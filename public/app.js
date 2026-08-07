@@ -112,9 +112,6 @@ async function initializeApplicationUpdater() {
     window.codexUpdater.onState((nextState) => {
       applicationUpdate = nextState;
       renderApplicationUpdate();
-      if (nextState.status === 'available' || nextState.status === 'downloaded') {
-        elements.updateDialog.showModal();
-      }
     });
   } catch {
     elements.updateChip.hidden = true;
@@ -333,6 +330,18 @@ function render() {
     const creditBadge = creditPoints
       ? `<span class="credit-badge" title="Codex Credits 可用点数">${escapeHtml(creditPoints)}</span>`
       : '';
+    let codexAction;
+    if (!account.codexInitialized) {
+      codexAction = `<button class="action-primary action-codex" data-action="authorize" ${codexLoginPending ? 'disabled' : ''}>${codexLoginPending ? '等待 Codex 授权' : account.setupStage === 'web-login' ? '已登录，继续授权' : account.quotaErrorCode === 'auth_expired' ? '重新授权' : '重试 Codex 授权'}</button>`;
+    } else if (account.codexActive) {
+      codexAction = '<button class="action-primary action-exit" data-action="quit-codex">退出 Codex</button>';
+    } else if (externalCodexRunning) {
+      codexAction = '<button class="action-primary action-blocked" type="button" disabled title="请先通过顶部入口关闭外部 Codex">关闭后启动</button>';
+    } else if (activeAccount) {
+      codexAction = '<button class="action-primary action-blocked" type="button" disabled title="请先退出当前 Codex">暂不可切换</button>';
+    } else {
+      codexAction = '<button class="action-primary action-codex" data-action="codex">启动 Codex</button>';
+    }
     return `<article class="account-card ${status}${account.codexActive ? ' current' : ''}" data-id="${account.id}">
       <div class="account-overview">
         <div class="account-identity">
@@ -344,11 +353,7 @@ function render() {
       ${renderQuota(account)}
       <div class="account-actions">
         <button class="action-primary" data-action="browser">${account.codexInitialized ? '网页端' : '打开网页登录'}</button>
-        ${account.codexInitialized
-          ? account.codexActive
-            ? `<button class="action-primary action-exit" data-action="quit-codex">退出 Codex</button>`
-            : `<button class="action-primary action-codex" data-action="codex">${activeAccount ? '切换账号' : '登录 Codex'}</button>`
-          : `<button class="action-primary action-codex" data-action="authorize" ${codexLoginPending ? 'disabled' : ''}>${codexLoginPending ? '等待 Codex 授权' : account.setupStage === 'web-login' ? '已登录，继续授权' : account.quotaErrorCode === 'auth_expired' ? '重新授权' : '重试 Codex 授权'}</button>`}
+        ${codexAction}
         <button class="icon-action" data-action="quota" title="刷新额度" aria-label="刷新额度" ${account.codexInitialized ? '' : 'disabled'}>↻</button>
         ${account.lease && !account.codexActive ? '<button class="release" data-action="release">释放占用</button>' : ''}
         <button class="icon-action danger-button" data-action="remove" title="移除账号" aria-label="移除账号" ${account.lease ? 'disabled' : ''}>×</button>
@@ -440,7 +445,11 @@ elements.accounts.addEventListener('click', async (event) => {
   }
 });
 
-document.querySelector('#add-account').addEventListener('click', () => elements.dialog.showModal());
+document.querySelector('#add-account').addEventListener('click', () => {
+  elements.form.reset();
+  elements.dialog.showModal();
+  requestAnimationFrame(() => elements.form.elements.label.focus());
+});
 elements.closeExternalCodex.addEventListener('click', async () => {
   if (!confirm('关闭外部 Codex？正在进行的任务会被中断。')) return;
   elements.closeExternalCodex.disabled = true;
@@ -551,4 +560,6 @@ elements.form.addEventListener('submit', async (event) => {
 syncSortMenu();
 initializeApplicationUpdater();
 refresh();
-state.timer = setInterval(refresh, 5_000);
+state.timer = setInterval(() => {
+  if (!elements.dialog.open && !elements.updateDialog.open && document.visibilityState === 'visible') refresh();
+}, 5_000);

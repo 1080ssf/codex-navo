@@ -203,7 +203,7 @@ function findCodexDesktop() {
     if (!fs.existsSync(settings.codexDesktopExecutable)) {
       throw new Error('settings.json 中配置的 Codex 桌面端路径不存在');
     }
-    return settings.codexDesktopExecutable;
+    return { executable: settings.codexDesktopExecutable, appUserModelId: '' };
   }
 
   const query = spawnSync(
@@ -213,16 +213,18 @@ function findCodexDesktop() {
       '-NoProfile',
       '-NonInteractive',
       '-Command',
-      '(Get-AppxPackage -Name OpenAI.Codex | Select-Object -First 1 -ExpandProperty InstallLocation)',
+      "$package = Get-AppxPackage -Name OpenAI.Codex | Select-Object -First 1; if ($package) { $applicationId = (Get-AppxPackageManifest -Package $package.PackageFullName).Package.Applications.Application.Id | Select-Object -First 1; [PSCustomObject]@{ InstallLocation = $package.InstallLocation; AppUserModelId = \"$($package.PackageFamilyName)!$applicationId\" } | ConvertTo-Json -Compress }",
     ],
     { encoding: 'utf8', windowsHide: true, timeout: 5_000 },
   );
-  const installLocation = String(query.stdout || '').trim();
+  let packageInfo = null;
+  try { packageInfo = JSON.parse(String(query.stdout || '').trim()); } catch {}
+  const installLocation = String(packageInfo?.InstallLocation || '').trim();
   const executable = installLocation ? path.join(installLocation, 'app', 'ChatGPT.exe') : '';
   if (!executable || !fs.existsSync(executable)) {
     throw new Error('没有找到 Windows Codex 桌面应用，请先从官方渠道安装，或在 settings.json 中配置 codexDesktopExecutable');
   }
-  return executable;
+  return { executable, appUserModelId: String(packageInfo?.AppUserModelId || '').trim() };
 }
 
 function findCodexCli() {
@@ -357,7 +359,7 @@ function ensureCodexProfileConfig(codexHomeDir) {
 function launchAccountBrowser(account, url) {
   const { browserDir } = accountPaths(account);
   fs.mkdirSync(browserDir, { recursive: true });
-  const executable = findBrowser(account.browserType || 'edge');
+  const executable = findBrowser(account.browserType || 'chrome');
   const child = spawn(executable, [`--user-data-dir=${browserDir}`, '--no-first-run', url], {
     detached: true,
     stdio: 'ignore',
@@ -367,7 +369,28 @@ function launchAccountBrowser(account, url) {
   return child.pid;
 }
 
-function launchCodexDesktop(account) {
+function spawnDetached(executable, args, options) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, options);
+    child.once('spawn', () => {
+      child.unref();
+      resolve(child.pid);
+    });
+    child.once('error', reject);
+  });
+}
+
+async function waitForCodexDesktop(timeoutMs = 8_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const pid = findRunningCodexDesktopPid();
+    if (pid) return pid;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return null;
+}
+
+async function launchCodexDesktop(account) {
   const { codexHomeDir } = accountPaths(account);
   ensureCodexProfileConfig(codexHomeDir);
   const runningPid = findRunningCodexDesktopPid();
@@ -378,26 +401,38 @@ function launchCodexDesktop(account) {
     }
     stopManagedCodexDesktop(active.accountId);
   }
-  const executable = findCodexDesktop();
+  const installation = findCodexDesktop();
   activateSharedCodexAuth(account);
   const environment = { ...process.env, CODEX_HOME: SHARED_CODEX_HOME };
   delete environment.CODEX_ELECTRON_USER_DATA_PATH;
   delete environment.CODEX_SQLITE_HOME;
-  let child;
   try {
-    child = spawn(executable, [], {
+    return await spawnDetached(installation.executable, [], {
       detached: true,
       stdio: 'ignore',
       windowsHide: false,
       env: environment,
     });
   } catch (error) {
-    restoreSharedCodexAuth(account.id);
-    throw error;
+    if (!['EPERM', 'EACCES'].includes(error.code) || !installation.appUserModelId) {
+      restoreSharedCodexAuth(account.id);
+      throw new Error(`Windows 无法启动 Codex（${error.code || '启动失败'}）。请确认 Codex 已正确安装，并检查安全软件的拦截记录。`);
+    }
   }
-  child.once('error', () => restoreSharedCodexAuth(account.id));
-  child.unref();
-  return child.pid;
+
+  try {
+    await spawnDetached('explorer.exe', [`shell:AppsFolder\\${installation.appUserModelId}`], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false,
+    });
+    const processPid = await waitForCodexDesktop();
+    if (!processPid) throw new Error('系统已接收启动请求，但没有检测到 Codex 进程');
+    return processPid;
+  } catch (error) {
+    restoreSharedCodexAuth(account.id);
+    throw new Error(`Windows 拒绝启动 Codex。请在安全软件中允许 Codex Navo 和 Codex，或先手动启动一次 Codex 后重试。详细信息：${error.message}`);
+  }
 }
 
 function stopManagedCodexDesktop(accountId) {
@@ -529,7 +564,7 @@ function startCodexDeviceLogin(account, operator) {
   return child.pid;
 }
 
-function launchAccount(account, launchType, operator) {
+async function launchAccount(account, launchType, operator) {
   const { browserDir, codexDir, codexHomeDir, codexDesktopDir, codexSqliteDir } = accountPaths(account);
   fs.mkdirSync(browserDir, { recursive: true });
   fs.mkdirSync(codexDir, { recursive: true });
@@ -555,7 +590,7 @@ function accountView(account) {
     id: account.id,
     label: account.label,
     emailHint: account.emailHint || '',
-    browserType: account.browserType || 'edge',
+    browserType: account.browserType || 'chrome',
     enabled: account.enabled !== false,
     createdAt: account.createdAt,
     quota: account.quota || null,
@@ -691,7 +726,7 @@ const server = http.createServer(async (request, response) => {
         id: `account-${crypto.randomBytes(6).toString('hex')}`,
         label,
         emailHint: String(body.emailHint || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 100),
-        browserType: body.browserType === 'chrome' ? 'chrome' : 'edge',
+        browserType: body.browserType === 'edge' ? 'edge' : 'chrome',
         enabled: true,
         setupStage: 'web-login',
         createdAt: new Date().toISOString(),
@@ -826,7 +861,7 @@ const server = http.createServer(async (request, response) => {
       }
       saveLeases(result.leases);
       try {
-        const processPid = launchAccount(account, launchType, operator);
+        const processPid = await launchAccount(account, launchType, operator);
         if (processPid) {
           result.lease.processPid = processPid;
           saveLeases({ ...leases, [accountId]: result.lease });

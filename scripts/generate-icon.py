@@ -22,19 +22,19 @@ canvas = Image.new('RGBA', (SIZE * SCALE, SIZE * SCALE), (0, 0, 0, 0))
 draw = ImageDraw.Draw(canvas)
 
 draw.rounded_rectangle(
-    (*scaled((112, 112)), *scaled((912, 912))),
-    radius=226 * SCALE,
+    (*scaled((34, 34)), *scaled((990, 990))),
+    radius=246 * SCALE,
     fill='#15243a',
 )
 
-slash_start = scaled((350, 704))
-slash_end = scaled((674, 320))
-slash_width = 112 * SCALE
+slash_start = scaled((322, 738))
+slash_end = scaled((704, 286))
+slash_width = 126 * SCALE
 draw.line((slash_start, slash_end), fill='#f6f7f4', width=slash_width)
-circle(draw, (350, 704), 56, '#f6f7f4')
-circle(draw, (674, 320), 56, '#f6f7f4')
+circle(draw, (322, 738), 63, '#f6f7f4')
+circle(draw, (704, 286), 63, '#f6f7f4')
 
-circle(draw, (732, 690), 48, '#2c62d6')
+circle(draw, (772, 728), 56, '#2c62d6')
 
 canvas = canvas.resize((SIZE, SIZE), Image.Resampling.LANCZOS)
 png_paths = [ROOT / 'desktop-src' / 'icon.png', ROOT / 'public' / 'icon.png']

@@ -128,7 +128,11 @@ function delay(milliseconds) {
 }
 
 async function ensureServer(root, port) {
-  if (await isReady(port)) return;
+  const tokenFile = path.join(USER_DATA_ROOT, 'data', 'access-token.txt');
+  if (await isReady(port)) {
+    if (fs.existsSync(tokenFile)) return;
+    throw new Error(`端口 ${port} 已被其他程序或旧版 Codex Navo 占用。请先退出旧版程序，再重新启动。`);
+  }
   const serverExecutable = app.isPackaged ? process.execPath : 'node.exe';
   const serverArguments = app.isPackaged ? [path.join(root, 'server.js')] : ['server.js'];
   serverProcess = spawn(serverExecutable, serverArguments, {
@@ -201,6 +205,9 @@ function publishUpdateError(error) {
 function configureAutoUpdater() {
   if (updaterConfigured) return;
   updaterConfigured = true;
+  // GUI builds may be launched without a writable stdout pipe. The updater's
+  // default console logger can otherwise crash the Electron main process with EPIPE.
+  autoUpdater.logger = null;
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
 
@@ -263,7 +270,9 @@ async function createWindow() {
   const config = readSettings();
   const port = Number.isInteger(config.port) ? config.port : 47821;
   await ensureServer(root, port);
-  const token = fs.readFileSync(path.join(USER_DATA_ROOT, 'data', 'access-token.txt'), 'utf8').trim();
+  const tokenFile = path.join(USER_DATA_ROOT, 'data', 'access-token.txt');
+  if (!fs.existsSync(tokenFile)) throw new Error('本地服务已启动，但没有生成访问凭据。请退出应用后重试。');
+  const token = fs.readFileSync(tokenFile, 'utf8').trim();
 
   mainWindow = new BrowserWindow({
     width: 1440,

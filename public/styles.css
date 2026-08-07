@@ -90,6 +90,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .current-codex.external { min-height: 38px; padding: 0 7px 0 13px; border-color: #e8c681; color: #7b5310; background: #fff8e9; box-shadow: 0 5px 16px rgba(181, 123, 22, .12); font-weight: 650; }
 .current-codex.external > i { width: 9px; height: 9px; background: #e59b22; box-shadow: 0 0 0 4px rgba(229,155,34,.17); }
 .close-external-codex { position: relative; display: grid; width: 26px; height: 26px; margin-left: 2px; place-items: center; padding: 0; border: 0; border-radius: 50%; color: #986b20; background: rgba(229,155,34,.12); transition: color .16s ease, background .16s ease, transform .16s ease; }
+.close-external-codex[hidden] { display: none; }
 .close-external-codex:hover { color: #fff; background: #b94b55; transform: scale(1.04); }
 .close-external-codex:disabled { opacity: .45; cursor: wait; }
 .close-external-codex svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
@@ -196,11 +197,13 @@ h1 { font-size: clamp(30px, 3vw, 38px); line-height: 1; letter-spacing: -.035em;
 .account-actions .action-codex:hover { color: #fff; border-color: var(--blue-dark); background: var(--blue-dark); }
 .account-actions .action-exit { color: #fff; border-color: #26364d; background: #26364d; }
 .account-actions .action-exit:hover { color: #fff; border-color: var(--danger); background: var(--danger); }
+.account-actions .action-blocked, .account-actions .action-blocked:hover { color: #718198; border-color: #d6dee8; background: #edf1f6; }
 .account-actions button.release { color: #956019; border-color: #e4c28e; background: #fffaf1; }
 .account-actions .icon-action { width: 38px; min-width: 38px; padding: 0; color: #5f7590; font-size: 20px; line-height: 1; }
 .account-actions .danger-button { color: #9aa8b9; }
 .account-actions .danger-button:hover { color: var(--danger); border-color: #e5b3b8; background: #fff7f8; }
 .account-actions button:disabled { cursor: not-allowed; opacity: .45; }
+.account-actions .action-blocked:disabled { opacity: 1; }
 .quota-panel { width: 100%; min-width: 0; padding: 4px 0; }
 .quota-window + .quota-window { margin-top: 14px; }
 .quota-line { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 8px; color: #53667e; font: 500 12px/1 "Cascadia Code", monospace; }
@@ -262,6 +265,7 @@ dialog input, dialog select { width: 100%; border: 1px solid var(--line); border
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 26px; }
 .update-dialog { width: min(560px, calc(100% - 28px)); }
 .update-progress { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; margin-top: 20px; }
+.update-progress[hidden] { display: none; }
 .update-progress > span { height: 5px; overflow: hidden; border-radius: 999px; background: #dfe6ef; }
 .update-progress > span i { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--blue), #36b987); transition: width .2s ease; }
 .update-progress b { min-width: 34px; color: var(--blue-dark); font: 700 11px/1 "Cascadia Mono", "Cascadia Code", monospace; text-align: right; }
