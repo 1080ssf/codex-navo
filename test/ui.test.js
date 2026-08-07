@@ -41,21 +41,94 @@ test('Codex 运行时不会向其他账号提供无效的切换操作', () => {
   assert.match(client, /请先退出当前 Codex/);
   assert.match(client, /关闭后启动/);
   assert.doesNotMatch(client, />切换账号</);
-  assert.match(html, /<option value="chrome">Google Chrome<\/option><option value="edge">/);
+  assert.match(html, /<strong>Google Chrome<\/strong>/);
+  assert.doesNotMatch(html, /Microsoft Edge/);
 });
 
 test('添加账号期间不会被后台刷新或更新弹窗抢走输入焦点', () => {
   const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   assert.match(client, /requestAnimationFrame\(\(\) => elements\.form\.elements\.label\.focus\(\)\)/);
-  assert.match(client, /!elements\.dialog\.open && !elements\.updateDialog\.open/);
+  assert.match(client, /!elements\.dialog\.open && !elements\.wakeDialog\.open && !elements\.updateDialog\.open/);
   assert.doesNotMatch(client, /nextState\.status === 'available'[\s\S]{0,160}showModal/);
+});
+
+test('界面与服务端不再包含代理和节点池功能', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.doesNotMatch(html, /节点池|node-dialog|networkMode|代理范围/);
+  assert.doesNotMatch(client, /\/api\/nodes|nodeDialog|networkMode/);
+  assert.doesNotMatch(server, /NODES_FILE|--proxy-server|proxy-credentials/);
 });
 
 test('新增账号在界面和服务端都默认使用 Chrome', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  const select = html.match(/<select name="browserType">([\s\S]*?)<\/select>/)?.[1] || '';
-  assert.match(select, /^<option value="chrome">/);
-  assert.match(server, /body\.browserType === 'edge' \? 'edge' : 'chrome'/);
-  assert.match(server, /account\.browserType \|\| 'chrome'/);
+  assert.match(html, /每个账号使用独立的 Chrome 环境/);
+  assert.doesNotMatch(html, /name="browserType"/);
+  assert.doesNotMatch(client, /formData\.get\('browserType'\)/);
+  assert.match(server, /browserType: 'chrome'/);
+  assert.match(server, /function findBrowser\(\)/);
+});
+
+test('账号唤醒具备真实 Codex 调用、单账号入口、批量入口与自动策略设置', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(html, /id="wake-all"/);
+  assert.match(html, /id="wake-dialog"/);
+  assert.match(html, /value="after-reset"/);
+  assert.match(html, /select name="model"/);
+  assert.match(html, /select name="reasoningEffort"/);
+  assert.match(client, /data-action="wake"/);
+  assert.match(client, /\/api\/wake-all/);
+  assert.match(server, /'exec', '--ephemeral'/);
+  assert.match(server, /CODEX_HOME: codexHomeDir/);
+  assert.match(server, /model_reasoning_effort=/);
+  assert.match(server, /\/api\/wake-settings/);
+  assert.match(server, /runScheduledWakes/);
+  assert.match(server, /detectResetForAccount/);
+  assert.match(html, /额度突然恢复/);
+});
+
+test('使用中统计同时识别租约和当前 Codex 账号', () => {
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(client, /account\.lease \|\| account\.codexActive/);
+  assert.match(client, /网页使用中/);
+  assert.match(client, /release-action/);
+  assert.match(client, /不会关闭网页/);
+  assert.match(styles, /\.session-badge/);
+});
+
+test('账号池支持可记忆的列表与卡片双视图', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(html, /id="view-switcher"/);
+  assert.match(html, /data-view="list"/);
+  assert.match(html, /data-view="grid"/);
+  assert.match(client, /codex-navo-account-view/);
+  assert.match(client, /classList\.toggle\('account-grid'/);
+  assert.match(styles, /\.account-list\.account-grid/);
+  assert.match(styles, /repeat\(3, minmax\(0, 1fr\)\)/);
+  assert.match(styles, /grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\) repeat\(3, 38px\)/);
+});
+
+test('再次打开账号网页端时恢复各自上次关闭的 Chrome 窗口', () => {
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(server, /function hasRestorableBrowserSession\(browserDir\)/);
+  assert.match(server, /--restore-last-session/);
+  assert.match(server, /--disable-background-mode/);
+  assert.match(server, /restoreLastSession: true/);
+  assert.match(server, /launchAccountBrowser\(account, pending\.deviceUrl\)/);
+});
+
+test('首次创建账号时优先打开 IP 检测页并同时打开 ChatGPT', () => {
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(server, /const IP_CHECK_URL = 'https:\/\/ipip\.la\/'/);
+  assert.match(server, /initialUrls: \[IP_CHECK_URL, settings\.browserStartUrl\]/);
+  assert.match(server, /args\.push\('--new-window', \.\.\.initialUrls\)/);
 });

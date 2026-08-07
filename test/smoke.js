@@ -1,4 +1,5 @@
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 process.env.CODEX_MANAGER_MOCK_LAUNCH = '1';
@@ -6,11 +7,9 @@ process.env.CODEX_MANAGER_NO_OPEN = '1';
 process.env.CODEX_MANAGER_PORT = '0';
 
 const root = path.resolve(__dirname, '..');
-const tokenFile = path.join(root, 'data', 'access-token.txt');
-const accountsFile = path.join(root, 'config', 'accounts.json');
-const leasesFile = path.join(root, 'data', 'leases.json');
-const auditFile = path.join(root, 'data', 'audit.jsonl');
-const auditBefore = fs.existsSync(auditFile) ? fs.readFileSync(auditFile) : null;
+const runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-navo-smoke-'));
+process.env.CODEX_SWITCHBOARD_USER_DATA = runtimeRoot;
+const tokenFile = path.join(runtimeRoot, 'data', 'access-token.txt');
 const { server } = require('../server');
 let testAccountId = '';
 
@@ -26,12 +25,29 @@ async function run() {
   if (!bootstrap.ok || !payload.ok || !Array.isArray(payload.data.accounts)) throw new Error('bootstrap API 冒烟测试失败');
   const headers = { Cookie: cookie, 'Content-Type': 'application/json', 'X-CSRF-Token': payload.data.csrfToken };
   const addedResponse = await fetch(`${baseUrl}/api/accounts`, {
-    method: 'POST', headers, body: JSON.stringify({ operator: '冒烟测试', label: '临时测试账号', browserType: 'edge' }),
+    method: 'POST', headers, body: JSON.stringify({ operator: '冒烟测试', label: '临时测试账号' }),
   });
   const added = await addedResponse.json();
   if (!addedResponse.ok || !added.ok) throw new Error('添加账号接口失败');
   const accountId = added.data.id;
   testAccountId = accountId;
+  const codexHome = path.join(runtimeRoot, 'profiles', 'codex', accountId, 'home');
+  fs.mkdirSync(codexHome, { recursive: true });
+  fs.writeFileSync(path.join(codexHome, 'auth.json'), '{}');
+
+  const wakeSettingsResponse = await fetch(`${baseUrl}/api/wake-settings`, {
+    method: 'POST', headers, body: JSON.stringify({ enabled: false, mode: 'manual', model: 'gpt-5.6-sol', reasoningEffort: 'low', prompt: 'hi' }),
+  });
+  if (!wakeSettingsResponse.ok) throw new Error('唤醒设置接口失败');
+  const wakeResponse = await fetch(`${baseUrl}/api/accounts/${accountId}/wake`, {
+    method: 'POST', headers, body: JSON.stringify({ operator: '冒烟测试' }),
+  });
+  if (!wakeResponse.ok) throw new Error('单账号唤醒接口失败');
+  const wakeAllResponse = await fetch(`${baseUrl}/api/wake-all`, {
+    method: 'POST', headers, body: JSON.stringify({ operator: '冒烟测试' }),
+  });
+  const wakeAll = await wakeAllResponse.json();
+  if (!wakeAllResponse.ok || wakeAll.data?.succeeded !== 1) throw new Error('批量唤醒接口失败');
 
   const launchResponse = await fetch(`${baseUrl}/api/accounts/${accountId}/launch`, {
     method: 'POST', headers, body: JSON.stringify({ operator: '冒烟测试', launchType: 'browser' }),
@@ -50,7 +66,7 @@ async function run() {
   });
   if (!removeResponse.ok) throw new Error('移除接口失败');
 
-  console.log('Smoke API: OK (bootstrap, add, launch, reopen, release, remove)');
+  console.log('Smoke API: OK (bootstrap, add, wake settings, wake, wake all, launch, reopen, release, remove)');
 }
 
 run()
@@ -61,15 +77,5 @@ run()
   .finally(() => server.close());
 
 process.on('beforeExit', () => {
-  if (testAccountId) {
-    const savedAccounts = JSON.parse(fs.readFileSync(accountsFile, 'utf8')).filter((item) => item.id !== testAccountId);
-    const savedLeases = JSON.parse(fs.readFileSync(leasesFile, 'utf8'));
-    delete savedLeases[testAccountId];
-    fs.writeFileSync(accountsFile, `${JSON.stringify(savedAccounts, null, 2)}\n`);
-    fs.writeFileSync(leasesFile, `${JSON.stringify(savedLeases, null, 2)}\n`);
-    fs.rmSync(path.join(root, 'profiles', 'browser', testAccountId), { recursive: true, force: true });
-    fs.rmSync(path.join(root, 'profiles', 'codex', testAccountId), { recursive: true, force: true });
-  }
-  if (auditBefore) fs.writeFileSync(auditFile, auditBefore);
-  else fs.rmSync(auditFile, { force: true });
+  fs.rmSync(runtimeRoot, { recursive: true, force: true });
 });

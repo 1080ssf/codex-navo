@@ -1,6 +1,6 @@
 # Codex Navo
 
-面向 Windows 的本地 Codex 账号环境切换器。每个账号使用独立的 Chrome 或 Edge 浏览器配置与 Codex 认证目录；切换账号时继续使用同一套本地项目和任务数据。
+面向 Windows 的本地 Codex 账号环境切换器。每个账号使用独立的 Chrome 浏览器配置与 Codex 认证目录；切换账号时继续使用同一套本地项目和任务数据。
 
 > [!IMPORTANT]
 > Codex Navo 不是 OpenAI 官方产品，与 OpenAI 无隶属或背书关系。请只管理你有权使用的账号，并遵守适用的服务条款、订阅规则和组织政策。
@@ -9,7 +9,7 @@
 
 普通用户建议从仓库右侧的 **Releases** 下载安装版：
 
-1. 下载 `Codex-Switchboard-Setup-<版本>-windows-x64.exe`。
+1. 下载 `Codex-Navo-Setup-<版本>-windows-x64.exe`。
 2. 按安装向导完成安装。
 3. 后续版本会由应用自动检查；下载完成后由用户确认重启安装。
 4. 如果 Windows SmartScreen 提示“未知发布者”，请先核对 Release 页面提供的 SHA-256；公开分发版本目前没有代码签名。
@@ -17,7 +17,7 @@
 安装版已经包含 Electron 和本地服务运行时，不需要安装 Node.js。需要预先安装：
 
 - Windows 11 x64
-- Google Chrome 或 Microsoft Edge
+- Google Chrome
 - Codex 桌面应用
 - Codex CLI（用于首次设备授权）
 
@@ -39,7 +39,11 @@
 - 显示套餐、Codex 点数和周额度
 - 当前账号每分钟、其他账号每五分钟自动刷新额度
 - 手动刷新单个账号或全部账号额度
+- 手动唤醒单个或全部账号，并可按每日时间或额度重置自动唤醒
+- 为唤醒请求选择模型、推理强度和发送内容
 - 按当前账号、剩余额度、名称或添加时间排序
+- 在列表与卡片视图之间切换，并记住上次选择
+- 再次打开账号网页端时恢复该账号上次关闭的 Chrome 窗口
 - 管理服务只监听 `127.0.0.1`
 - 关闭窗口后驻留 Windows 系统托盘
 - 从 GitHub Releases 检查、下载并安装应用更新

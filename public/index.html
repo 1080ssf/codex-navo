@@ -33,9 +33,23 @@
               <p id="account-summary">正在读取本地状态…</p>
             </div>
             <div class="heading-actions">
+              <button class="refresh-all-button wake-all-button" id="wake-all" type="button" data-tooltip="一键唤醒全部账号" aria-label="一键唤醒全部账号">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.2 2.8 5.8 13h5l-1 8.2L18.2 10h-5z"></path></svg>
+              </button>
+              <button class="refresh-all-button wake-settings-button" id="wake-settings-button" type="button" data-tooltip="唤醒设置" aria-label="唤醒设置">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1z"></path></svg>
+              </button>
               <button class="refresh-all-button" id="refresh-all-quotas" type="button" data-tooltip="刷新全部账号额度" aria-label="刷新全部账号额度">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.1 8A7.5 7.5 0 0 0 6.4 5.4L4.5 7.2"></path><path d="M4.5 3.8v3.4h3.4"></path><path d="M4.9 16A7.5 7.5 0 0 0 17.6 18.6l1.9-1.8"></path><path d="M19.5 20.2v-3.4h-3.4"></path></svg>
               </button>
+              <div class="view-switcher" id="view-switcher" role="group" aria-label="账号显示方式">
+                <button type="button" data-view="list" aria-label="列表视图" title="列表视图">
+                  <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h2M8 5h9M3 10h2M8 10h9M3 15h2M8 15h9"></path></svg>
+                </button>
+                <button type="button" data-view="grid" aria-label="卡片视图" title="卡片视图">
+                  <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="5.5" height="5.5" rx="1"></rect><rect x="11.5" y="3" width="5.5" height="5.5" rx="1"></rect><rect x="3" y="11.5" width="5.5" height="5.5" rx="1"></rect><rect x="11.5" y="11.5" width="5.5" height="5.5" rx="1"></rect></svg>
+                </button>
+              </div>
               <div class="sort-menu" id="sort-menu">
                 <button class="sort-trigger" id="sort-trigger" type="button" aria-haspopup="menu" aria-expanded="false">
                   <span class="sort-glyph" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -72,10 +86,51 @@
         <p class="dialog-copy">创建后会先打开该账号的专属浏览器。完成 ChatGPT 网页登录后，回到这里继续 Codex 授权。</p>
         <label>账号名称<input name="label" required maxlength="60" placeholder="例如：设计组 01"></label>
         <label>邮箱提示<input name="emailHint" maxlength="100" placeholder="例如：de***@company.com"></label>
-        <label>浏览器<select name="browserType"><option value="chrome">Google Chrome</option><option value="edge">Microsoft Edge</option></select></label>
+        <div class="fixed-browser" aria-label="浏览器">
+          <span class="fixed-browser-label">浏览器</span>
+          <div class="fixed-browser-value">
+            <strong>Google Chrome</strong>
+            <small>每个账号使用独立的 Chrome 环境</small>
+          </div>
+        </div>
         <div class="dialog-actions">
           <button class="secondary-button" value="cancel" type="submit" formnovalidate>取消</button>
           <button class="primary-button" value="default" type="submit">创建账号环境</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="wake-dialog" class="wake-dialog">
+      <form method="dialog" id="wake-form">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">ACCOUNT WAKE</p>
+            <h2>账号唤醒</h2>
+          </div>
+          <button class="icon-button" value="cancel" aria-label="关闭" type="submit" formnovalidate>×</button>
+        </div>
+        <p class="dialog-copy">通过账号独立授权发送一次真实 Codex 请求。每次唤醒都会消耗少量额度。</p>
+        <label class="wake-toggle"><span><strong>自动唤醒</strong><small>默认关闭；开启后按下方策略执行</small></span><input name="enabled" type="checkbox"></label>
+        <div class="wake-settings-grid">
+          <label>执行策略
+            <select name="mode">
+              <option value="manual">仅手动唤醒</option>
+              <option value="daily">每天唤醒一次</option>
+              <option value="after-reset">额度重置后唤醒一次</option>
+            </select>
+          </label>
+          <label data-daily-time>每日执行时间<input name="dailyTime" type="time" value="09:00"></label>
+        </div>
+        <div class="wake-settings-grid wake-model-grid">
+          <label>模型<select name="model" aria-label="唤醒模型"><option value="">正在读取 Codex 模型…</option></select></label>
+          <label>推理强度<select name="reasoningEffort" aria-label="推理强度"><option value="">模型默认</option></select></label>
+        </div>
+        <p class="wake-model-help" id="wake-model-help"></p>
+        <label>发送内容<textarea name="prompt" maxlength="1000" rows="3" placeholder="hi">hi</textarea></label>
+        <p class="wake-note">“额度重置后”会同时检测预计时间、重置时间变化和额度突然恢复，通常在 5 分钟内识别不定时重置。请求在独立空目录中以只读模式运行，不会读取你的项目文件。</p>
+        <div class="dialog-actions">
+          <button class="secondary-button" value="cancel" type="submit" formnovalidate>取消</button>
+          <button class="primary-button" value="default" type="submit">保存设置</button>
         </div>
       </form>
     </dialog>

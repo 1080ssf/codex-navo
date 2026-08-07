@@ -136,7 +136,15 @@ h1 { font-size: clamp(30px, 3vw, 38px); line-height: 1; letter-spacing: -.035em;
 .refresh-all-button:disabled { cursor: wait; opacity: .7; }
 .refresh-all-button.loading svg { color: var(--blue); animation: quota-refresh-spin .8s linear infinite; }
 .refresh-all-button.loading:hover svg { color: #fff; }
+.wake-all-button { color: #176d58; background: #e5f5ef; }
+.wake-all-button:hover { background: #168267; box-shadow: 0 7px 16px rgba(22,130,103,.22); }
+.wake-settings-button { background: transparent; box-shadow: inset 0 0 0 1px #d5dfeb; }
 @keyframes quota-refresh-spin { to { transform: rotate(360deg); } }
+.view-switcher { display: flex; height: 38px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: #e9eef5; }
+.view-switcher button { display: grid; width: 34px; height: 30px; place-items: center; padding: 0; border: 0; border-radius: 6px; color: #7a8ba1; background: transparent; transition: color .15s ease, background .15s ease, box-shadow .15s ease; }
+.view-switcher button:hover { color: var(--blue); }
+.view-switcher button.active { color: var(--blue-dark); background: #fff; box-shadow: 0 2px 7px rgba(35, 58, 88, .12); }
+.view-switcher svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.55; stroke-linecap: round; stroke-linejoin: round; }
 .sort-menu { position: relative; z-index: 20; }
 .sort-trigger { display: flex; width: 178px; height: 42px; align-items: center; gap: 10px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; color: #334a66; background: #fff; font-size: 12px; font-weight: 650; text-align: left; white-space: nowrap; }
 .sort-trigger:hover, .sort-menu.open .sort-trigger { color: var(--blue); border-color: #9db5dd; background: #f9fbff; }
@@ -160,6 +168,7 @@ h1 { font-size: clamp(30px, 3vw, 38px); line-height: 1; letter-spacing: -.035em;
 .account-list { position: relative; display: grid; gap: 14px; }
 .account-list::before { display: none; }
 .account-list.is-empty::before { display: none; }
+.account-list.account-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
 .account-card {
   --status: var(--cyan);
   position: relative;
@@ -175,6 +184,16 @@ h1 { font-size: clamp(30px, 3vw, 38px); line-height: 1; letter-spacing: -.035em;
   box-shadow: 0 8px 24px rgba(30,57,91,.055);
   transition: transform .18s ease, border-color .18s ease;
 }
+.account-grid .account-card { grid-template-columns: 1fr; align-content: start; gap: 18px; min-height: 300px; padding: 22px; }
+.account-grid .account-overview { min-height: 54px; }
+.account-grid .account-identity h3 { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 16px; }
+.account-grid .identity-badges { flex-wrap: wrap; }
+.account-grid .quota-panel { align-self: stretch; }
+.account-grid .account-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) repeat(3, 38px); align-self: end; gap: 8px; padding-top: 16px; border-top: 1px solid #e2e8f0; }
+.account-grid .account-actions .action-primary { width: 100%; min-width: 0; padding-inline: 8px; overflow: hidden; text-overflow: ellipsis; }
+.account-grid .codex-login-panel { grid-column: 1; align-items: flex-start; flex-direction: column; }
+.account-grid .codex-login-panel strong { margin-right: 0; }
+.account-grid .empty-state { grid-column: 1 / -1; }
 .account-card:hover { border-color: #9eb2cb; }
 .account-card.current { border-color: #a7bdea; box-shadow: 0 8px 24px rgba(44,98,214,.08), inset 3px 0 0 var(--blue); }
 .account-card.disabled { --status: #9aa7b7; opacity: .68; }
@@ -189,6 +208,8 @@ h1 { font-size: clamp(30px, 3vw, 38px); line-height: 1; letter-spacing: -.035em;
 .plan-badge.plan-team, .plan-badge.plan-business, .plan-badge.plan-enterprise { color: #2459a9; border-color: #bfd2ee; background: #edf5ff; }
 .plan-badge.plan-free { color: #65758a; border-color: #d4dce6; background: #f3f5f8; }
 .credit-badge { flex: 0 0 auto; padding: 3px 8px; border: 1px solid #bfd4ee; border-radius: 999px; color: #245a9f; background: #eef6ff; font: 700 10px/1 "Cascadia Code", monospace; }
+.session-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border: 1px solid #d9c39c; border-radius: 999px; color: #8a5b16; background: #fff9ee; font-size: 10px; font-weight: 650; }
+.session-badge i { width: 5px; height: 5px; border-radius: 50%; background: #d99a2b; box-shadow: 0 0 0 3px rgba(217,154,43,.12); }
 .account-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: nowrap; gap: 8px; }
 .account-actions button { height: 38px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); padding: 0 15px; font-size: 12px; white-space: nowrap; }
 .account-actions button:hover { color: var(--blue); border-color: var(--blue); }
@@ -200,10 +221,18 @@ h1 { font-size: clamp(30px, 3vw, 38px); line-height: 1; letter-spacing: -.035em;
 .account-actions .action-blocked, .account-actions .action-blocked:hover { color: #718198; border-color: #d6dee8; background: #edf1f6; }
 .account-actions button.release { color: #956019; border-color: #e4c28e; background: #fffaf1; }
 .account-actions .icon-action { width: 38px; min-width: 38px; padding: 0; color: #5f7590; font-size: 20px; line-height: 1; }
+.account-actions .wake-action { color: #168267; background: #f4fbf8; }
+.account-actions .wake-action svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.account-actions .wake-action:hover { color: #fff; border-color: #168267; background: #168267; }
 .account-actions .danger-button { color: #9aa8b9; }
 .account-actions .danger-button:hover { color: var(--danger); border-color: #e5b3b8; background: #fff7f8; }
 .account-actions button:disabled { cursor: not-allowed; opacity: .45; }
 .account-actions .action-blocked:disabled { opacity: 1; }
+.account-actions .action-browser-active { color: #765019; border-color: #dfc28e; background: #fffaf1; }
+.account-actions .action-browser-active:hover { color: #765019; border-color: #c99d51; background: #fff6e6; }
+.account-actions .release-action { color: #9a681c; border-color: #e2c99d; background: #fffaf2; }
+.account-actions .release-action svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.account-actions .release-action:hover { color: #fff; border-color: #bf7b16; background: #bf7b16; }
 .quota-panel { width: 100%; min-width: 0; padding: 4px 0; }
 .quota-window + .quota-window { margin-top: 14px; }
 .quota-line { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 8px; color: #53667e; font: 500 12px/1 "Cascadia Code", monospace; }
@@ -255,15 +284,34 @@ h1 { font-size: clamp(30px, 3vw, 38px); line-height: 1; letter-spacing: -.035em;
 
 
 dialog { width: min(520px, calc(100% - 28px)); border: 1px solid var(--line); border-radius: 14px; padding: 0; color: var(--ink); background: var(--paper); box-shadow: 0 30px 100px rgba(21,36,58,.25); }
+#account-dialog { width: min(620px, calc(100% - 28px)); max-height: calc(100vh - 38px); overflow-x: hidden; overflow-y: auto; }
+#account-dialog form { width: 100%; min-width: 0; }
 dialog::backdrop { background: rgba(21,36,58,.38); backdrop-filter: blur(3px); }
 dialog form { padding: 26px; }
 .dialog-head { display: flex; justify-content: space-between; gap: 20px; }
 .dialog-copy { color: var(--muted); font-size: 13px; line-height: 1.7; }
 .icon-button { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: transparent; font-size: 22px; line-height: 1; }
 dialog label { display: grid; gap: 8px; margin-top: 18px; font-size: 13px; font-weight: 650; }
-dialog input, dialog select { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; color: var(--ink); }
+dialog input, dialog select, dialog textarea { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; color: var(--ink); font: inherit; }
+dialog textarea { resize: vertical; line-height: 1.55; }
+.fixed-browser { display: grid; gap: 7px; }
+.fixed-browser-label { color: var(--ink); font-size: 13px; font-weight: 700; }
+.fixed-browser-value { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 48px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; }
+.fixed-browser-value strong { color: var(--ink); font-size: 14px; }
+.fixed-browser-value small { color: var(--muted); font-size: 12px; text-align: right; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 26px; }
 .update-dialog { width: min(560px, calc(100% - 28px)); }
+.wake-dialog { width: min(600px, calc(100% - 28px)); }
+.wake-toggle { display: flex; align-items: center; justify-content: space-between; gap: 22px; padding: 14px 15px; border: 1px solid #cfdae7; border-radius: 9px; background: #f7f9fc; }
+.wake-toggle span { display: grid; gap: 4px; }
+.wake-toggle strong { font-size: 13px; }
+.wake-toggle small { color: var(--muted); font-size: 11px; font-weight: 400; }
+.wake-toggle input { width: 42px; height: 22px; flex: 0 0 auto; accent-color: #168267; }
+.wake-settings-grid { display: grid; grid-template-columns: 1fr 160px; gap: 12px; }
+.wake-model-grid { grid-template-columns: minmax(0, 1.2fr) minmax(150px, .8fr); }
+.wake-settings-grid label[hidden] { display: none; }
+.wake-model-help { min-height: 17px; margin: 8px 2px 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.wake-note { margin: 16px 0 0; padding: 11px 13px; border-left: 3px solid #65bca6; color: #536b68; background: #eef8f5; font-size: 11px; line-height: 1.65; }
 .update-progress { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; margin-top: 20px; }
 .update-progress[hidden] { display: none; }
 .update-progress > span { height: 5px; overflow: hidden; border-radius: 999px; background: #dfe6ef; }
@@ -287,6 +335,7 @@ dialog input, dialog select { width: 100%; border: 1px solid var(--line); border
   .section-title p { white-space: normal; }
   .empty-state { align-items: flex-start; flex-direction: column; }
   .account-card { grid-template-columns: 1fr; gap: 15px; }
+  .account-list.account-grid { grid-template-columns: 1fr; }
   .account-actions { justify-content: flex-start; flex-wrap: wrap; }
   .codex-login-panel { align-items: flex-start; flex-direction: column; }
   .codex-login-panel strong { margin-right: 0; }
@@ -295,6 +344,7 @@ dialog input, dialog select { width: 100%; border: 1px solid var(--line); border
 @media (max-width: 620px) {
   .topbar { grid-template-columns: 1fr auto; }
   .current-codex { grid-column: 1 / -1; grid-row: 2; margin: 0 auto; }
+  .account-list.account-grid { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

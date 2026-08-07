@@ -142,7 +142,7 @@ npm run build:desktop
 
 然后更新版本号和 `CHANGELOG.md`，提交源码，再创建新标签和 Release。自动更新版本必须把 `release/auto-update/` 中以下文件一起上传：
 
-- `Codex-Switchboard-Setup-<版本>-windows-x64.exe`
+- `Codex-Navo-Setup-<版本>-windows-x64.exe`
 - 对应的 `.blockmap`
 - `latest.yml`
 

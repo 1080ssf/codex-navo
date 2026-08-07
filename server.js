@@ -12,6 +12,8 @@ const {
   validateAccountId,
 } = require('./lib/core');
 const { readCodexQuota } = require('./lib/codex-quota');
+const { readModelCatalog } = require('./lib/model-catalog');
+const { detectQuotaReset, localDateKey, normalizeWakeSettings, quotaObservation, shouldWakeAccount } = require('./lib/wake');
 
 const ROOT = __dirname;
 const RUNTIME_ROOT = process.env.CODEX_SWITCHBOARD_USER_DATA
@@ -25,6 +27,7 @@ const BROWSER_PROFILES_DIR = path.join(PROFILES_DIR, 'browser');
 const CODEX_PROFILES_DIR = path.join(PROFILES_DIR, 'codex');
 const ACCOUNTS_FILE = path.join(CONFIG_DIR, 'accounts.json');
 const SETTINGS_FILE = path.join(CONFIG_DIR, 'settings.json');
+const WAKE_SETTINGS_FILE = path.join(CONFIG_DIR, 'wake-settings.json');
 const LEASES_FILE = path.join(DATA_DIR, 'leases.json');
 const ACCESS_TOKEN_FILE = path.join(DATA_DIR, 'access-token.txt');
 const AUDIT_FILE = path.join(DATA_DIR, 'audit.jsonl');
@@ -34,6 +37,7 @@ const SHARED_CODEX_HOME = path.join(os.homedir(), '.codex');
 const SHARED_CODEX_AUTH_FILE = path.join(SHARED_CODEX_HOME, 'auth.json');
 const SHARED_AUTH_BACKUP_DIR = path.join(CODEX_PROFILES_DIR, '_shared');
 const SHARED_AUTH_BACKUP_FILE = path.join(SHARED_AUTH_BACKUP_DIR, 'original-auth.json');
+const IP_CHECK_URL = 'https://ipip.la/';
 
 for (const directory of [CONFIG_DIR, DATA_DIR, BROWSER_PROFILES_DIR, CODEX_PROFILES_DIR]) {
   fs.mkdirSync(directory, { recursive: true });
@@ -82,11 +86,14 @@ function loadSettings() {
 
 let settings = loadSettings();
 let accounts = readJson(ACCOUNTS_FILE, []);
+let wakeSettings = normalizeWakeSettings(readJson(WAKE_SETTINGS_FILE, {}));
 let leases = Object.fromEntries(Object.entries(readJson(LEASES_FILE, {})).map(([accountId, lease]) => [
   accountId,
   { ...lease, operator: '本机用户' },
 ]));
 const pendingCodexLogins = new Map();
+const wakeRuns = new Map();
+let wakeScheduleRunning = false;
 const csrfToken = crypto.randomBytes(24).toString('base64url');
 
 function getAccessToken() {
@@ -178,23 +185,18 @@ function requireOperator() {
   return '本机用户';
 }
 
-function findBrowser(browserType) {
+function findBrowser() {
   if (settings.browserExecutable) {
     if (!fs.existsSync(settings.browserExecutable)) throw new Error('settings.json 中配置的浏览器路径不存在');
     return settings.browserExecutable;
   }
-  const candidates = browserType === 'chrome'
-    ? [
-        path.join(process.env.PROGRAMFILES || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
-        path.join(process.env['PROGRAMFILES(X86)'] || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
-        path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
-      ]
-    : [
-        path.join(process.env['PROGRAMFILES(X86)'] || '', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-        path.join(process.env.PROGRAMFILES || '', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-      ];
+  const candidates = [
+    path.join(process.env.PROGRAMFILES || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    path.join(process.env['PROGRAMFILES(X86)'] || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+  ];
   const executable = candidates.find((candidate) => candidate && fs.existsSync(candidate));
-  if (!executable) throw new Error(`没有找到 ${browserType === 'chrome' ? 'Chrome' : 'Edge'}，请在 settings.json 中配置 browserExecutable`);
+  if (!executable) throw new Error('没有找到 Google Chrome，请先安装 Chrome，或在 settings.json 中配置 browserExecutable');
   return executable;
 }
 
@@ -303,6 +305,202 @@ function isCodexAuthenticated(account) {
   return fs.existsSync(path.join(codexHomeDir, 'auth.json')) || fs.existsSync(path.join(codexDir, 'auth.json'));
 }
 
+function saveWakeSettings(next) {
+  wakeSettings = normalizeWakeSettings(next);
+  writeJsonAtomic(WAKE_SETTINGS_FILE, wakeSettings);
+}
+
+function publicWakeSettings() {
+  return {
+    enabled: wakeSettings.enabled,
+    mode: wakeSettings.mode,
+    dailyTime: wakeSettings.dailyTime,
+    model: wakeSettings.model,
+    reasoningEffort: wakeSettings.reasoningEffort,
+    prompt: wakeSettings.prompt,
+  };
+}
+
+function wakeModelCatalog() {
+  const files = [path.join(SHARED_CODEX_HOME, 'models_cache.json')];
+  for (const account of accounts) files.push(path.join(accountPaths(account).codexHomeDir, 'models_cache.json'));
+  return readModelCatalog(files);
+}
+
+function validateWakeModelSelection(model, reasoningEffort) {
+  const catalog = wakeModelCatalog();
+  const selected = model ? catalog.find((item) => item.slug === model) : catalog[0];
+  if (!selected) throw new Error('所选模型当前不可用，请重新选择');
+  if (reasoningEffort && !selected.reasoningEfforts.includes(reasoningEffort)) {
+    throw new Error(`${selected.displayName} 不支持所选推理强度`);
+  }
+}
+
+function wakeState(accountId) {
+  return wakeSettings.accountStates[accountId] || {};
+}
+
+function updateWakeState(accountId, patch) {
+  saveWakeSettings({
+    ...wakeSettings,
+    accountStates: {
+      ...wakeSettings.accountStates,
+      [accountId]: { ...wakeState(accountId), ...patch },
+    },
+  });
+}
+
+function recordWakeAttempt(account, trigger, status, error = '') {
+  const previous = wakeState(account.id);
+  const next = {
+    ...previous,
+    lastWakeAt: new Date().toISOString(),
+    lastWakeStatus: status,
+    lastWakeError: String(error || '').slice(0, 500),
+  };
+  if (trigger === 'daily') next.lastDailyDate = localDateKey();
+  if (trigger === 'after-reset') {
+    const event = previous.pendingResetEvent;
+    if (status === 'success') {
+      next.lastHandledResetEventKey = event?.key || previous.lastHandledResetEventKey || '';
+      next.pendingResetEvent = null;
+      next.lastResetAttemptAt = '';
+    } else {
+      next.lastResetAttemptAt = next.lastWakeAt;
+    }
+  }
+  saveWakeSettings({
+    ...wakeSettings,
+    accountStates: { ...wakeSettings.accountStates, [account.id]: next },
+  });
+}
+
+function runWakeCommand(account) {
+  if (!isCodexAuthenticated(account) || account.quotaErrorCode === 'auth_expired') {
+    throw new Error('该账号尚未完成 Codex 授权，无法唤醒');
+  }
+  if (wakeRuns.has(account.id)) throw new Error('该账号正在唤醒，请稍候');
+  if (settings.mockLaunch) return Promise.resolve({ output: 'mock wake success' });
+
+  const executable = findCodexCli();
+  const { codexDir, codexHomeDir } = accountPaths(account);
+  const workspace = path.join(codexDir, 'wake-workspace');
+  fs.mkdirSync(workspace, { recursive: true });
+  ensureCodexProfileConfig(codexHomeDir);
+  const args = [
+    'exec', '--ephemeral', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check',
+    '--sandbox', 'read-only', '--color', 'never', '-C', workspace,
+  ];
+  if (wakeSettings.model) args.push('--model', wakeSettings.model);
+  if (wakeSettings.reasoningEffort) args.push('--config', `model_reasoning_effort="${wakeSettings.reasoningEffort}"`);
+  args.push(wakeSettings.prompt);
+
+  return new Promise((resolve, reject) => {
+    let output = '';
+    let settled = false;
+    const child = spawn(executable, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      env: { ...process.env, CODEX_HOME: codexHomeDir, NO_COLOR: '1', TERM: 'dumb' },
+    });
+    wakeRuns.set(account.id, child);
+    const consume = (chunk) => { output = `${output}${chunk}`.slice(-12_000); };
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', consume);
+    child.stderr.on('data', consume);
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      wakeRuns.delete(account.id);
+      if (error) reject(error);
+      else resolve({ output });
+    };
+    child.on('error', (error) => finish(new Error(`无法启动 Codex 唤醒请求：${error.message}`)));
+    child.on('exit', (code) => finish(code === 0
+      ? null
+      : new Error(`Codex 唤醒请求失败（退出码 ${code}）：${output.trim().slice(-600) || '没有返回错误详情'}`)));
+    const timeout = setTimeout(() => {
+      try { child.kill(); } catch {}
+      finish(new Error('Codex 唤醒请求超时，请检查网络或账号状态'));
+    }, 120_000);
+  });
+}
+
+async function wakeAccount(account, trigger = 'manual', operator = '本机用户') {
+  try {
+    await runWakeCommand(account);
+    recordWakeAttempt(account, trigger, 'success');
+    audit('account.wake', { accountId: account.id, operator, result: trigger });
+    try {
+      if (settings.mockLaunch) return accountView(account);
+      const { codexHomeDir } = accountPaths(account);
+      account.quota = await readCodexQuota(findCodexCli(), codexHomeDir);
+      account.quotaError = '';
+      account.quotaErrorCode = '';
+      account.quotaCheckedAt = account.quota.refreshedAt;
+      saveAccounts([...accounts]);
+      if (trigger === 'after-reset') updateWakeState(account.id, { quotaObservation: quotaObservation(account.quota) });
+    } catch {}
+    return accountView(account);
+  } catch (error) {
+    recordWakeAttempt(account, trigger, 'failed', error.message);
+    audit('account.wake.failed', { accountId: account.id, operator, result: error.message });
+    throw error;
+  }
+}
+
+async function refreshQuotaForResetDetection(account) {
+  const state = wakeState(account.id);
+  const lastProbe = Date.parse(state.lastQuotaProbeAt || '');
+  if (Number.isFinite(lastProbe) && Date.now() - lastProbe < 5 * 60_000) return;
+  updateWakeState(account.id, { lastQuotaProbeAt: new Date().toISOString() });
+  try {
+    const { codexHomeDir } = accountPaths(account);
+    account.quota = await readCodexQuota(findCodexCli(), codexHomeDir);
+    account.quotaError = '';
+    account.quotaErrorCode = '';
+    account.quotaCheckedAt = account.quota.refreshedAt;
+    saveAccounts([...accounts]);
+  } catch (error) {
+    audit('wake.quota-probe.failed', { accountId: account.id, result: error.message });
+  }
+}
+
+async function detectResetForAccount(account) {
+  const before = wakeState(account.id);
+  const previous = before.quotaObservation || quotaObservation(account.quota);
+  await refreshQuotaForResetDetection(account);
+  const current = quotaObservation(account.quota);
+  if (!current) return;
+  const event = detectQuotaReset(previous, current);
+  const latest = wakeState(account.id);
+  const patch = { quotaObservation: current };
+  if (event && event.key !== latest.lastHandledResetEventKey && event.key !== latest.pendingResetEvent?.key) {
+    patch.pendingResetEvent = event;
+    audit('wake.reset.detected', { accountId: account.id, result: event.reason });
+  }
+  updateWakeState(account.id, patch);
+}
+
+async function runScheduledWakes() {
+  if (wakeScheduleRunning || !wakeSettings.enabled || wakeSettings.mode === 'manual') return;
+  wakeScheduleRunning = true;
+  try {
+    for (const account of accounts) {
+      if (!isCodexAuthenticated(account) || account.quotaErrorCode === 'auth_expired') continue;
+      if (wakeSettings.mode === 'after-reset') await detectResetForAccount(account);
+      if (!shouldWakeAccount(wakeSettings, account)) continue;
+      const lastAttempt = Date.parse(wakeState(account.id).lastResetAttemptAt || '');
+      if (wakeSettings.mode === 'after-reset' && Number.isFinite(lastAttempt) && Date.now() - lastAttempt < 30 * 60_000) continue;
+      try { await wakeAccount(account, wakeSettings.mode, '自动唤醒'); } catch {}
+    }
+  } finally {
+    wakeScheduleRunning = false;
+  }
+}
+
 function readActiveCodexAuth() {
   const active = readJson(ACTIVE_CODEX_AUTH_FILE, null);
   return active && validateAccountId(active.accountId) ? active : null;
@@ -356,11 +554,28 @@ function ensureCodexProfileConfig(codexHomeDir) {
   }
 }
 
-function launchAccountBrowser(account, url) {
+function hasRestorableBrowserSession(browserDir) {
+  const sessionDir = path.join(browserDir, 'Default', 'Sessions');
+  try {
+    if (fs.existsSync(sessionDir) && fs.readdirSync(sessionDir).some((name) => /^(?:Session|Tabs)_/.test(name))) return true;
+  } catch {}
+  return ['Last Session', 'Last Tabs'].some((name) => fs.existsSync(path.join(browserDir, 'Default', name)));
+}
+
+async function launchAccountBrowser(account, url, options = {}) {
   const { browserDir } = accountPaths(account);
   fs.mkdirSync(browserDir, { recursive: true });
-  const executable = findBrowser(account.browserType || 'chrome');
-  const child = spawn(executable, [`--user-data-dir=${browserDir}`, '--no-first-run', url], {
+  const executable = findBrowser();
+  const args = [`--user-data-dir=${browserDir}`, '--no-first-run', '--disable-background-mode'];
+  if (options.restoreLastSession && hasRestorableBrowserSession(browserDir)) {
+    args.push('--restore-last-session');
+  } else {
+    const initialUrls = Array.isArray(options.initialUrls) && options.initialUrls.length
+      ? options.initialUrls
+      : [url];
+    args.push('--new-window', ...initialUrls);
+  }
+  const child = spawn(executable, args, {
     detached: true,
     stdio: 'ignore',
     windowsHide: false,
@@ -517,7 +732,7 @@ function startCodexDeviceLogin(account, operator) {
     audit('codex.login.failed', { accountId: account.id, operator, result: message });
   };
 
-  const consume = (chunk) => {
+  const consume = async (chunk) => {
     pending.output = `${pending.output}${chunk}`.slice(-12_000);
     const plain = pending.output.replace(/\x1b\[[0-9;]*m/g, '');
     const code = plain.match(/\b[A-Z0-9]{4,5}-[A-Z0-9]{4,5}\b/)?.[0];
@@ -526,7 +741,7 @@ function startCodexDeviceLogin(account, operator) {
     pending.status = 'waiting';
     pending.browserOpened = true;
     try {
-      launchAccountBrowser(account, pending.deviceUrl);
+      await launchAccountBrowser(account, pending.deviceUrl);
       audit('codex.login.browser-opened', { accountId: account.id, operator, result: 'device-auth' });
     } catch (error) {
       fail(error.message);
@@ -571,7 +786,10 @@ async function launchAccount(account, launchType, operator) {
   if (settings.mockLaunch) return null;
 
   if (launchType === 'browser') {
-    return launchAccountBrowser(account, settings.browserStartUrl);
+    return launchAccountBrowser(account, settings.browserStartUrl, {
+      restoreLastSession: true,
+      initialUrls: [IP_CHECK_URL, settings.browserStartUrl],
+    });
   }
 
   if (findRunningCodexDesktopPid()) {
@@ -590,7 +808,7 @@ function accountView(account) {
     id: account.id,
     label: account.label,
     emailHint: account.emailHint || '',
-    browserType: account.browserType || 'chrome',
+    browserType: 'chrome',
     enabled: account.enabled !== false,
     createdAt: account.createdAt,
     quota: account.quota || null,
@@ -601,6 +819,10 @@ function accountView(account) {
     quotaError: account.quotaError || '',
     quotaErrorCode: account.quotaErrorCode || '',
     quotaCheckedAt: account.quotaCheckedAt || null,
+    wake: {
+      ...wakeState(account.id),
+      running: wakeRuns.has(account.id),
+    },
     codexLogin: pendingCodexLogins.has(account.id) ? (() => {
       const login = pendingCodexLogins.get(account.id);
       return {
@@ -702,7 +924,57 @@ const server = http.createServer(async (request, response) => {
           csrfToken,
           operators: settings.operators,
           mockLaunch: settings.mockLaunch,
+          wakeSettings: publicWakeSettings(),
+          wakeModelOptions: wakeModelCatalog(),
         },
+      });
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/wake-settings') {
+      const body = await readBody(request);
+      const model = String(body.model || '').trim();
+      const reasoningEffort = String(body.reasoningEffort || '').trim();
+      try { validateWakeModelSelection(model, reasoningEffort); }
+      catch (error) { return sendError(response, 400, error.message); }
+      const nextAccountStates = { ...wakeSettings.accountStates };
+      if (body.enabled === true && body.mode === 'after-reset') {
+        for (const account of accounts) {
+          const observation = quotaObservation(account.quota);
+          if (observation && !nextAccountStates[account.id]?.quotaObservation) {
+            nextAccountStates[account.id] = { ...nextAccountStates[account.id], quotaObservation: observation };
+          }
+        }
+      }
+      saveWakeSettings({
+        ...wakeSettings,
+        enabled: body.enabled === true,
+        mode: body.mode,
+        dailyTime: body.dailyTime,
+        model,
+        reasoningEffort,
+        prompt: body.prompt,
+        accountStates: nextAccountStates,
+      });
+      audit('wake.settings.updated', { result: wakeSettings.enabled ? wakeSettings.mode : 'disabled' });
+      return sendJson(response, 200, { ok: true, data: publicWakeSettings() });
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/wake-all') {
+      const body = await readBody(request);
+      const operator = requireOperator(body.operator);
+      const targets = accounts.filter((account) => isCodexAuthenticated(account) && account.quotaErrorCode !== 'auth_expired');
+      const results = [];
+      for (const account of targets) {
+        try {
+          await wakeAccount(account, 'manual', operator);
+          results.push({ accountId: account.id, ok: true });
+        } catch (error) {
+          results.push({ accountId: account.id, ok: false, error: error.message });
+        }
+      }
+      return sendJson(response, 200, {
+        ok: true,
+        data: { total: targets.length, succeeded: results.filter((item) => item.ok).length, results },
       });
     }
 
@@ -726,7 +998,7 @@ const server = http.createServer(async (request, response) => {
         id: `account-${crypto.randomBytes(6).toString('hex')}`,
         label,
         emailHint: String(body.emailHint || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 100),
-        browserType: body.browserType === 'edge' ? 'edge' : 'chrome',
+        browserType: 'chrome',
         enabled: true,
         setupStage: 'web-login',
         createdAt: new Date().toISOString(),
@@ -737,7 +1009,9 @@ const server = http.createServer(async (request, response) => {
         const result = acquireLease(leases, account.id, operator, 'setup');
         saveLeases(result.leases);
         try {
-          const processPid = launchAccountBrowser(account, settings.browserStartUrl);
+          const processPid = await launchAccountBrowser(account, settings.browserStartUrl, {
+            initialUrls: [IP_CHECK_URL, settings.browserStartUrl],
+          });
           result.lease.processPid = processPid;
           saveLeases({ ...leases, [account.id]: result.lease });
           audit('account.web-login.opened', { accountId: account.id, operator, result: 'first-step' });
@@ -752,7 +1026,7 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 201, { ok: true, data: accountView(account) });
     }
 
-    const match = url.pathname.match(/^\/api\/accounts\/([a-z0-9-]+)\/(launch|release|toggle|authorize|quota|quit-codex)$/);
+    const match = url.pathname.match(/^\/api\/accounts\/([a-z0-9-]+)\/(launch|release|toggle|authorize|quota|wake|quit-codex)$/);
     if (match && request.method === 'POST') {
       const [, accountId, operation] = match;
       if (!validateAccountId(accountId)) return sendError(response, 400, '账号 ID 无效');
@@ -792,6 +1066,15 @@ const server = http.createServer(async (request, response) => {
           saveAccounts([...accounts]);
           audit('quota.refresh', { accountId, operator, result: error.message });
           return sendError(response, authExpired ? 401 : 502, account.quotaError);
+        }
+      }
+
+      if (operation === 'wake') {
+        try {
+          const data = await wakeAccount(account, 'manual', operator);
+          return sendJson(response, 200, { ok: true, data });
+        } catch (error) {
+          return sendError(response, 502, error.message);
         }
       }
 
@@ -886,6 +1169,9 @@ const server = http.createServer(async (request, response) => {
       if (leases[accountId]) return sendError(response, 409, '请先释放账号再移除');
       if (!accounts.some((item) => item.id === accountId)) return sendError(response, 404, '账号不存在');
       saveAccounts(accounts.filter((item) => item.id !== accountId));
+      const nextWakeStates = { ...wakeSettings.accountStates };
+      delete nextWakeStates[accountId];
+      saveWakeSettings({ ...wakeSettings, accountStates: nextWakeStates });
       audit('account.remove', { accountId, operator });
       return sendJson(response, 200, { ok: true });
     }
@@ -908,7 +1194,11 @@ server.listen(settings.port, '127.0.0.1', () => {
     const child = spawn('explorer.exe', [url], { detached: true, stdio: 'ignore' });
     child.unref();
   }
+  setTimeout(runScheduledWakes, 5_000).unref?.();
 });
+
+const wakeScheduleTimer = setInterval(runScheduledWakes, 60_000);
+wakeScheduleTimer.unref?.();
 
 server.on('error', (error) => {
   console.error(`启动失败：${error.message}`);

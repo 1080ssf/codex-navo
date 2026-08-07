@@ -1,4 +1,4 @@
-const state = { accounts: [], csrfToken: '', timer: null, quotaRefreshing: false };
+const state = { accounts: [], csrfToken: '', timer: null, quotaRefreshing: false, wakeSettings: {}, wakeModelOptions: [] };
 const elements = {
   accounts: document.querySelector('#accounts'),
   summary: document.querySelector('#account-summary'),
@@ -11,7 +11,13 @@ const elements = {
   sortTrigger: document.querySelector('#sort-trigger'),
   sortLabel: document.querySelector('#sort-label'),
   sortPopover: document.querySelector('#sort-popover'),
+  viewSwitcher: document.querySelector('#view-switcher'),
   refreshAllQuotas: document.querySelector('#refresh-all-quotas'),
+  wakeAll: document.querySelector('#wake-all'),
+  wakeSettingsButton: document.querySelector('#wake-settings-button'),
+  wakeDialog: document.querySelector('#wake-dialog'),
+  wakeForm: document.querySelector('#wake-form'),
+  wakeModelHelp: document.querySelector('#wake-model-help'),
   updateChip: document.querySelector('#update-chip'),
   updateDialog: document.querySelector('#update-dialog'),
   updateDialogTitle: document.querySelector('#update-dialog-title'),
@@ -119,6 +125,7 @@ async function initializeApplicationUpdater() {
 }
 
 const sortStorageKey = 'codex-manager-account-sort';
+const viewStorageKey = 'codex-navo-account-view';
 const sortLabels = {
   current: '当前账号优先',
   'quota-desc': '额度：高到低',
@@ -127,6 +134,16 @@ const sortLabels = {
   created: '最近添加',
 };
 state.sortMode = localStorage.getItem(sortStorageKey) || 'current';
+state.viewMode = localStorage.getItem(viewStorageKey) === 'grid' ? 'grid' : 'list';
+
+function applyViewMode() {
+  elements.accounts.classList.toggle('account-grid', state.viewMode === 'grid');
+  elements.viewSwitcher.querySelectorAll('[data-view]').forEach((button) => {
+    const active = button.dataset.view === state.viewMode;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+}
 
 function formatPlan(planType) {
   const normalized = String(planType || '').trim().toLowerCase();
@@ -280,7 +297,8 @@ function renderQuota(account) {
 }
 
 function render() {
-  const occupied = state.accounts.filter((account) => account.lease).length;
+  applyViewMode();
+  const occupied = state.accounts.filter((account) => account.lease || account.codexActive).length;
   elements.summary.innerHTML = `<span><strong>${state.accounts.length}</strong> 个账号</span><i aria-hidden="true"></i><span class="${occupied ? 'has-active' : ''}"><strong>${occupied}</strong> 使用中</span>`;
   const activeAccount = state.accounts.find((account) => account.codexActive);
   const externalCodexRunning = Boolean(state.codexRunning && !activeAccount);
@@ -292,7 +310,6 @@ function render() {
     : externalCodexRunning
       ? '外部 Codex 正在运行'
       : 'Codex 未启动';
-
   if (!state.accounts.length) {
     elements.accounts.classList.add('is-empty');
     elements.accounts.innerHTML = `<div class="empty-state"><strong>暂无账号</strong><p>点击右上角“添加账号”创建第一个独立登录环境。</p></div>`;
@@ -302,7 +319,7 @@ function render() {
   elements.accounts.classList.remove('is-empty');
 
   elements.accounts.innerHTML = sortedAccounts(activeAccount).map((account) => {
-    const status = account.enabled === false ? 'disabled' : account.lease ? 'occupied' : 'free';
+    const status = account.enabled === false ? 'disabled' : account.lease || account.codexActive ? 'occupied' : 'free';
     const codexLoginPending = account.codexLogin && ['starting', 'waiting'].includes(account.codexLogin.status);
     const setupSteps = !account.codexInitialized ? `<div class="setup-steps" aria-label="账号入池进度">
       <span class="${account.setupStage === 'web-login' ? 'active' : 'done'}"><i>1</i>网页登录</span>
@@ -330,6 +347,10 @@ function render() {
     const creditBadge = creditPoints
       ? `<span class="credit-badge" title="Codex Credits 可用点数">${escapeHtml(creditPoints)}</span>`
       : '';
+    const browserOccupied = Boolean(account.lease && !account.codexActive && account.lease.launchType === 'browser');
+    const sessionBadge = browserOccupied
+      ? '<span class="session-badge"><i></i>网页使用中</span>'
+      : '';
     let codexAction;
     if (!account.codexInitialized) {
       codexAction = `<button class="action-primary action-codex" data-action="authorize" ${codexLoginPending ? 'disabled' : ''}>${codexLoginPending ? '等待 Codex 授权' : account.setupStage === 'web-login' ? '已登录，继续授权' : account.quotaErrorCode === 'auth_expired' ? '重新授权' : '重试 Codex 授权'}</button>`;
@@ -342,21 +363,26 @@ function render() {
     } else {
       codexAction = '<button class="action-primary action-codex" data-action="codex">启动 Codex</button>';
     }
+    const wakeTitle = account.wake?.running
+      ? '正在唤醒账号'
+      : account.wake?.lastWakeStatus === 'failed'
+        ? `上次唤醒失败：${escapeHtml(account.wake.lastWakeError || '未知错误')}`
+        : '唤醒账号（发送一次真实 Codex 请求）';
     return `<article class="account-card ${status}${account.codexActive ? ' current' : ''}" data-id="${account.id}">
       <div class="account-overview">
         <div class="account-identity">
           <div class="identity-title"><h3>${escapeHtml(account.label)}</h3></div>
-          ${(planBadge || creditBadge) ? `<div class="identity-badges">${planBadge}${creditBadge}</div>` : ''}
+          ${(planBadge || creditBadge || sessionBadge) ? `<div class="identity-badges">${planBadge}${creditBadge}${sessionBadge}</div>` : ''}
           ${secondaryIdentity}
         </div>
       </div>
       ${renderQuota(account)}
       <div class="account-actions">
-        <button class="action-primary" data-action="browser">${account.codexInitialized ? '网页端' : '打开网页登录'}</button>
+        <button class="action-primary ${browserOccupied ? 'action-browser-active' : ''}" data-action="browser">${browserOccupied ? '网页已打开' : account.codexInitialized ? '网页端' : '打开网页登录'}</button>
         ${codexAction}
+        <button class="icon-action wake-action" data-action="wake" title="${wakeTitle}" aria-label="唤醒账号" ${account.codexInitialized && !account.wake?.running ? '' : 'disabled'}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.2 2.8 5.8 13h5l-1 8.2L18.2 10h-5z"></path></svg></button>
         <button class="icon-action" data-action="quota" title="刷新额度" aria-label="刷新额度" ${account.codexInitialized ? '' : 'disabled'}>↻</button>
-        ${account.lease && !account.codexActive ? '<button class="release" data-action="release">释放占用</button>' : ''}
-        <button class="icon-action danger-button" data-action="remove" title="移除账号" aria-label="移除账号" ${account.lease ? 'disabled' : ''}>×</button>
+        ${account.lease && !account.codexActive ? '<button class="icon-action release-action" data-action="release" title="释放账号占用（不会关闭网页）" aria-label="释放账号占用"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="10" width="12" height="10" rx="2"></rect><path d="M9 10V7a3 3 0 0 1 5.6-1.5"></path></svg></button>' : '<button class="icon-action danger-button" data-action="remove" title="移除账号" aria-label="移除账号">×</button>'}
       </div>
       ${codexLoginPanel}
     </article>`;
@@ -422,6 +448,9 @@ elements.accounts.addEventListener('click', async (event) => {
     } else if (action === 'quota') {
       await api(`/api/accounts/${card.dataset.id}/quota`, { method: 'POST', body: JSON.stringify({ operator: currentOperator }) });
       showToast('额度已刷新');
+    } else if (action === 'wake') {
+      await api(`/api/accounts/${card.dataset.id}/wake`, { method: 'POST', body: JSON.stringify({ operator: currentOperator }) });
+      showToast('账号已唤醒，额度状态已同步');
     } else if (action === 'authorize') {
       await api(`/api/accounts/${card.dataset.id}/authorize`, { method: 'POST', body: JSON.stringify({ operator: currentOperator }) });
       showToast('已在同一个独立浏览器中打开 Codex 授权页，完成后会自动入池');
@@ -489,8 +518,130 @@ elements.refreshAllQuotas.addEventListener('click', async () => {
     elements.refreshAllQuotas.classList.remove('loading');
   }
 });
+elements.wakeAll.addEventListener('click', async () => {
+  const accounts = state.accounts.filter((account) => account.codexInitialized);
+  if (!accounts.length) {
+    showToast('暂无已完成授权的账号可唤醒', true);
+    return;
+  }
+  if (!confirm(`将为 ${accounts.length} 个账号各发送一次真实 Codex 请求，会消耗额度。继续吗？`)) return;
+  elements.wakeAll.disabled = true;
+  elements.wakeAll.classList.add('loading');
+  try {
+    const result = await api('/api/wake-all', {
+      method: 'POST',
+      body: JSON.stringify({ operator: operator() }),
+    });
+    await refresh();
+    const failed = result.total - result.succeeded;
+    showToast(failed
+      ? `已唤醒 ${result.succeeded} 个账号，${failed} 个失败`
+      : `已成功唤醒全部 ${result.succeeded} 个账号`, Boolean(failed));
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    elements.wakeAll.disabled = false;
+    elements.wakeAll.classList.remove('loading');
+  }
+});
+
+function syncWakeForm() {
+  const config = state.wakeSettings || {};
+  elements.wakeForm.elements.enabled.checked = config.enabled === true;
+  elements.wakeForm.elements.mode.value = config.mode || 'manual';
+  elements.wakeForm.elements.dailyTime.value = config.dailyTime || '09:00';
+  syncWakeModelOptions(config.model || '', config.reasoningEffort || '');
+  elements.wakeForm.elements.prompt.value = config.prompt || 'hi';
+  elements.wakeForm.querySelector('[data-daily-time]').hidden = elements.wakeForm.elements.mode.value !== 'daily';
+}
+
+const reasoningLabels = {
+  none: '无推理', minimal: '最少', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最大', ultra: '极限（自动协作）',
+};
+
+function syncWakeReasoningOptions(preferred = '') {
+  const modelSelect = elements.wakeForm.elements.model;
+  const effortSelect = elements.wakeForm.elements.reasoningEffort;
+  const selected = state.wakeModelOptions.find((model) => model.slug === modelSelect.value) || state.wakeModelOptions[0];
+  effortSelect.replaceChildren();
+  const defaultOption = document.createElement('option');
+  defaultOption.value = '';
+  defaultOption.textContent = selected?.defaultReasoningEffort
+    ? `模型默认（${reasoningLabels[selected.defaultReasoningEffort] || selected.defaultReasoningEffort}）`
+    : '模型默认';
+  effortSelect.append(defaultOption);
+  for (const effort of selected?.reasoningEfforts || []) {
+    const option = document.createElement('option');
+    option.value = effort;
+    option.textContent = reasoningLabels[effort] || effort;
+    effortSelect.append(option);
+  }
+  effortSelect.value = [...effortSelect.options].some((option) => option.value === preferred) ? preferred : '';
+  elements.wakeModelHelp.textContent = selected
+    ? `${selected.description || selected.displayName}；默认推理强度：${reasoningLabels[selected.defaultReasoningEffort] || selected.defaultReasoningEffort || '由 Codex 决定'}`
+    : '模型列表暂不可用';
+}
+
+function syncWakeModelOptions(preferredModel = '', preferredEffort = '') {
+  const select = elements.wakeForm.elements.model;
+  select.replaceChildren();
+  const currentDefault = state.wakeModelOptions[0];
+  const defaultOption = document.createElement('option');
+  defaultOption.value = '';
+  defaultOption.textContent = currentDefault
+    ? `Codex 默认（当前 ${currentDefault.displayName}）`
+    : 'Codex 默认模型';
+  select.append(defaultOption);
+  for (const model of state.wakeModelOptions) {
+    const option = document.createElement('option');
+    option.value = model.slug;
+    option.textContent = model.displayName;
+    select.append(option);
+  }
+  select.value = [...select.options].some((option) => option.value === preferredModel) ? preferredModel : '';
+  syncWakeReasoningOptions(preferredEffort);
+}
+
+elements.wakeSettingsButton.addEventListener('click', () => {
+  syncWakeForm();
+  elements.wakeDialog.showModal();
+});
+elements.wakeForm.elements.mode.addEventListener('change', syncWakeFormVisibility);
+elements.wakeForm.elements.model.addEventListener('change', () => syncWakeReasoningOptions(''));
+function syncWakeFormVisibility() {
+  elements.wakeForm.querySelector('[data-daily-time]').hidden = elements.wakeForm.elements.mode.value !== 'daily';
+}
+elements.wakeForm.addEventListener('submit', async (event) => {
+  if (event.submitter?.value === 'cancel') return;
+  event.preventDefault();
+  const formData = new FormData(elements.wakeForm);
+  try {
+    state.wakeSettings = await api('/api/wake-settings', {
+      method: 'POST',
+      body: JSON.stringify({
+        enabled: formData.get('enabled') === 'on',
+        mode: formData.get('mode'),
+        dailyTime: formData.get('dailyTime'),
+        model: formData.get('model'),
+        reasoningEffort: formData.get('reasoningEffort'),
+        prompt: formData.get('prompt'),
+      }),
+    });
+    elements.wakeDialog.close();
+    showToast(state.wakeSettings.enabled ? '自动唤醒设置已启用' : '唤醒设置已保存');
+  } catch (error) {
+    showToast(error.message, true);
+  }
+});
 elements.sortTrigger.addEventListener('click', () => {
   setSortMenuOpen(elements.sortPopover.hidden);
+});
+elements.viewSwitcher.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-view]');
+  if (!button || button.dataset.view === state.viewMode) return;
+  state.viewMode = button.dataset.view;
+  localStorage.setItem(viewStorageKey, state.viewMode);
+  applyViewMode();
 });
 elements.sortPopover.addEventListener('click', (event) => {
   const option = event.target.closest('[data-sort]');
@@ -545,7 +696,6 @@ elements.form.addEventListener('submit', async (event) => {
         operator: currentOperator,
         label: formData.get('label'),
         emailHint: formData.get('emailHint'),
-        browserType: formData.get('browserType'),
       }),
     });
     elements.form.reset();
@@ -561,5 +711,5 @@ syncSortMenu();
 initializeApplicationUpdater();
 refresh();
 state.timer = setInterval(() => {
-  if (!elements.dialog.open && !elements.updateDialog.open && document.visibilityState === 'visible') refresh();
+  if (!elements.dialog.open && !elements.wakeDialog.open && !elements.updateDialog.open && document.visibilityState === 'visible') refresh();
 }, 5_000);
