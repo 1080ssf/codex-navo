@@ -1,20 +1,20 @@
-# Codex Switchboard
+# Codex Navo
 
 面向 Windows 的本地 Codex 账号环境切换器。每个账号使用独立的 Chrome 或 Edge 浏览器配置与 Codex 认证目录；切换账号时继续使用同一套本地项目和任务数据。
 
 > [!IMPORTANT]
-> Codex Switchboard 不是 OpenAI 官方产品，与 OpenAI 无隶属或背书关系。请只管理你有权使用的账号，并遵守适用的服务条款、订阅规则和组织政策。
+> Codex Navo 不是 OpenAI 官方产品，与 OpenAI 无隶属或背书关系。请只管理你有权使用的账号，并遵守适用的服务条款、订阅规则和组织政策。
 
 ## 下载与安装
 
-普通用户建议从仓库右侧的 **Releases** 下载：
+普通用户建议从仓库右侧的 **Releases** 下载安装版：
 
-1. 下载 `Codex-Switchboard-v1.0.0-windows-x64.zip`。
-2. 解压完整压缩包；不要只取出单个 EXE。
-3. 运行 `Codex 账号切换.exe`。
+1. 下载 `Codex-Switchboard-Setup-<版本>-windows-x64.exe`。
+2. 按安装向导完成安装。
+3. 后续版本会由应用自动检查；下载完成后由用户确认重启安装。
 4. 如果 Windows SmartScreen 提示“未知发布者”，请先核对 Release 页面提供的 SHA-256；公开分发版本目前没有代码签名。
 
-便携版已经包含 Electron 和本地服务运行时，不需要安装 Node.js。需要预先安装：
+安装版已经包含 Electron 和本地服务运行时，不需要安装 Node.js。需要预先安装：
 
 - Windows 11 x64
 - Google Chrome 或 Microsoft Edge
@@ -42,18 +42,19 @@
 - 按当前账号、剩余额度、名称或添加时间排序
 - 管理服务只监听 `127.0.0.1`
 - 关闭窗口后驻留 Windows 系统托盘
+- 从 GitHub Releases 检查、下载并安装应用更新
 
 ## 数据与隐私
 
-应用运行后会在程序目录生成：
+安装版会把运行数据保存在 `%LOCALAPPDATA%\Codex Switchboard`，升级和卸载程序默认不会删除这些数据：
 
 | 路径 | 内容 | 是否敏感 |
 | --- | --- | --- |
-| `config/accounts.json` | 账号显示名称、邮箱提示和额度缓存 | 是 |
-| `config/settings.json` | 本机设置和可选的绝对路径 | 可能 |
-| `profiles/browser/` | 独立浏览器配置，可能包含有效 Cookie | 高度敏感 |
-| `profiles/codex/` | 每个账号的 Codex `auth.json` | 高度敏感 |
-| `data/` | 本地访问令牌、租约、日志和状态 | 高度敏感 |
+| `%LOCALAPPDATA%\Codex Switchboard\config\accounts.json` | 账号显示名称、邮箱提示和额度缓存 | 是 |
+| `%LOCALAPPDATA%\Codex Switchboard\config\settings.json` | 本机设置和可选的绝对路径 | 可能 |
+| `%LOCALAPPDATA%\Codex Switchboard\profiles\browser\` | 独立浏览器配置，可能包含有效 Cookie | 高度敏感 |
+| `%LOCALAPPDATA%\Codex Switchboard\profiles\codex\` | 每个账号的 Codex `auth.json` | 高度敏感 |
+| `%LOCALAPPDATA%\Codex Switchboard\data\` | 本地访问令牌、租约、日志和状态 | 高度敏感 |
 
 上述路径均已加入 `.gitignore`。不要将它们上传到 Git、网盘、Issue、聊天工具或公开截图中。本工具不会导出 Cookie、密码或令牌，也不会绕过密码、验证码、安全检查或服务端风控。
 
@@ -65,8 +66,8 @@
 开发环境需要 Node.js 20 或更高版本：
 
 ```powershell
-git clone https://github.com/1080ssf/codex-switchboard.git
-cd codex-switchboard
+git clone https://github.com/1080ssf/codex-navo.git
+cd codex-navo
 npm install
 Copy-Item config/settings.example.json config/settings.json
 npm run dev
@@ -99,7 +100,7 @@ npm audit --audit-level=high
 npm run build:desktop
 ```
 
-便携版输出到 `release/`。该目录不会进入 Git，生成的 ZIP 应作为 GitHub Release 附件发布。
+安装版输出到 `release/auto-update/`。发布自动更新版本时，必须把 Setup 安装程序、`.blockmap` 和 `latest.yml` 一起上传到同一个非草稿 GitHub Release。开发模式不会连接更新服务。
 
 ## 已知限制
 

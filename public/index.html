@@ -3,17 +3,26 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Codex 账号切换</title>
+    <title>Codex Navo</title>
+    <link rel="icon" type="image/png" href="/icon.png">
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
     <div class="app-shell">
       <header class="topbar">
         <a class="brand" href="/" aria-label="回到账号列表">
-          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span class="brand-copy"><b><em>Codex</em> 账号切换</b><small>本地账号环境</small></span>
+          <span class="brand-mark" aria-hidden="true"><img src="/icon.png" alt=""></span>
+          <span class="brand-copy"><b><em>Codex</em> Navo</b><small>ACCOUNT ENVIRONMENTS</small></span>
         </a>
-        <div class="current-codex" id="current-codex"><i></i><span>Codex 未由账号池启动</span></div>
+        <div class="current-codex" id="current-codex">
+          <i></i><span>Codex 未启动</span>
+          <button class="close-external-codex" id="close-external-codex" type="button" hidden aria-label="关闭外部 Codex" data-tooltip="关闭外部 Codex">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6.4 6.4l7.2 7.2m0-7.2-7.2 7.2"></path></svg>
+          </button>
+        </div>
+        <button class="update-chip" id="update-chip" type="button" hidden aria-label="检查应用更新">
+          <i aria-hidden="true"></i><span>检查更新</span>
+        </button>
       </header>
 
       <main>
@@ -67,6 +76,27 @@
         <div class="dialog-actions">
           <button class="secondary-button" value="cancel" type="submit" formnovalidate>取消</button>
           <button class="primary-button" value="default" type="submit">创建账号环境</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="update-dialog" class="update-dialog">
+      <form method="dialog">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">APP UPDATE</p>
+            <h2 id="update-dialog-title">应用更新</h2>
+          </div>
+          <button class="icon-button" value="cancel" aria-label="关闭" type="submit" formnovalidate>×</button>
+        </div>
+        <p class="dialog-copy" id="update-dialog-copy">正在读取版本信息。</p>
+        <div class="update-progress" id="update-progress" hidden>
+          <span><i id="update-progress-bar"></i></span><b id="update-progress-label">0%</b>
+        </div>
+        <pre class="update-notes" id="update-notes" hidden></pre>
+        <div class="dialog-actions">
+          <button class="secondary-button" value="cancel" type="submit" formnovalidate>稍后</button>
+          <button class="primary-button" id="update-primary-action" type="button">检查更新</button>
         </div>
       </form>
     </dialog>

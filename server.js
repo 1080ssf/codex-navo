@@ -14,10 +14,13 @@ const {
 const { readCodexQuota } = require('./lib/codex-quota');
 
 const ROOT = __dirname;
+const RUNTIME_ROOT = process.env.CODEX_SWITCHBOARD_USER_DATA
+  ? path.resolve(process.env.CODEX_SWITCHBOARD_USER_DATA)
+  : ROOT;
 const PUBLIC_DIR = path.join(ROOT, 'public');
-const CONFIG_DIR = path.join(ROOT, 'config');
-const DATA_DIR = path.join(ROOT, 'data');
-const PROFILES_DIR = path.join(ROOT, 'profiles');
+const CONFIG_DIR = path.join(RUNTIME_ROOT, 'config');
+const DATA_DIR = path.join(RUNTIME_ROOT, 'data');
+const PROFILES_DIR = path.join(RUNTIME_ROOT, 'profiles');
 const BROWSER_PROFILES_DIR = path.join(PROFILES_DIR, 'browser');
 const CODEX_PROFILES_DIR = path.join(PROFILES_DIR, 'codex');
 const ACCOUNTS_FILE = path.join(CONFIG_DIR, 'accounts.json');
@@ -32,7 +35,7 @@ const SHARED_CODEX_AUTH_FILE = path.join(SHARED_CODEX_HOME, 'auth.json');
 const SHARED_AUTH_BACKUP_DIR = path.join(CODEX_PROFILES_DIR, '_shared');
 const SHARED_AUTH_BACKUP_FILE = path.join(SHARED_AUTH_BACKUP_DIR, 'original-auth.json');
 
-for (const directory of [PUBLIC_DIR, CONFIG_DIR, DATA_DIR, BROWSER_PROFILES_DIR, CODEX_PROFILES_DIR]) {
+for (const directory of [CONFIG_DIR, DATA_DIR, BROWSER_PROFILES_DIR, CODEX_PROFILES_DIR]) {
   fs.mkdirSync(directory, { recursive: true });
 }
 
@@ -416,6 +419,21 @@ function stopManagedCodexDesktop(accountId) {
   audit('codex.desktop.stopped', { accountId, result: 'user-request' });
 }
 
+function stopExternalCodexDesktop() {
+  if (readActiveCodexAuth()) {
+    throw new Error('当前 Codex 由账号池管理，请使用对应账号上的“退出 Codex”按钮');
+  }
+  const processPid = findRunningCodexDesktopPid();
+  if (!processPid) return;
+  try { process.kill(processPid, 'SIGTERM'); }
+  catch (error) { throw new Error(`无法关闭外部 Codex：${error.message}`); }
+  spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', `Wait-Process -Id ${processPid} -Timeout 8 -ErrorAction SilentlyContinue`], {
+    encoding: 'utf8', windowsHide: true, timeout: 10_000,
+  });
+  if (isProcessAlive(processPid)) throw new Error('Codex 尚未退出，请关闭窗口后重试');
+  audit('codex.desktop.external-stopped', { result: 'user-request' });
+}
+
 function cancelPendingCodexLogin(accountId) {
   const pending = pendingCodexLogins.get(accountId);
   if (!pending) return;
@@ -653,6 +671,17 @@ const server = http.createServer(async (request, response) => {
       });
     }
 
+    if (request.method === 'POST' && url.pathname === '/api/codex/quit-external') {
+      const body = await readBody(request);
+      requireOperator(body.operator);
+      try {
+        stopExternalCodexDesktop();
+        return sendJson(response, 200, { ok: true });
+      } catch (error) {
+        return sendError(response, 409, error.message);
+      }
+    }
+
     if (request.method === 'POST' && url.pathname === '/api/accounts') {
       const body = await readBody(request);
       const operator = requireOperator(body.operator);
@@ -837,8 +866,8 @@ const server = http.createServer(async (request, response) => {
 server.listen(settings.port, '127.0.0.1', () => {
   fs.writeFileSync(PID_FILE, String(process.pid));
   const url = `http://127.0.0.1:${settings.port}/?token=${encodeURIComponent(accessToken)}`;
-  if (process.env.CODEX_MANAGER_NO_OPEN === '1') console.log('\nCodex Switchboard 已启动（测试模式）。\n');
-  else console.log(`\nCodex Switchboard 已启动：\n${url}\n`);
+  if (process.env.CODEX_MANAGER_NO_OPEN === '1') console.log('\nCodex Navo 已启动（测试模式）。\n');
+  else console.log(`\nCodex Navo 已启动：\n${url}\n`);
   console.log('此窗口用于运行本地服务，使用完毕后可以关闭。');
   if (process.env.CODEX_MANAGER_NO_OPEN !== '1') {
     const child = spawn('explorer.exe', [url], { detached: true, stdio: 'ignore' });

@@ -28,7 +28,7 @@ git config --local user.email
 ## 2. 在 GitHub 创建空仓库
 
 1. 打开 <https://github.com/new>。
-2. Repository name 填写 `codex-switchboard`。
+2. Repository name 填写 `codex-navo`。
 3. Description 可填写：`A local Windows account environment switcher for Codex.`
 4. Visibility 选择 **Public**。
 5. 不要勾选 README、`.gitignore` 或 License；本地已经准备好了这些文件。
@@ -78,7 +78,7 @@ git branch -M main
 把 `<your-name>` 替换为你的 GitHub 用户名：
 
 ```powershell
-git remote add origin https://github.com/<your-name>/codex-switchboard.git
+git remote add origin https://github.com/<your-name>/codex-navo.git
 git remote -v
 git push -u origin main
 ```
@@ -105,7 +105,7 @@ GitHub 不接受账户密码进行 Git 推送。Windows 通常会自动打开 Gi
 
 1. 打开仓库右侧 **Releases** → **Draft a new release**。
 2. 点击 **Choose a tag**，输入 `v1.0.0` 并创建新标签。
-3. Release title 填写 `Codex Switchboard v1.0.0`。
+3. Release title 填写 `Codex Navo v1.0.0`。
 4. 上传 `release/Codex-Switchboard-v1.0.0-windows-x64.zip`。
 5. Release notes 可参考根目录的 [CHANGELOG.md](../CHANGELOG.md)。
 6. 在说明中附上 ZIP 的 SHA-256。
@@ -140,7 +140,13 @@ npm audit --audit-level=high
 npm run build:desktop
 ```
 
-然后更新版本号和 `CHANGELOG.md`，提交源码，再创建新标签和 Release。不要复用旧 ZIP，也不要忘记重新计算 SHA-256。
+然后更新版本号和 `CHANGELOG.md`，提交源码，再创建新标签和 Release。自动更新版本必须把 `release/auto-update/` 中以下文件一起上传：
+
+- `Codex-Switchboard-Setup-<版本>-windows-x64.exe`
+- 对应的 `.blockmap`
+- `latest.yml`
+
+Release 不能保持 Draft，否则客户端无法发现更新。不要复用旧安装包，也不要忘记重新计算 SHA-256。安装包版本、Git 标签和 Release 版本必须一致。
 
 ## 10. 如果不小心上传了凭据
 

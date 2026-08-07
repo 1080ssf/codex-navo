@@ -6,12 +6,120 @@ const elements = {
   form: document.querySelector('#account-form'),
   toast: document.querySelector('#toast'),
   currentCodex: document.querySelector('#current-codex'),
+  closeExternalCodex: document.querySelector('#close-external-codex'),
   sortMenu: document.querySelector('#sort-menu'),
   sortTrigger: document.querySelector('#sort-trigger'),
   sortLabel: document.querySelector('#sort-label'),
   sortPopover: document.querySelector('#sort-popover'),
   refreshAllQuotas: document.querySelector('#refresh-all-quotas'),
+  updateChip: document.querySelector('#update-chip'),
+  updateDialog: document.querySelector('#update-dialog'),
+  updateDialogTitle: document.querySelector('#update-dialog-title'),
+  updateDialogCopy: document.querySelector('#update-dialog-copy'),
+  updateProgress: document.querySelector('#update-progress'),
+  updateProgressBar: document.querySelector('#update-progress-bar'),
+  updateProgressLabel: document.querySelector('#update-progress-label'),
+  updateNotes: document.querySelector('#update-notes'),
+  updatePrimaryAction: document.querySelector('#update-primary-action'),
 };
+
+let applicationUpdate = {
+  status: 'idle',
+  currentVersion: '',
+  availableVersion: '',
+  percent: 0,
+  releaseNotes: '',
+  error: '',
+};
+
+function renderApplicationUpdate() {
+  if (!window.codexUpdater) {
+    elements.updateChip.hidden = true;
+    return;
+  }
+
+  const status = applicationUpdate.status;
+  const currentVersion = applicationUpdate.currentVersion || '';
+  const availableVersion = applicationUpdate.availableVersion || '';
+  const percent = Math.max(0, Math.min(100, Number(applicationUpdate.percent) || 0));
+  const labels = {
+    idle: currentVersion ? `v${currentVersion}` : '检查更新',
+    development: currentVersion ? `v${currentVersion}` : '开发模式',
+    checking: '正在检查',
+    current: currentVersion ? `v${currentVersion}` : '已是最新版',
+    available: `v${availableVersion} 可更新`,
+    downloading: `下载 ${percent}%`,
+    downloaded: '重启更新',
+    error: '更新检查失败',
+  };
+
+  elements.updateChip.hidden = false;
+  elements.updateChip.className = `update-chip ${status}`;
+  elements.updateChip.querySelector('span').textContent = labels[status] || labels.idle;
+  elements.updateChip.setAttribute('aria-label', status === 'available' || status === 'downloaded'
+    ? '打开应用更新'
+    : '检查应用更新');
+
+  elements.updateDialogTitle.textContent = status === 'available'
+    ? `发现 v${availableVersion}`
+    : status === 'downloaded'
+      ? '更新已准备好'
+      : status === 'error'
+        ? '更新检查失败'
+        : '应用更新';
+  elements.updateDialogCopy.textContent = status === 'available'
+    ? `当前版本 v${currentVersion}。下载完成后由你决定何时重启安装。`
+    : status === 'downloading'
+      ? '正在后台下载更新，账号数据和登录环境不会被覆盖。'
+      : status === 'downloaded'
+        ? '更新已经下载完成。重启应用即可安装，正在运行的 Codex 不会被强制关闭。'
+        : status === 'current'
+          ? `当前 v${currentVersion} 已是最新版。`
+          : status === 'development'
+            ? '开发模式不会连接更新服务，请安装本地构建的 Setup 版本测试。'
+            : status === 'error'
+              ? (applicationUpdate.error || '无法连接更新服务，请稍后重试。')
+              : '检查 GitHub Releases 是否有新版本。';
+
+  elements.updateProgress.hidden = status !== 'downloading';
+  elements.updateProgressBar.style.width = `${percent}%`;
+  elements.updateProgressLabel.textContent = `${percent}%`;
+  const notes = String(applicationUpdate.releaseNotes || '').trim();
+  elements.updateNotes.hidden = !(notes && status === 'available');
+  elements.updateNotes.textContent = notes;
+
+  elements.updatePrimaryAction.hidden = status === 'downloading';
+  elements.updatePrimaryAction.disabled = status === 'checking';
+  elements.updatePrimaryAction.dataset.action = status === 'available'
+    ? 'download'
+    : status === 'downloaded'
+      ? 'install'
+      : 'check';
+  elements.updatePrimaryAction.textContent = status === 'available'
+    ? '下载更新'
+    : status === 'downloaded'
+      ? '重启并安装'
+      : status === 'checking'
+        ? '正在检查'
+        : '重新检查';
+}
+
+async function initializeApplicationUpdater() {
+  if (!window.codexUpdater) return;
+  try {
+    applicationUpdate = await window.codexUpdater.getState();
+    renderApplicationUpdate();
+    window.codexUpdater.onState((nextState) => {
+      applicationUpdate = nextState;
+      renderApplicationUpdate();
+      if (nextState.status === 'available' || nextState.status === 'downloaded') {
+        elements.updateDialog.showModal();
+      }
+    });
+  } catch {
+    elements.updateChip.hidden = true;
+  }
+}
 
 const sortStorageKey = 'codex-manager-account-sort';
 const sortLabels = {
@@ -178,12 +286,15 @@ function render() {
   const occupied = state.accounts.filter((account) => account.lease).length;
   elements.summary.innerHTML = `<span><strong>${state.accounts.length}</strong> 个账号</span><i aria-hidden="true"></i><span class="${occupied ? 'has-active' : ''}"><strong>${occupied}</strong> 使用中</span>`;
   const activeAccount = state.accounts.find((account) => account.codexActive);
+  const externalCodexRunning = Boolean(state.codexRunning && !activeAccount);
   elements.currentCodex.classList.toggle('active', Boolean(activeAccount));
+  elements.currentCodex.classList.toggle('external', externalCodexRunning);
+  elements.closeExternalCodex.hidden = !externalCodexRunning;
   elements.currentCodex.querySelector('span').textContent = activeAccount
     ? `当前 Codex · ${activeAccount.label}`
-    : state.codexRunning
+    : externalCodexRunning
       ? '外部 Codex 正在运行'
-      : 'Codex 当前未启动';
+      : 'Codex 未启动';
 
   if (!state.accounts.length) {
     elements.accounts.classList.add('is-empty');
@@ -330,6 +441,22 @@ elements.accounts.addEventListener('click', async (event) => {
 });
 
 document.querySelector('#add-account').addEventListener('click', () => elements.dialog.showModal());
+elements.closeExternalCodex.addEventListener('click', async () => {
+  if (!confirm('关闭外部 Codex？正在进行的任务会被中断。')) return;
+  elements.closeExternalCodex.disabled = true;
+  try {
+    await api('/api/codex/quit-external', {
+      method: 'POST',
+      body: JSON.stringify({ operator: operator() }),
+    });
+    showToast('外部 Codex 已关闭');
+    await refresh();
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    elements.closeExternalCodex.disabled = false;
+  }
+});
 elements.refreshAllQuotas.addEventListener('click', async () => {
   const accounts = state.accounts.filter((account) => account.codexInitialized);
   if (!accounts.length) {
@@ -375,6 +502,28 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+elements.updateChip.addEventListener('click', async () => {
+  if (!window.codexUpdater) return;
+  if (['available', 'downloading', 'downloaded', 'error', 'development'].includes(applicationUpdate.status)) {
+    elements.updateDialog.showModal();
+    return;
+  }
+  applicationUpdate = await window.codexUpdater.check();
+  renderApplicationUpdate();
+  elements.updateDialog.showModal();
+});
+
+elements.updatePrimaryAction.addEventListener('click', async () => {
+  if (!window.codexUpdater) return;
+  const action = elements.updatePrimaryAction.dataset.action;
+  if (action === 'download') applicationUpdate = await window.codexUpdater.download();
+  else if (action === 'install') {
+    await window.codexUpdater.install();
+    return;
+  } else applicationUpdate = await window.codexUpdater.check();
+  renderApplicationUpdate();
+});
+
 elements.form.addEventListener('submit', async (event) => {
   if (event.submitter?.value === 'cancel') return;
   event.preventDefault();
@@ -400,5 +549,6 @@ elements.form.addEventListener('submit', async (event) => {
 });
 
 syncSortMenu();
+initializeApplicationUpdater();
 refresh();
 state.timer = setInterval(refresh, 5_000);

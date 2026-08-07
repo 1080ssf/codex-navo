@@ -1,6 +1,6 @@
 # Security policy
 
-Codex Switchboard handles local browser profiles and Codex authentication files. Treat every runtime profile as a credential container.
+Codex Navo handles local browser profiles and Codex authentication files. Treat every runtime profile as a credential container.
 
 ## Never include in a report
 

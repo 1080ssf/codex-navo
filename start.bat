@@ -1,5 +1,5 @@
 @echo off
-title Codex Switchboard
+title Codex Navo
 cd /d "%~dp0"
 where node >nul 2>nul
 if errorlevel 1 (
