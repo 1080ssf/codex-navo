@@ -1,0 +1,120 @@
+# Codex Switchboard
+
+面向 Windows 的本地 Codex 账号环境切换器。每个账号使用独立的 Chrome 或 Edge 浏览器配置与 Codex 认证目录；切换账号时继续使用同一套本地项目和任务数据。
+
+> [!IMPORTANT]
+> Codex Switchboard 不是 OpenAI 官方产品，与 OpenAI 无隶属或背书关系。请只管理你有权使用的账号，并遵守适用的服务条款、订阅规则和组织政策。
+
+## 下载与安装
+
+普通用户建议从仓库右侧的 **Releases** 下载：
+
+1. 下载 `Codex-Switchboard-v1.0.0-windows-x64.zip`。
+2. 解压完整压缩包；不要只取出单个 EXE。
+3. 运行 `Codex 账号切换.exe`。
+4. 如果 Windows SmartScreen 提示“未知发布者”，请先核对 Release 页面提供的 SHA-256；公开分发版本目前没有代码签名。
+
+便携版已经包含 Electron 和本地服务运行时，不需要安装 Node.js。需要预先安装：
+
+- Windows 11 x64
+- Google Chrome 或 Microsoft Edge
+- Codex 桌面应用
+- Codex CLI（用于首次设备授权）
+
+## 第一次使用
+
+1. 点击“添加账号”，填写本机可识别的账号名称。
+2. 在自动打开的独立浏览器中完成 ChatGPT 官方登录。
+3. 回到应用，点击“已登录，继续授权”，完成 Codex 官方设备授权。
+4. 授权完成后，账号进入账号池。
+5. 以后可以直接打开该账号网页端，或切换并启动 Codex 桌面端。
+
+关闭主窗口不会退出程序，而是隐藏到 Windows 系统托盘。点击托盘图标可重新显示；右键托盘并选择“退出应用”才会彻底关闭本地服务。
+
+## 主要功能
+
+- 为每个账号维护独立浏览器配置目录
+- 只使用 OpenAI 官方网页和设备授权流程
+- 切换 Codex 桌面端账号，同时保留本机项目与任务
+- 显示套餐、Codex 点数和周额度
+- 当前账号每分钟、其他账号每五分钟自动刷新额度
+- 手动刷新单个账号或全部账号额度
+- 按当前账号、剩余额度、名称或添加时间排序
+- 管理服务只监听 `127.0.0.1`
+- 关闭窗口后驻留 Windows 系统托盘
+
+## 数据与隐私
+
+应用运行后会在程序目录生成：
+
+| 路径 | 内容 | 是否敏感 |
+| --- | --- | --- |
+| `config/accounts.json` | 账号显示名称、邮箱提示和额度缓存 | 是 |
+| `config/settings.json` | 本机设置和可选的绝对路径 | 可能 |
+| `profiles/browser/` | 独立浏览器配置，可能包含有效 Cookie | 高度敏感 |
+| `profiles/codex/` | 每个账号的 Codex `auth.json` | 高度敏感 |
+| `data/` | 本地访问令牌、租约、日志和状态 | 高度敏感 |
+
+上述路径均已加入 `.gitignore`。不要将它们上传到 Git、网盘、Issue、聊天工具或公开截图中。本工具不会导出 Cookie、密码或令牌，也不会绕过密码、验证码、安全检查或服务端风控。
+
+> [!WARNING]
+> Codex 桌面端是单实例应用。切换或退出账号前，请先让正在运行的任务安全结束，否则任务可能被中断。
+
+## 从源码运行
+
+开发环境需要 Node.js 20 或更高版本：
+
+```powershell
+git clone https://github.com/1080ssf/codex-switchboard.git
+cd codex-switchboard
+npm install
+Copy-Item config/settings.example.json config/settings.json
+npm run dev
+```
+
+也可以双击 `启动桌面开发版.bat`。
+
+`config/settings.json` 示例：
+
+```json
+{
+  "port": 47821,
+  "operators": [],
+  "browserExecutable": "",
+  "codexDesktopExecutable": "",
+  "codexCliExecutable": "",
+  "browserStartUrl": "https://chatgpt.com/",
+  "mockLaunch": false
+}
+```
+
+路径留空时会自动探测。`mockLaunch` 仅用于测试，不会真的打开浏览器或 Codex。
+
+## 测试与构建
+
+```powershell
+npm test
+npm run test:smoke
+npm audit --audit-level=high
+npm run build:desktop
+```
+
+便携版输出到 `release/`。该目录不会进入 Git，生成的 ZIP 应作为 GitHub Release 附件发布。
+
+## 已知限制
+
+- 当前只针对 Windows 11 x64 测试。
+- 未签名的 EXE 可能触发 SmartScreen。
+- 浏览器或 Codex 会话失效后，需要重新完成官方认证。
+- 不支持把有效登录状态无验证迁移到另一台电脑。
+- 不支持同时运行多个 Codex 桌面端实例。
+
+## 参与和安全报告
+
+- 发现普通问题：提交 GitHub Issue，但不要附带账号、日志、认证文件或未打码截图。
+- 发现安全问题：优先使用 GitHub Private Vulnerability Reporting，详见 [SECURITY.md](SECURITY.md)。
+- 第一次发布本项目：按照 [GitHub 首次发布指南](docs/PUBLISHING.md) 操作。
+
+## 许可证
+
+[MIT License](LICENSE)

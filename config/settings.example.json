@@ -1,0 +1,9 @@
+{
+  "port": 47821,
+  "operators": [],
+  "browserExecutable": "",
+  "codexDesktopExecutable": "",
+  "codexCliExecutable": "",
+  "browserStartUrl": "https://chatgpt.com/",
+  "mockLaunch": false
+}

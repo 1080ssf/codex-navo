@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codex 账号切换</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="回到账号列表">
+          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="brand-copy"><b><em>Codex</em> 账号切换</b><small>本地账号环境</small></span>
+        </a>
+        <div class="current-codex" id="current-codex"><i></i><span>Codex 未由账号池启动</span></div>
+      </header>
+
+      <main>
+        <section class="accounts-section" aria-labelledby="accounts-title">
+          <div class="section-heading">
+            <div class="section-title">
+              <h1 id="accounts-title">账号池</h1>
+              <p id="account-summary">正在读取本地状态…</p>
+            </div>
+            <div class="heading-actions">
+              <button class="refresh-all-button" id="refresh-all-quotas" type="button" data-tooltip="刷新全部账号额度" aria-label="刷新全部账号额度">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.1 8A7.5 7.5 0 0 0 6.4 5.4L4.5 7.2"></path><path d="M4.5 3.8v3.4h3.4"></path><path d="M4.9 16A7.5 7.5 0 0 0 17.6 18.6l1.9-1.8"></path><path d="M19.5 20.2v-3.4h-3.4"></path></svg>
+              </button>
+              <div class="sort-menu" id="sort-menu">
+                <button class="sort-trigger" id="sort-trigger" type="button" aria-haspopup="menu" aria-expanded="false">
+                  <span class="sort-glyph" aria-hidden="true"><i></i><i></i><i></i></span>
+                  <span id="sort-label">当前账号优先</span>
+                  <i class="sort-chevron" aria-hidden="true"></i>
+                </button>
+                <div class="sort-popover" id="sort-popover" role="menu" aria-label="账号排序方式" hidden>
+                  <div class="sort-popover-title">排序方式</div>
+                  <button type="button" role="menuitemradio" data-sort="current"><span>当前账号优先</span><i>置顶使用中账号</i><b>✓</b></button>
+                  <button type="button" role="menuitemradio" data-sort="quota-desc"><span>剩余额度：高到低</span><i>优先选择额度充足账号</i><b>✓</b></button>
+                  <button type="button" role="menuitemradio" data-sort="quota-asc"><span>剩余额度：低到高</span><i>快速找到额度较低账号</i><b>✓</b></button>
+                  <button type="button" role="menuitemradio" data-sort="name"><span>账号名称</span><i>按名称顺序排列</i><b>✓</b></button>
+                  <button type="button" role="menuitemradio" data-sort="created"><span>最近添加</span><i>新账号排在前面</i><b>✓</b></button>
+                </div>
+              </div>
+              <button class="primary-button" id="add-account" type="button"><span>＋</span>添加账号</button>
+            </div>
+          </div>
+          <div id="accounts" class="account-list" aria-live="polite"></div>
+        </section>
+      </main>
+
+    </div>
+
+    <dialog id="account-dialog">
+      <form method="dialog" id="account-form">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">NEW TRACK</p>
+            <h2>添加账号环境</h2>
+          </div>
+          <button class="icon-button" value="cancel" aria-label="关闭" type="submit" formnovalidate>×</button>
+        </div>
+        <p class="dialog-copy">创建后会先打开该账号的专属浏览器。完成 ChatGPT 网页登录后，回到这里继续 Codex 授权。</p>
+        <label>账号名称<input name="label" required maxlength="60" placeholder="例如：设计组 01"></label>
+        <label>邮箱提示<input name="emailHint" maxlength="100" placeholder="例如：de***@company.com"></label>
+        <label>浏览器<select name="browserType"><option value="edge">Microsoft Edge</option><option value="chrome">Google Chrome</option></select></label>
+        <div class="dialog-actions">
+          <button class="secondary-button" value="cancel" type="submit" formnovalidate>取消</button>
+          <button class="primary-button" value="default" type="submit">创建账号环境</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

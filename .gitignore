@@ -1,0 +1,23 @@
+# Dependencies and build output
+node_modules/
+desktop-build/
+release/
+
+# Local configuration may contain usernames or absolute paths
+config/settings.json
+config/accounts.json
+
+# Browser profiles and Codex authentication
+profiles/
+
+# Runtime credentials, state, logs, and screenshots
+data/
+
+# Temporary and editor files
+*.tmp
+*.log
+.codex-schema-probe/
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

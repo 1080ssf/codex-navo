@@ -1,0 +1,16 @@
+{
+  "name": "codex-switchboard",
+  "private": true,
+  "version": "1.0.0",
+  "devDependencies": {
+    "@electron/packager": "^18.3.6",
+    "electron": "^43.2.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "electron desktop-src",
+    "test": "node --test test/*.test.js",
+    "test:smoke": "node test/smoke.js",
+    "build:desktop": "node scripts/build-desktop.js"
+  }
+}
