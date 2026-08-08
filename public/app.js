@@ -159,15 +159,26 @@ function formatPlan(planType) {
   return labels[normalized] || normalized.toUpperCase();
 }
 
-function formatCreditPoints(credits) {
+function creditQuantity(credits) {
+  const candidate = credits?.quantity ?? credits?.points ?? credits?.rawBalance;
+  const numeric = Number(candidate);
+  return Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : null;
+}
+
+function formatCredits(credits) {
   if (!credits) return '';
-  if (credits.unlimited) return '点数 ∞';
-  if (credits.points == null || credits.points === '') return '';
-  const numeric = Number(credits.points);
-  const points = Number.isFinite(numeric)
-    ? numeric.toLocaleString('en-US', { minimumFractionDigits: numeric % 1 ? 2 : 0, maximumFractionDigits: 2 })
-    : String(credits.points);
-  return `点数 ${points}`;
+  if (credits.unlimited) return 'Credits ∞';
+  const quantity = creditQuantity(credits);
+  if (quantity == null) return '';
+  return `Credits ${quantity.toLocaleString('en-US')}`;
+}
+
+function formatUsdBalance(credits) {
+  if (!credits || credits.unlimited) return '';
+  const amount = Number(credits.usdBalance);
+  return Number.isFinite(amount)
+    ? `US$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : '';
 }
 
 function weeklyRemaining(account) {
@@ -343,9 +354,13 @@ function render() {
     const planBadge = planType
       ? `<span class="plan-badge plan-${escapeHtml(String(planType).toLowerCase())}">${escapeHtml(formatPlan(planType))}</span>`
       : '';
-    const creditPoints = formatCreditPoints(account.quota?.credits);
-    const creditBadge = creditPoints
-      ? `<span class="credit-badge" title="Codex Credits 可用点数">${escapeHtml(creditPoints)}</span>`
+    const creditText = formatCredits(account.quota?.credits);
+    const creditBadge = creditText
+      ? `<span class="credit-badge" title="Codex 返回的原始 Credits">${escapeHtml(creditText)}</span>`
+      : '';
+    const usdBalance = formatUsdBalance(account.quota?.credits);
+    const balanceBadge = usdBalance
+      ? `<span class="balance-badge" title="按 Codex 官方美国定价 US$0.04/Credit 换算">余额 ${escapeHtml(usdBalance)}</span>`
       : '';
     const browserOccupied = Boolean(account.lease && !account.codexActive && account.lease.launchType === 'browser');
     const sessionBadge = browserOccupied
@@ -372,7 +387,7 @@ function render() {
       <div class="account-overview">
         <div class="account-identity">
           <div class="identity-title"><h3>${escapeHtml(account.label)}</h3></div>
-          ${(planBadge || creditBadge || sessionBadge) ? `<div class="identity-badges">${planBadge}${creditBadge}${sessionBadge}</div>` : ''}
+          ${(planBadge || creditBadge || balanceBadge || sessionBadge) ? `<div class="identity-badges">${planBadge}${creditBadge}${balanceBadge}${sessionBadge}</div>` : ''}
           ${secondaryIdentity}
         </div>
       </div>
@@ -406,7 +421,7 @@ async function refreshStaleQuotas() {
   const now = Date.now();
   const due = state.accounts.filter((account) => {
     if (!account.codexInitialized) return false;
-    if (!account.quota?.credits || !Object.prototype.hasOwnProperty.call(account.quota.credits, 'points')) return true;
+    if (!account.quota?.credits || creditQuantity(account.quota.credits) == null) return true;
     const interval = account.codexActive ? 60_000 : 5 * 60_000;
     const lastChecked = account.quota?.refreshedAt || account.quotaCheckedAt;
     return !lastChecked || Date.parse(lastChecked) <= now - interval;

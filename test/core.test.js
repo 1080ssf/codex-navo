@@ -51,6 +51,13 @@ test('额度窗口会转换为可用百分比并优先显示周额度', () => {
   assert.equal(quota.windows[0].label, '周额度');
   assert.equal(quota.windows[0].remainingPercent, 88);
   assert.equal(quota.windows[1].remainingPercent, 65);
-  assert.deepEqual(quota.credits, { hasCredits: true, unlimited: false, points: '12.50' });
+  assert.deepEqual(quota.credits, {
+    hasCredits: true,
+    unlimited: false,
+    quantity: 12,
+    rawBalance: '12.50',
+    usdBalance: '0.48',
+    usdPerCredit: 0.04,
+  });
   assert.equal(windowLabel({ windowDurationMins: 300 }), '5 小时额度');
 });

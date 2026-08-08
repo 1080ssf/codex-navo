@@ -208,6 +208,7 @@ h1 { font-size: clamp(30px, 3vw, 38px); line-height: 1; letter-spacing: -.035em;
 .plan-badge.plan-team, .plan-badge.plan-business, .plan-badge.plan-enterprise { color: #2459a9; border-color: #bfd2ee; background: #edf5ff; }
 .plan-badge.plan-free { color: #65758a; border-color: #d4dce6; background: #f3f5f8; }
 .credit-badge { flex: 0 0 auto; padding: 3px 8px; border: 1px solid #bfd4ee; border-radius: 999px; color: #245a9f; background: #eef6ff; font: 700 10px/1 "Cascadia Code", monospace; }
+.balance-badge { flex: 0 0 auto; padding: 3px 8px; border: 1px solid #c8d5e7; border-radius: 999px; color: #334e73; background: #f5f8fc; font: 700 10px/1 "Cascadia Code", monospace; }
 .session-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border: 1px solid #d9c39c; border-radius: 999px; color: #8a5b16; background: #fff9ee; font-size: 10px; font-weight: 650; }
 .session-badge i { width: 5px; height: 5px; border-radius: 50%; background: #d99a2b; box-shadow: 0 0 0 3px rgba(217,154,43,.12); }
 .account-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: nowrap; gap: 8px; }
