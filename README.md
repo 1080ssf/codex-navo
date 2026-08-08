@@ -5,6 +5,12 @@
 > [!IMPORTANT]
 > Codex Navo 不是 OpenAI 官方产品，与 OpenAI 无隶属或背书关系。请只管理你有权使用的账号，并遵守适用的服务条款、订阅规则和组织政策。
 
+## 界面预览
+
+![Codex Navo 账号池](docs/images/codex-navo-account-pool.png)
+
+![Codex Navo 本机用量](docs/images/codex-navo-usage-dashboard.png)
+
 ## 下载与安装
 
 普通用户建议从仓库右侧的 **Releases** 下载最新安装版：
@@ -27,9 +33,15 @@
 
 1. 点击“添加账号”，填写本机可识别的账号名称。
 2. 在自动打开的独立浏览器中完成 ChatGPT 官方登录。
-3. 回到应用，点击“已登录，继续授权”，完成 Codex 官方设备授权。
-4. 授权完成后，账号进入账号池。
-5. 以后可以直接打开该账号网页端，或切换并启动 Codex 桌面端。
+3. 在 ChatGPT 网页端依次进入 **设置 → 账户安全与登录**，开启 **“为 Codex 启用设备代码授权”**。
+4. 回到应用，点击“已登录，继续授权”，确认上述开关已开启，再完成 Codex 官方设备授权。
+5. 授权完成后，账号进入账号池。
+6. 以后可以直接打开该账号网页端，或切换并启动 Codex 桌面端。
+
+> [!IMPORTANT]
+> 必须先开启“为 Codex 启用设备代码授权”，再继续 Codex 授权。未开启时，官方设备授权流程可能无法继续或返回错误。
+
+![在 ChatGPT 中开启 Codex 设备代码授权](docs/images/enable-codex-device-auth.png)
 
 关闭主窗口不会退出程序，而是隐藏到 Windows 系统托盘。点击托盘图标可重新显示；右键托盘并选择“退出应用”才会彻底关闭本地服务。
 
