@@ -4,9 +4,6 @@ const elements = {
   summary: document.querySelector('#account-summary'),
   dialog: document.querySelector('#account-dialog'),
   form: document.querySelector('#account-form'),
-  deviceAuthDialog: document.querySelector('#device-auth-dialog'),
-  deviceAuthForm: document.querySelector('#device-auth-form'),
-  deviceAuthAccount: document.querySelector('#device-auth-account'),
   toast: document.querySelector('#toast'),
   currentCodex: document.querySelector('#current-codex'),
   closeExternalCodex: document.querySelector('#close-external-codex'),
@@ -36,7 +33,6 @@ const elements = {
   usageRange: document.querySelector('#usage-range'),
 };
 
-let pendingAuthorizationAccountId = '';
 
 let applicationUpdate = {
   status: 'idle',
@@ -372,9 +368,7 @@ function renderQuota(account) {
     return `<div class="quota-panel quota-unavailable quota-error"><div class="quota-empty-title">登录已失效</div><p>重新授权后会自动读取额度</p></div>`;
   }
   if (!account.codexInitialized) {
-    return account.setupStage === 'web-login'
-      ? `<div class="quota-panel quota-unavailable"><div class="quota-empty-title">等待网页登录</div><p>先在独立浏览器登录 ChatGPT，再继续 Codex 授权</p></div>`
-      : `<div class="quota-panel quota-unavailable"><div class="quota-empty-title">等待 Codex 授权</div><p>设备授权完成后会自动入池并读取额度</p></div>`;
+    return `<div class="quota-panel quota-unavailable"><div class="quota-empty-title">等待登录授权</div><p>在独立浏览器完成官方流程后会自动入池</p></div>`;
   }
   if (!account.quota?.windows?.length) {
     return account.quotaError
@@ -422,20 +416,20 @@ function render() {
   elements.accounts.innerHTML = sortedAccounts(activeAccount).map((account) => {
     const status = account.enabled === false ? 'disabled' : account.lease || account.codexActive ? 'occupied' : 'free';
     const codexLoginPending = account.codexLogin && ['starting', 'waiting'].includes(account.codexLogin.status);
-    const setupSteps = !account.codexInitialized ? `<div class="setup-steps" aria-label="账号入池进度">
-      <span class="${account.setupStage === 'web-login' ? 'active' : 'done'}"><i>1</i>网页登录</span>
-      <b aria-hidden="true">→</b>
-      <span class="${account.setupStage === 'device-auth' ? 'active' : ''}"><i>2</i>Codex 授权</span>
+    const setupSteps = !account.codexInitialized ? `<div class="setup-steps one-step" aria-label="账号入池进度">
+      <span class="active"><i>1</i>${account.setupStage === 'device-auth' ? '设备代码授权' : '登录并授权'}</span>
     </div>` : '';
     const codexLoginPanel = account.codexLogin ? `<div class="codex-login-panel ${account.codexLogin.status === 'error' ? 'error' : ''}">
       ${setupSteps}
       ${account.codexLogin.status === 'error'
-        ? `<strong>Codex 授权未完成</strong><span>${escapeHtml(account.codexLogin.error)}</span>`
-        : `<strong>请在同一个独立浏览器中完成 Codex 授权</strong><span>设备验证码</span><code>${escapeHtml(account.codexLogin.userCode || '正在获取…')}</code><small>授权完成后会自动入池。</small>`}
+        ? `<strong>登录授权未完成</strong><span>${escapeHtml(account.codexLogin.error)}</span><button class="login-fallback" data-action="authorize-device" type="button">改用设备代码</button>`
+        : account.codexLogin.flow === 'device'
+          ? `<strong>请在独立浏览器中完成设备代码授权</strong><span>设备验证码</span><code>${escapeHtml(account.codexLogin.userCode || '正在获取…')}</code><small>备用流程需要先在 ChatGPT 设置中开启设备代码授权。</small>`
+          : `<strong>请在独立浏览器中完成登录与授权</strong><small>这是一个连续的官方流程，完成后会自动入池，无需开启设备代码授权。</small>`}
     </div>` : !account.codexInitialized ? `<div class="codex-login-panel setup-ready">
       ${setupSteps}
-      <strong>${account.setupStage === 'web-login' ? '先完成 ChatGPT 网页登录' : 'Codex 授权尚未完成'}</strong>
-      <small>${account.setupStage === 'web-login' ? '确认网页右上角显示目标账号后，再点击“已登录，继续授权”。' : '点击“重试 Codex 授权”重新打开设备授权页。'}</small>
+      <strong>登录授权尚未完成</strong>
+      <small>点击“登录并授权”，在该账号的独立 Chrome 环境中一次完成官方流程。</small>
     </div>` : '';
     const secondaryIdentity = account.emailHint && account.emailHint !== account.label
       ? `<p>${escapeHtml(account.emailHint)}</p>`
@@ -458,7 +452,7 @@ function render() {
       : '';
     let codexAction;
     if (!account.codexInitialized) {
-      codexAction = `<button class="action-primary action-codex" data-action="authorize" ${codexLoginPending ? 'disabled' : ''}>${codexLoginPending ? '等待 Codex 授权' : account.setupStage === 'web-login' ? '已登录，继续授权' : account.quotaErrorCode === 'auth_expired' ? '重新授权' : '重试 Codex 授权'}</button>`;
+      codexAction = `<button class="action-primary action-codex" data-action="authorize" ${codexLoginPending ? 'disabled' : ''}>${codexLoginPending ? '等待登录授权' : account.quotaErrorCode === 'auth_expired' ? '重新登录授权' : '登录并授权'}</button>`;
     } else if (account.codexActive) {
       codexAction = '<button class="action-primary action-exit" data-action="quit-codex">退出 Codex</button>';
     } else if (externalCodexRunning) {
@@ -565,15 +559,15 @@ elements.accounts.addEventListener('click', async (event) => {
     } else if (action === 'wake') {
       await api(`/api/accounts/${card.dataset.id}/wake`, { method: 'POST', body: JSON.stringify({ operator: currentOperator }) });
       showToast('账号已唤醒，额度状态已同步');
-    } else if (action === 'authorize') {
-      const account = state.accounts.find((item) => item.id === card.dataset.id);
-      pendingAuthorizationAccountId = card.dataset.id;
-      elements.deviceAuthAccount.textContent = account
-        ? `当前准备授权：${account.label}`
-        : '请确认独立浏览器中显示的是目标账号';
-      elements.deviceAuthForm.reset();
-      elements.deviceAuthDialog.showModal();
-      return;
+    } else if (action === 'authorize' || action === 'authorize-device') {
+      if (action === 'authorize-device' && !confirm('设备代码是备用流程。请先在 ChatGPT 设置 → 账户安全与登录中开启“为 Codex 启用设备代码授权”。继续吗？')) return;
+      await api(`/api/accounts/${card.dataset.id}/${action}`, {
+        method: 'POST',
+        body: JSON.stringify({ operator: currentOperator }),
+      });
+      showToast(action === 'authorize-device'
+        ? '已打开设备代码授权页，完成后账号会自动入池'
+        : '已打开官方登录授权页，完成后账号会自动入池');
     } else if (action === 'quit-codex') {
       if (!confirm('退出当前 Codex？正在进行的任务会被中断。')) return;
       await api(`/api/accounts/${card.dataset.id}/quit-codex`, { method: 'POST', body: JSON.stringify({ operator: currentOperator }) });
@@ -841,39 +835,10 @@ elements.form.addEventListener('submit', async (event) => {
     });
     elements.form.reset();
     elements.dialog.close();
-    showToast('账号已创建，请先在专属浏览器完成 ChatGPT 网页登录');
+    showToast('账号已创建，请在独立浏览器中完成登录与授权');
     await refresh();
   } catch (error) {
     showToast(error.message, true);
-  }
-});
-
-elements.deviceAuthForm.addEventListener('submit', async (event) => {
-  if (event.submitter?.value === 'cancel') {
-    pendingAuthorizationAccountId = '';
-    return;
-  }
-  event.preventDefault();
-  if (!pendingAuthorizationAccountId) {
-    elements.deviceAuthDialog.close();
-    return;
-  }
-  const accountId = pendingAuthorizationAccountId;
-  const submitter = event.submitter;
-  submitter.disabled = true;
-  try {
-    await api(`/api/accounts/${accountId}/authorize`, {
-      method: 'POST',
-      body: JSON.stringify({ operator: operator() }),
-    });
-    pendingAuthorizationAccountId = '';
-    elements.deviceAuthDialog.close();
-    showToast('已打开 Codex 官方授权页，完成后账号会自动入池');
-    await refresh();
-  } catch (error) {
-    showToast(error.message, true);
-  } finally {
-    submitter.disabled = false;
   }
 });
 
@@ -881,5 +846,5 @@ syncSortMenu();
 initializeApplicationUpdater();
 refresh();
 state.timer = setInterval(() => {
-  if (!elements.dialog.open && !elements.deviceAuthDialog.open && !elements.wakeDialog.open && !elements.updateDialog.open && document.visibilityState === 'visible') refresh();
+  if (!elements.dialog.open && !elements.wakeDialog.open && !elements.updateDialog.open && document.visibilityState === 'visible') refresh();
 }, 5_000);

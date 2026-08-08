@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
+const readline = require('node:readline');
 const { spawn, spawnSync } = require('node:child_process');
 const {
   acquireLease,
@@ -15,6 +16,7 @@ const { readCodexQuota } = require('./lib/codex-quota');
 const { CodexUsageTracker } = require('./lib/codex-usage');
 const { readModelCatalog } = require('./lib/model-catalog');
 const { detectQuotaReset, localDateKey, normalizeWakeSettings, quotaObservation, shouldWakeAccount } = require('./lib/wake');
+const { version: APP_VERSION } = require('./package.json');
 
 const ROOT = __dirname;
 const RUNTIME_ROOT = process.env.CODEX_SWITCHBOARD_USER_DATA
@@ -635,13 +637,11 @@ async function launchAccountBrowser(account, url, options = {}) {
       : [url];
     args.push('--new-window', ...initialUrls);
   }
-  const child = spawn(executable, args, {
+  return spawnDetached(executable, args, {
     detached: true,
     stdio: 'ignore',
     windowsHide: false,
   });
-  child.unref();
-  return child.pid;
 }
 
 function spawnDetached(executable, args, options) {
@@ -755,6 +755,152 @@ function cancelPendingCodexLogin(accountId) {
   pendingCodexLogins.delete(accountId);
 }
 
+function completeCodexLogin(account, operator, pending) {
+  if (pending.status === 'complete' || pending.status === 'error') return;
+  if (!isCodexAuthenticated(account)) {
+    pending.credentialDeadline ||= Date.now() + 5_000;
+    if (Date.now() < pending.credentialDeadline) {
+      setTimeout(() => completeCodexLogin(account, operator, pending), 150);
+      return;
+    }
+    pending.fail('Codex 登录已返回成功，但没有保存账号凭证，请重新发起授权');
+    return;
+  }
+  pending.status = 'complete';
+  clearTimeout(pending.timeout);
+  pendingCodexLogins.delete(account.id);
+  account.setupStage = 'complete';
+  account.quotaError = '';
+  account.quotaErrorCode = '';
+  saveAccounts([...accounts]);
+  const lease = leases[account.id];
+  if (lease?.operator === operator) {
+    const next = { ...leases };
+    delete next[account.id];
+    saveLeases(next);
+  }
+  audit('codex.login.success', { accountId: account.id, operator, result: 'pooled' });
+  if (pending.child && isProcessAlive(pending.child.pid)) {
+    try { pending.child.kill(); } catch {}
+  }
+}
+
+function startCodexBrowserLogin(account, operator) {
+  cancelPendingCodexLogin(account.id);
+  const { codexHomeDir } = accountPaths(account);
+  ensureCodexProfileConfig(codexHomeDir);
+  const executable = findCodexCli();
+  const child = spawn(executable, ['app-server'], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
+    env: { ...process.env, CODEX_HOME: codexHomeDir, NO_COLOR: '1', TERM: 'dumb' },
+  });
+  const pending = {
+    child,
+    operator,
+    flow: 'browser',
+    status: 'starting',
+    authUrl: '',
+    loginId: '',
+    output: '',
+    browserOpened: false,
+    startedAt: new Date().toISOString(),
+    timeout: null,
+    fail: null,
+  };
+  pendingCodexLogins.set(account.id, pending);
+
+  const fail = (message) => {
+    if (pending.status === 'complete' || pending.status === 'error') return;
+    pending.status = 'error';
+    pending.error = message;
+    clearTimeout(pending.timeout);
+    const lease = leases[account.id];
+    if (lease?.operator === operator) {
+      const next = { ...leases };
+      delete next[account.id];
+      saveLeases(next);
+    }
+    audit('codex.login.failed', { accountId: account.id, operator, result: message });
+    if (pending.child && isProcessAlive(pending.child.pid)) {
+      try { pending.child.kill(); } catch {}
+    }
+  };
+  pending.fail = fail;
+
+  const send = (message) => {
+    if (!child.stdin.destroyed) child.stdin.write(`${JSON.stringify(message)}\n`);
+  };
+  const lines = readline.createInterface({ input: child.stdout });
+  lines.on('line', (line) => {
+    let message;
+    try { message = JSON.parse(line); }
+    catch {
+      pending.output = `${pending.output}${line}\n`.slice(-12_000);
+      return;
+    }
+    if (message.id === 1) {
+      if (message.error) {
+        fail(`Codex 登录服务初始化失败：${message.error.message || '未知错误'}`);
+        return;
+      }
+      send({ method: 'initialized', params: {} });
+      send({
+        method: 'account/login/start',
+        id: 2,
+        params: { type: 'chatgpt', useHostedLoginSuccessPage: true, appBrand: 'codex' },
+      });
+      return;
+    }
+    if (message.id === 2) {
+      if (message.error) {
+        fail(`无法发起 Codex 浏览器授权：${message.error.message || '未知错误'}`);
+        return;
+      }
+      const authUrl = String(message.result?.authUrl || '');
+      if (!/^https:\/\/(?:chatgpt\.com|auth\.openai\.com)\//i.test(authUrl)) {
+        fail('Codex 登录服务没有返回有效的官方授权地址');
+        return;
+      }
+      pending.authUrl = authUrl;
+      pending.loginId = String(message.result?.loginId || '');
+      pending.status = 'waiting';
+      if (!pending.browserOpened) {
+        pending.browserOpened = true;
+        launchAccountBrowser(account, authUrl)
+          .then(() => audit('codex.login.browser-opened', { accountId: account.id, operator, result: 'browser-oauth' }))
+          .catch((error) => fail(`无法打开账号独立浏览器：${error.message}`));
+      }
+      return;
+    }
+    if (message.method === 'account/login/completed') {
+      if (pending.loginId && message.params?.loginId !== pending.loginId) return;
+      if (!message.params?.success) {
+        fail(message.params?.error || 'Codex 登录授权没有完成');
+        return;
+      }
+      setTimeout(() => completeCodexLogin(account, operator, pending), 150);
+    }
+  });
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk) => { pending.output = `${pending.output}${chunk}`.slice(-12_000); });
+  child.stdin.on('error', (error) => fail(`Codex 登录服务通信失败：${error.message}`));
+  child.on('error', (error) => fail(`无法启动 Codex 登录服务：${error.message}`));
+  child.on('exit', (code) => {
+    if (pending.status === 'complete' || pending.status === 'error') return;
+    fail(`Codex 登录服务提前退出（退出码 ${code ?? '未知'}）`);
+  });
+  child.once('spawn', () => {
+    send({
+      method: 'initialize',
+      id: 1,
+      params: { clientInfo: { name: 'codex_navo', title: 'Codex Navo', version: APP_VERSION } },
+    });
+  });
+  pending.timeout = setTimeout(() => fail('Codex 浏览器授权已超时，请重新发起登录'), 15 * 60 * 1000);
+  return child.pid;
+}
+
 function startCodexDeviceLogin(account, operator) {
   cancelPendingCodexLogin(account.id);
   const { codexHomeDir } = accountPaths(account);
@@ -768,6 +914,7 @@ function startCodexDeviceLogin(account, operator) {
   const pending = {
     child,
     operator,
+    flow: 'device',
     status: 'starting',
     userCode: '',
     deviceUrl: 'https://auth.openai.com/codex/device',
@@ -791,6 +938,7 @@ function startCodexDeviceLogin(account, operator) {
     }
     audit('codex.login.failed', { accountId: account.id, operator, result: message });
   };
+  pending.fail = fail;
 
   const consume = async (chunk) => {
     pending.output = `${pending.output}${chunk}`.slice(-12_000);
@@ -820,17 +968,7 @@ function startCodexDeviceLogin(account, operator) {
       fail('Codex 登录没有完成，请重新发起授权');
       return;
     }
-    pending.status = 'complete';
-    pendingCodexLogins.delete(account.id);
-    account.setupStage = 'complete';
-    saveAccounts([...accounts]);
-    const lease = leases[account.id];
-    if (lease?.operator === operator) {
-      const next = { ...leases };
-      delete next[account.id];
-      saveLeases(next);
-    }
-    audit('codex.login.success', { accountId: account.id, operator, result: 'pooled' });
+    completeCodexLogin(account, operator, pending);
   });
   pending.timeout = setTimeout(() => {
     fail('Codex 登录验证码已过期，请重新发起授权');
@@ -886,6 +1024,7 @@ function accountView(account) {
     codexLogin: pendingCodexLogins.has(account.id) ? (() => {
       const login = pendingCodexLogins.get(account.id);
       return {
+        flow: login.flow || 'device',
         status: login.status,
         userCode: login.userCode,
         deviceUrl: login.deviceUrl,
@@ -1067,7 +1206,7 @@ const server = http.createServer(async (request, response) => {
         emailHint: String(body.emailHint || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 100),
         browserType: 'chrome',
         enabled: true,
-        setupStage: 'web-login',
+        setupStage: 'oauth',
         createdAt: new Date().toISOString(),
       };
       saveAccounts([...accounts, account]);
@@ -1076,24 +1215,22 @@ const server = http.createServer(async (request, response) => {
         const result = acquireLease(leases, account.id, operator, 'setup');
         saveLeases(result.leases);
         try {
-          const processPid = await launchAccountBrowser(account, settings.browserStartUrl, {
-            initialUrls: [IP_CHECK_URL, settings.browserStartUrl],
-          });
+          const processPid = startCodexBrowserLogin(account, operator);
           result.lease.processPid = processPid;
           saveLeases({ ...leases, [account.id]: result.lease });
-          audit('account.web-login.opened', { accountId: account.id, operator, result: 'first-step' });
+          audit('codex.login.started', { accountId: account.id, operator, result: 'account-create-browser-oauth' });
         } catch (error) {
           const next = { ...leases };
           delete next[account.id];
           saveLeases(next);
-          audit('account.web-login.failed', { accountId: account.id, operator, result: error.message });
-          return sendError(response, 500, `账号已创建，但网页登录窗口未打开：${error.message}`);
+          audit('codex.login.failed', { accountId: account.id, operator, result: error.message });
+          return sendError(response, 500, `账号已创建，但登录授权未启动：${error.message}`);
         }
       }
       return sendJson(response, 201, { ok: true, data: accountView(account) });
     }
 
-    const match = url.pathname.match(/^\/api\/accounts\/([a-z0-9-]+)\/(launch|release|toggle|authorize|quota|wake|quit-codex)$/);
+    const match = url.pathname.match(/^\/api\/accounts\/([a-z0-9-]+)\/(launch|release|toggle|authorize|authorize-device|quota|wake|quit-codex)$/);
     if (match && request.method === 'POST') {
       const [, accountId, operation] = match;
       if (!validateAccountId(accountId)) return sendError(response, 400, '账号 ID 无效');
@@ -1145,7 +1282,7 @@ const server = http.createServer(async (request, response) => {
         }
       }
 
-      if (operation === 'authorize') {
+      if (operation === 'authorize' || operation === 'authorize-device') {
         if (isCodexAuthenticated(account) && account.quotaErrorCode !== 'auth_expired') {
           return sendJson(response, 200, { ok: true, data: accountView(account) });
         }
@@ -1166,15 +1303,18 @@ const server = http.createServer(async (request, response) => {
         if (!result.ok) return sendError(response, 409, `账号正在由 ${result.existing.operator} 使用`);
         saveLeases(result.leases);
         try {
-          account.setupStage = 'device-auth';
+          const useDeviceCode = operation === 'authorize-device';
+          account.setupStage = useDeviceCode ? 'device-auth' : 'oauth';
           saveAccounts([...accounts]);
-          const processPid = startCodexDeviceLogin(account, operator);
+          const processPid = useDeviceCode
+            ? startCodexDeviceLogin(account, operator)
+            : startCodexBrowserLogin(account, operator);
           result.lease.processPid = processPid;
           saveLeases({ ...leases, [accountId]: result.lease });
-          audit('codex.login.started', { accountId, operator, result: 'manual-retry' });
+          audit('codex.login.started', { accountId, operator, result: useDeviceCode ? 'device-fallback' : 'browser-oauth-retry' });
           return sendJson(response, 200, { ok: true, data: accountView(account) });
         } catch (error) {
-          account.setupStage = 'web-login';
+          account.setupStage = 'oauth';
           saveAccounts([...accounts]);
           const next = { ...leases };
           delete next[accountId];

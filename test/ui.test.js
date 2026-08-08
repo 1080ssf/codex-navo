@@ -48,19 +48,23 @@ test('Codex 运行时不会向其他账号提供无效的切换操作', () => {
 test('添加账号期间不会被后台刷新或更新弹窗抢走输入焦点', () => {
   const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   assert.match(client, /requestAnimationFrame\(\(\) => elements\.form\.elements\.label\.focus\(\)\)/);
-  assert.match(client, /!elements\.dialog\.open && !elements\.deviceAuthDialog\.open && !elements\.wakeDialog\.open && !elements\.updateDialog\.open/);
+  assert.match(client, /!elements\.dialog\.open && !elements\.wakeDialog\.open && !elements\.updateDialog\.open/);
   assert.doesNotMatch(client, /nextState\.status === 'available'[\s\S]{0,160}showModal/);
 });
 
-test('首次 Codex 授权前必须确认已开启设备代码授权', () => {
+test('新增账号使用官方浏览器 OAuth 一次完成登录和授权', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
-  const dialog = html.match(/<dialog id="device-auth-dialog"[\s\S]*?<\/dialog>/)?.[0] || '';
-  assert.match(dialog, /设置 → 账户安全与登录/);
-  assert.match(dialog, /为 Codex 启用设备代码授权/);
-  assert.match(dialog, /name="confirmed" type="checkbox" required/);
-  assert.match(client, /elements\.deviceAuthDialog\.showModal\(\)/);
-  assert.match(client, /\/authorize`/);
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(html, /登录并授权/);
+  assert.doesNotMatch(html, /id="device-auth-dialog"/);
+  assert.match(client, /data-action="authorize-device"/);
+  assert.match(client, /\/\$\{action\}`/);
+  assert.match(server, /\['app-server'\]/);
+  assert.match(server, /method: 'account\/login\/start'/);
+  assert.match(server, /type: 'chatgpt'/);
+  assert.match(server, /launchAccountBrowser\(account, authUrl\)/);
+  assert.match(server, /authorize-device/);
 });
 
 test('界面与服务端不再包含代理和节点池功能', () => {
@@ -183,13 +187,13 @@ test('再次打开账号网页端时恢复各自上次关闭的 Chrome 窗口', 
   assert.match(server, /--restore-last-session/);
   assert.match(server, /--disable-background-mode/);
   assert.match(server, /restoreLastSession: true/);
-  assert.match(server, /launchAccountBrowser\(account, pending\.deviceUrl\)/);
+  assert.match(server, /launchAccountBrowser\(account, authUrl\)/);
 });
 
-test('首次创建账号时优先打开 IP 检测页并同时打开 ChatGPT', () => {
+test('首次创建账号时直接打开官方 OAuth 地址', () => {
   const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  assert.match(server, /const IP_CHECK_URL = 'https:\/\/ipip\.la\/'/);
-  assert.match(server, /initialUrls: \[IP_CHECK_URL, settings\.browserStartUrl\]/);
+  assert.match(server, /startCodexBrowserLogin\(account, operator\)/);
+  assert.match(server, /launchAccountBrowser\(account, authUrl\)/);
   assert.match(server, /args\.push\('--new-window', \.\.\.initialUrls\)/);
 });

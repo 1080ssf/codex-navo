@@ -109,7 +109,7 @@
           </div>
           <button class="icon-button" value="cancel" aria-label="关闭" type="submit" formnovalidate>×</button>
         </div>
-        <p class="dialog-copy">创建后会先打开该账号的专属浏览器。完成 ChatGPT 网页登录后，回到这里继续 Codex 授权。</p>
+        <p class="dialog-copy">创建后会在该账号的独立 Chrome 环境中打开官方登录授权页。完成登录后将自动入池，无需返回应用执行第二步。</p>
         <label>账号名称<input name="label" required maxlength="60" placeholder="例如：设计组 01"></label>
         <label>邮箱提示<input name="emailHint" maxlength="100" placeholder="例如：de***@company.com"></label>
         <div class="fixed-browser" aria-label="浏览器">
@@ -121,33 +121,7 @@
         </div>
         <div class="dialog-actions">
           <button class="secondary-button" value="cancel" type="submit" formnovalidate>取消</button>
-          <button class="primary-button" value="default" type="submit">创建账号环境</button>
-        </div>
-      </form>
-    </dialog>
-
-    <dialog id="device-auth-dialog" class="device-auth-dialog">
-      <form method="dialog" id="device-auth-form">
-        <div class="dialog-head">
-          <div>
-            <p class="eyebrow">BEFORE DEVICE AUTH</p>
-            <h2>先开启设备代码授权</h2>
-          </div>
-          <button class="icon-button" value="cancel" aria-label="关闭" type="submit" formnovalidate>×</button>
-        </div>
-        <p class="dialog-copy">这是 Codex 官方设备授权的必要设置。未开启时，后续授权页可能无法继续。</p>
-        <ol class="auth-checklist">
-          <li><i>1</i><span><strong>确认网页登录账号</strong><small id="device-auth-account">请确认独立浏览器中显示的是目标账号</small></span></li>
-          <li><i>2</i><span><strong>进入账户安全设置</strong><small>ChatGPT 网页端 → 设置 → 账户安全与登录</small></span></li>
-          <li><i>3</i><span><strong>开启设备代码授权</strong><small>打开“为 Codex 启用设备代码授权”开关</small></span></li>
-        </ol>
-        <label class="auth-confirmation">
-          <input name="confirmed" type="checkbox" required>
-          <span><strong>我已开启设备代码授权</strong><small>接下来将在同一独立浏览器中打开 Codex 官方授权页</small></span>
-        </label>
-        <div class="dialog-actions">
-          <button class="secondary-button" value="cancel" type="submit" formnovalidate>稍后处理</button>
-          <button class="primary-button" value="default" type="submit">继续 Codex 授权</button>
+          <button class="primary-button" value="default" type="submit">登录并授权</button>
         </div>
       </form>
     </dialog>
