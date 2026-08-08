@@ -351,6 +351,20 @@ dialog textarea { resize: vertical; line-height: 1.55; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 26px; }
 .update-dialog { width: min(560px, calc(100% - 28px)); }
 .wake-dialog { width: min(600px, calc(100% - 28px)); }
+.device-auth-dialog { width: min(590px, calc(100% - 28px)); }
+.auth-checklist { display: grid; gap: 1px; margin: 20px 0 0; padding: 0; overflow: hidden; border: 1px solid #cfdae7; border-radius: 10px; background: #cfdae7; list-style: none; }
+.auth-checklist li { display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 12px; padding: 13px 15px; background: #f8faff; }
+.auth-checklist i { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid #b9c9df; border-radius: 50%; color: var(--blue-dark); background: #fff; font: 700 11px/1 "Cascadia Code", monospace; font-style: normal; }
+.auth-checklist span { display: grid; gap: 4px; }
+.auth-checklist strong { font-size: 13px; }
+.auth-checklist small { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.auth-checklist li:last-child { background: #eef8f5; }
+.auth-checklist li:last-child i { border-color: #74bca8; color: #0d775b; }
+.auth-confirmation { display: flex; align-items: center; gap: 12px; margin-top: 16px; padding: 13px 15px; border: 1px solid #b9c9df; border-radius: 9px; background: #fff; cursor: pointer; }
+.auth-confirmation input { width: 18px; height: 18px; flex: 0 0 auto; padding: 0; accent-color: #168267; }
+.auth-confirmation span { display: grid; gap: 3px; }
+.auth-confirmation strong { font-size: 13px; }
+.auth-confirmation small { color: var(--muted); font-size: 11px; font-weight: 400; line-height: 1.45; }
 .wake-toggle { display: flex; align-items: center; justify-content: space-between; gap: 22px; padding: 14px 15px; border: 1px solid #cfdae7; border-radius: 9px; background: #f7f9fc; }
 .wake-toggle span { display: grid; gap: 4px; }
 .wake-toggle strong { font-size: 13px; }

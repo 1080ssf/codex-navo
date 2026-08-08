@@ -48,8 +48,19 @@ test('Codex 运行时不会向其他账号提供无效的切换操作', () => {
 test('添加账号期间不会被后台刷新或更新弹窗抢走输入焦点', () => {
   const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   assert.match(client, /requestAnimationFrame\(\(\) => elements\.form\.elements\.label\.focus\(\)\)/);
-  assert.match(client, /!elements\.dialog\.open && !elements\.wakeDialog\.open && !elements\.updateDialog\.open/);
+  assert.match(client, /!elements\.dialog\.open && !elements\.deviceAuthDialog\.open && !elements\.wakeDialog\.open && !elements\.updateDialog\.open/);
   assert.doesNotMatch(client, /nextState\.status === 'available'[\s\S]{0,160}showModal/);
+});
+
+test('首次 Codex 授权前必须确认已开启设备代码授权', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const dialog = html.match(/<dialog id="device-auth-dialog"[\s\S]*?<\/dialog>/)?.[0] || '';
+  assert.match(dialog, /设置 → 账户安全与登录/);
+  assert.match(dialog, /为 Codex 启用设备代码授权/);
+  assert.match(dialog, /name="confirmed" type="checkbox" required/);
+  assert.match(client, /elements\.deviceAuthDialog\.showModal\(\)/);
+  assert.match(client, /\/authorize`/);
 });
 
 test('界面与服务端不再包含代理和节点池功能', () => {

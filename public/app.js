@@ -4,6 +4,9 @@ const elements = {
   summary: document.querySelector('#account-summary'),
   dialog: document.querySelector('#account-dialog'),
   form: document.querySelector('#account-form'),
+  deviceAuthDialog: document.querySelector('#device-auth-dialog'),
+  deviceAuthForm: document.querySelector('#device-auth-form'),
+  deviceAuthAccount: document.querySelector('#device-auth-account'),
   toast: document.querySelector('#toast'),
   currentCodex: document.querySelector('#current-codex'),
   closeExternalCodex: document.querySelector('#close-external-codex'),
@@ -32,6 +35,8 @@ const elements = {
   usageUpdated: document.querySelector('#usage-updated'),
   usageRange: document.querySelector('#usage-range'),
 };
+
+let pendingAuthorizationAccountId = '';
 
 let applicationUpdate = {
   status: 'idle',
@@ -561,8 +566,14 @@ elements.accounts.addEventListener('click', async (event) => {
       await api(`/api/accounts/${card.dataset.id}/wake`, { method: 'POST', body: JSON.stringify({ operator: currentOperator }) });
       showToast('账号已唤醒，额度状态已同步');
     } else if (action === 'authorize') {
-      await api(`/api/accounts/${card.dataset.id}/authorize`, { method: 'POST', body: JSON.stringify({ operator: currentOperator }) });
-      showToast('已在同一个独立浏览器中打开 Codex 授权页，完成后会自动入池');
+      const account = state.accounts.find((item) => item.id === card.dataset.id);
+      pendingAuthorizationAccountId = card.dataset.id;
+      elements.deviceAuthAccount.textContent = account
+        ? `当前准备授权：${account.label}`
+        : '请确认独立浏览器中显示的是目标账号';
+      elements.deviceAuthForm.reset();
+      elements.deviceAuthDialog.showModal();
+      return;
     } else if (action === 'quit-codex') {
       if (!confirm('退出当前 Codex？正在进行的任务会被中断。')) return;
       await api(`/api/accounts/${card.dataset.id}/quit-codex`, { method: 'POST', body: JSON.stringify({ operator: currentOperator }) });
@@ -837,9 +848,38 @@ elements.form.addEventListener('submit', async (event) => {
   }
 });
 
+elements.deviceAuthForm.addEventListener('submit', async (event) => {
+  if (event.submitter?.value === 'cancel') {
+    pendingAuthorizationAccountId = '';
+    return;
+  }
+  event.preventDefault();
+  if (!pendingAuthorizationAccountId) {
+    elements.deviceAuthDialog.close();
+    return;
+  }
+  const accountId = pendingAuthorizationAccountId;
+  const submitter = event.submitter;
+  submitter.disabled = true;
+  try {
+    await api(`/api/accounts/${accountId}/authorize`, {
+      method: 'POST',
+      body: JSON.stringify({ operator: operator() }),
+    });
+    pendingAuthorizationAccountId = '';
+    elements.deviceAuthDialog.close();
+    showToast('已打开 Codex 官方授权页，完成后账号会自动入池');
+    await refresh();
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    submitter.disabled = false;
+  }
+});
+
 syncSortMenu();
 initializeApplicationUpdater();
 refresh();
 state.timer = setInterval(() => {
-  if (!elements.dialog.open && !elements.wakeDialog.open && !elements.updateDialog.open && document.visibilityState === 'visible') refresh();
+  if (!elements.dialog.open && !elements.deviceAuthDialog.open && !elements.wakeDialog.open && !elements.updateDialog.open && document.visibilityState === 'visible') refresh();
 }, 5_000);
