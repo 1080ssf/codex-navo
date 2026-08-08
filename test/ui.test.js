@@ -116,6 +116,56 @@ test('账号池支持可记忆的列表与卡片双视图', () => {
   assert.match(styles, /grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\) repeat\(3, 38px\)/);
 });
 
+test('账号池展示本机实时用量、历史范围和每账号明细', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(html, /id="usage-overview"/);
+  assert.match(html, /data-range="yesterday"/);
+  assert.match(html, /data-range="30d"/);
+  assert.match(client, /function renderAccountUsage\(account\)/);
+  assert.match(client, /Token 估值/);
+  assert.match(styles, /\.account-usage-strip/);
+  assert.match(server, /\/api\/usage/);
+  assert.match(server, /CodexUsageTracker/);
+});
+
+test('列表模式的账号用量可以独立折叠并记住状态', () => {
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(client, /codex-navo-collapsed-account-usage/);
+  assert.match(client, /data-action="toggle-usage"/);
+  assert.match(client, /state\.viewMode === 'list'/);
+  assert.match(styles, /\.account-usage-strip\.collapsed \.account-usage-line/);
+  assert.match(styles, /\.account-grid \.usage-collapse-button \{ display: none; \}/);
+});
+
+test('本机与账号用量会显示缓存命中率', () => {
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  assert.match(client, /function formatCacheHitRate\(usage\)/);
+  assert.match(client, /cachedTokens \/ inputTokens \* 100/);
+  assert.match(client, /命中 \$\{formatCacheHitRate\(totals\)\}/);
+  assert.match(client, /命中 \$\{formatCacheHitRate\(usage\)\}/);
+});
+
+test('Token 大数保留 M 主值并补充亿单位小标签', () => {
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(client, /notation: 'compact'/);
+  assert.match(client, /function formatYiTokenNote\(value\)/);
+  assert.match(client, /number < 100_000_000/);
+  assert.match(client, /class="token-scale-note">约/);
+  assert.match(styles, /\.usage-primary > div > \.token-scale-note/);
+});
+
+test('单账号今日用量以总 Token 为主并将美元降级为估值明细', () => {
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  assert.match(client, /class="account-usage-total"/);
+  assert.match(client, /account-usage-total[\s\S]*formatTokenCount\(usage\.totalTokens, true\)/);
+  assert.match(client, /class="usage-estimate"[\s\S]*Token 估值/);
+});
+
 test('再次打开账号网页端时恢复各自上次关闭的 Chrome 窗口', () => {
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.match(server, /function hasRestorableBrowserSession\(browserDir\)/);

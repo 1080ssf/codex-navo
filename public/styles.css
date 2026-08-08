@@ -165,6 +165,32 @@ h1 { font-size: clamp(30px, 3vw, 38px); line-height: 1; letter-spacing: -.035em;
 .sort-popover button.active { color: var(--blue-dark); background: #edf4ff; }
 .sort-popover button.active b { display: block; }
 
+.usage-overview { margin: 0 0 18px; overflow: hidden; border: 1px solid #bdcbe0; border-radius: 13px; background: #fff; box-shadow: 0 10px 30px rgba(30,57,91,.06); }
+.usage-overview-head { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 70px; padding: 13px 18px 12px; border-bottom: 1px solid #e0e7f0; background: linear-gradient(100deg, #f8fbff 0%, #fff 55%, #f4faf8 100%); }
+.usage-kicker { display: block; margin-bottom: 6px; color: #56759e; font: 700 9px/1 "Cascadia Mono", "Cascadia Code", monospace; letter-spacing: .13em; }
+.usage-heading-line { display: flex; align-items: baseline; gap: 10px; }
+.usage-heading-line h2 { margin: 0; font: 700 18px/1 "Segoe UI Variable Display", "Microsoft YaHei UI", sans-serif; letter-spacing: -.02em; }
+.usage-heading-line span { color: #8391a3; font-size: 10px; }
+.usage-range { display: flex; padding: 3px; border: 1px solid #ced9e6; border-radius: 9px; background: #edf2f7; }
+.usage-range button { min-width: 48px; height: 29px; padding: 0 10px; border: 0; border-radius: 6px; color: #687b92; background: transparent; font-size: 10px; font-weight: 650; }
+.usage-range button:hover { color: var(--blue-dark); }
+.usage-range button.active { color: #174cae; background: #fff; box-shadow: 0 2px 8px rgba(35,58,88,.13); }
+.usage-range button:disabled { cursor: wait; }
+.usage-ledger { display: grid; grid-template-columns: minmax(280px, .9fr) minmax(0, 1.65fr); gap: 12px; padding: 14px 16px 16px; background: #f7f9fc; }
+.usage-ledger span { color: #72839a; font-size: 10px; font-weight: 650; }
+.usage-ledger strong { display: block; margin-top: 8px; color: #1a2d48; font: 720 21px/1 "Cascadia Mono", "Cascadia Code", monospace; letter-spacing: -.04em; white-space: nowrap; }
+.usage-ledger small { display: block; min-height: 12px; margin-top: 7px; color: #8996a7; font-size: 9px; white-space: nowrap; }
+.usage-primary { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(110px, .85fr); align-items: stretch; overflow: hidden; border: 1px solid #c9d8ec; border-radius: 10px; background: #eef5ff; }
+.usage-primary > div { position: relative; display: flex; min-width: 0; flex-direction: column; justify-content: center; padding: 15px 17px; }
+.usage-primary > div + div { border-left: 1px solid #d4e0ef; background: rgba(255,255,255,.52); }
+.usage-primary > div:first-child strong { color: var(--blue-dark); font-size: 28px; }
+.usage-primary .usage-cost strong { color: #147052; font-size: 19px; }
+.token-scale-note { color: #55718f; font: 650 9px/1 "Segoe UI Variable Text", "Microsoft YaHei UI", sans-serif; font-style: normal; white-space: nowrap; }
+.usage-primary > div > .token-scale-note { position: absolute; top: 13px; right: 15px; padding: 3px 6px; border: 1px solid #cbd9ea; border-radius: 999px; background: rgba(255,255,255,.64); }
+.usage-breakdown { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.usage-metric { display: flex; min-width: 0; flex-direction: column; justify-content: center; padding: 14px 15px; border: 1px solid #dbe3ed; border-radius: 10px; background: #fff; }
+.usage-metric strong, .usage-metric small { overflow: hidden; text-overflow: ellipsis; }
+
 .account-list { position: relative; display: grid; gap: 14px; }
 .account-list::before { display: none; }
 .account-list.is-empty::before { display: none; }
@@ -184,7 +210,7 @@ h1 { font-size: clamp(30px, 3vw, 38px); line-height: 1; letter-spacing: -.035em;
   box-shadow: 0 8px 24px rgba(30,57,91,.055);
   transition: transform .18s ease, border-color .18s ease;
 }
-.account-grid .account-card { grid-template-columns: 1fr; align-content: start; gap: 18px; min-height: 300px; padding: 22px; }
+.account-grid .account-card { grid-template-columns: 1fr; align-content: start; gap: 16px; min-height: 330px; padding: 22px; }
 .account-grid .account-overview { min-height: 54px; }
 .account-grid .account-identity h3 { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 16px; }
 .account-grid .identity-badges { flex-wrap: wrap; }
@@ -234,6 +260,28 @@ h1 { font-size: clamp(30px, 3vw, 38px); line-height: 1; letter-spacing: -.035em;
 .account-actions .release-action { color: #9a681c; border-color: #e2c99d; background: #fffaf2; }
 .account-actions .release-action svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .account-actions .release-action:hover { color: #fff; border-color: #bf7b16; background: #bf7b16; }
+.account-usage-strip { grid-column: 1 / -1; display: grid; gap: 8px; min-width: 0; padding: 11px 13px 10px; border-radius: 9px; background: linear-gradient(105deg, #f4f8fd, #f8fbfa); }
+.account-usage-title { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; }
+.account-usage-title > span { display: inline-flex; align-items: center; gap: 7px; color: #667b94; font-size: 10px; font-weight: 650; }
+.account-usage-title > span i { width: 6px; height: 6px; border-radius: 50%; background: #6e91c5; box-shadow: 0 0 0 3px rgba(110,145,197,.12); }
+.account-usage-title > div { display: flex; align-items: center; gap: 8px; }
+.account-usage-title strong { color: #263d5b; font: 700 13px/1 "Cascadia Mono", "Cascadia Code", monospace; }
+.account-usage-title strong small { color: #74869b; font-size: 9px; font-weight: 550; }
+.usage-collapse-button { display: grid; width: 24px; height: 24px; padding: 0; place-items: center; border: 0; border-radius: 6px; color: #6f829a; background: transparent; cursor: pointer; }
+.usage-collapse-button:hover { color: var(--blue); background: rgba(44,98,214,.08); }
+.usage-collapse-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; transition: transform .18s ease; }
+.account-usage-strip.collapsed { gap: 0; padding-block: 9px; }
+.account-usage-strip.collapsed .usage-collapse-button svg { transform: rotate(-90deg); }
+.account-usage-strip.collapsed .account-usage-line { display: none; }
+.account-usage-line { display: flex; min-width: 0; align-items: baseline; gap: 14px; }
+.account-usage-line b { flex: 0 0 auto; color: #263d5b; font: 700 12px/1 "Cascadia Mono", "Cascadia Code", monospace; }
+.account-usage-line b small { color: #7e8ea2; font: 500 9px/1 "Segoe UI Variable Text", "Microsoft YaHei UI", sans-serif; }
+.account-usage-total > .token-scale-note { color: #6f8299; }
+.account-usage-line .usage-estimate { color: #147052; }
+.account-usage-line > span { min-width: 0; margin-left: auto; overflow: hidden; color: #8593a4; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.account-grid .account-usage-line { flex-wrap: wrap; row-gap: 7px; }
+.account-grid .account-usage-line > span { width: 100%; margin-left: 0; }
+.account-grid .usage-collapse-button { display: none; }
 .quota-panel { width: 100%; min-width: 0; padding: 4px 0; }
 .quota-window + .quota-window { margin-top: 14px; }
 .quota-line { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 8px; color: #53667e; font: 500 12px/1 "Cascadia Code", monospace; }
@@ -338,6 +386,8 @@ dialog textarea { resize: vertical; line-height: 1.55; }
   .account-card { grid-template-columns: 1fr; gap: 15px; }
   .account-list.account-grid { grid-template-columns: 1fr; }
   .account-actions { justify-content: flex-start; flex-wrap: wrap; }
+  .usage-overview-head { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .usage-ledger { grid-template-columns: 1fr; }
   .codex-login-panel { align-items: flex-start; flex-direction: column; }
   .codex-login-panel strong { margin-right: 0; }
 }
@@ -346,6 +396,13 @@ dialog textarea { resize: vertical; line-height: 1.55; }
   .topbar { grid-template-columns: 1fr auto; }
   .current-codex { grid-column: 1 / -1; grid-row: 2; margin: 0 auto; }
   .account-list.account-grid { grid-template-columns: 1fr; }
+  .usage-range { width: 100%; overflow-x: auto; }
+  .usage-range button { flex: 1 0 auto; }
+  .usage-primary { grid-template-columns: 1fr 1fr; }
+  .usage-breakdown { grid-template-columns: 1fr; }
+  .usage-metric { min-height: 78px; }
+  .account-usage-line { flex-wrap: wrap; }
+  .account-usage-line > span { width: 100%; margin-left: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

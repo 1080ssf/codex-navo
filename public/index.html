@@ -68,6 +68,32 @@
               <button class="primary-button" id="add-account" type="button"><span>＋</span>添加账号</button>
             </div>
           </div>
+          <section class="usage-overview" id="usage-overview" aria-labelledby="usage-title">
+            <div class="usage-overview-head">
+              <div>
+                <span class="usage-kicker">LOCAL TOKEN LEDGER</span>
+                <div class="usage-heading-line"><h2 id="usage-title">本机用量</h2><span id="usage-updated">从现在开始记录</span></div>
+              </div>
+              <div class="usage-range" id="usage-range" role="group" aria-label="用量统计范围">
+                <button type="button" data-range="today">今日</button>
+                <button type="button" data-range="yesterday">昨日</button>
+                <button type="button" data-range="7d">7 天</button>
+                <button type="button" data-range="30d">30 天</button>
+                <button type="button" data-range="all">全部</button>
+              </div>
+            </div>
+            <div class="usage-ledger" id="usage-ledger">
+              <div class="usage-primary">
+                <div><span>总 Token</span><strong>—</strong><small>输入与输出合计</small></div>
+                <div class="usage-cost"><span>Token 估值</span><strong>—</strong><small>按 API Token 公价估算</small></div>
+              </div>
+              <div class="usage-breakdown">
+                <div class="usage-metric"><span>模型调用</span><strong>—</strong><small>近实时记录</small></div>
+                <div class="usage-metric"><span>输入</span><strong>—</strong><small>缓存 — · 命中 —</small></div>
+                <div class="usage-metric"><span>输出</span><strong>—</strong><small>其中推理 —</small></div>
+              </div>
+            </div>
+          </section>
           <div id="accounts" class="account-list" aria-live="polite"></div>
         </section>
       </main>

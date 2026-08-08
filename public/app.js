@@ -1,4 +1,4 @@
-const state = { accounts: [], csrfToken: '', timer: null, quotaRefreshing: false, wakeSettings: {}, wakeModelOptions: [] };
+const state = { accounts: [], csrfToken: '', timer: null, quotaRefreshing: false, wakeSettings: {}, wakeModelOptions: [], usage: null };
 const elements = {
   accounts: document.querySelector('#accounts'),
   summary: document.querySelector('#account-summary'),
@@ -27,6 +27,10 @@ const elements = {
   updateProgressLabel: document.querySelector('#update-progress-label'),
   updateNotes: document.querySelector('#update-notes'),
   updatePrimaryAction: document.querySelector('#update-primary-action'),
+  usageOverview: document.querySelector('#usage-overview'),
+  usageLedger: document.querySelector('#usage-ledger'),
+  usageUpdated: document.querySelector('#usage-updated'),
+  usageRange: document.querySelector('#usage-range'),
 };
 
 let applicationUpdate = {
@@ -126,6 +130,8 @@ async function initializeApplicationUpdater() {
 
 const sortStorageKey = 'codex-manager-account-sort';
 const viewStorageKey = 'codex-navo-account-view';
+const usageRangeStorageKey = 'codex-navo-usage-range';
+const collapsedUsageStorageKey = 'codex-navo-collapsed-account-usage';
 const sortLabels = {
   current: '当前账号优先',
   'quota-desc': '额度：高到低',
@@ -135,6 +141,14 @@ const sortLabels = {
 };
 state.sortMode = localStorage.getItem(sortStorageKey) || 'current';
 state.viewMode = localStorage.getItem(viewStorageKey) === 'grid' ? 'grid' : 'list';
+state.usageRange = ['today', 'yesterday', '7d', '30d', 'all'].includes(localStorage.getItem(usageRangeStorageKey))
+  ? localStorage.getItem(usageRangeStorageKey)
+  : 'today';
+try {
+  state.collapsedUsage = new Set(JSON.parse(localStorage.getItem(collapsedUsageStorageKey) || '[]'));
+} catch {
+  state.collapsedUsage = new Set();
+}
 
 function applyViewMode() {
   elements.accounts.classList.toggle('account-grid', state.viewMode === 'grid');
@@ -186,6 +200,76 @@ function weeklyRemaining(account) {
     || account.quota?.windows?.[0];
   const remaining = Number(weekly?.remainingPercent);
   return Number.isFinite(remaining) ? remaining : null;
+}
+
+function formatTokenCount(value, compact = false) {
+  const number = Math.max(0, Number(value) || 0);
+  return compact && number >= 10_000
+    ? new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(number)
+    : Math.round(number).toLocaleString('en-US');
+}
+
+function formatYiTokenNote(value) {
+  const number = Math.max(0, Number(value) || 0);
+  if (number < 100_000_000) return '';
+  const amount = (number / 100_000_000).toLocaleString('zh-CN', { maximumFractionDigits: 2 });
+  return `<em class="token-scale-note">约 ${amount} 亿</em>`;
+}
+
+function formatUsageCost(usage) {
+  if (!usage || !usage.pricedRequests) return '—';
+  const value = Number(usage.estimatedCostUsd) || 0;
+  const digits = value < 0.01 ? 4 : 2;
+  return `${usage.unpricedRequests ? '≥' : ''}US$${value.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+}
+
+function formatCacheHitRate(usage) {
+  const inputTokens = Math.max(0, Number(usage?.inputTokens) || 0);
+  if (!inputTokens) return '—';
+  const cachedTokens = Math.max(0, Number(usage?.cachedInputTokens) || 0);
+  const percentage = Math.min(100, cachedTokens / inputTokens * 100);
+  return `${percentage.toLocaleString('zh-CN', { minimumFractionDigits: percentage === 100 ? 0 : 1, maximumFractionDigits: 1 })}%`;
+}
+
+function renderUsage() {
+  const usage = state.usage || {};
+  const totals = usage.totals || {};
+  elements.usageRange.querySelectorAll('[data-range]').forEach((button) => {
+    const active = button.dataset.range === state.usageRange;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  const updated = usage.updatedAt ? new Date(usage.updatedAt) : null;
+  elements.usageUpdated.textContent = updated && !Number.isNaN(updated.getTime())
+    ? `更新于 ${updated.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}`
+    : '从启用统计后开始记录';
+  elements.usageLedger.innerHTML = `
+    <div class="usage-primary">
+      <div><span>总 Token</span>${formatYiTokenNote(totals.totalTokens)}<strong title="${formatTokenCount(totals.totalTokens)}">${formatTokenCount(totals.totalTokens, true)}</strong><small>输入与输出合计</small></div>
+      <div class="usage-cost"><span>Token 估值</span><strong>${formatUsageCost(totals)}</strong><small>${totals.unpricedRequests ? `${formatTokenCount(totals.unpricedRequests)} 次待定价` : '按 API Token 公价估算'}</small></div>
+    </div>
+    <div class="usage-breakdown">
+      <div class="usage-metric"><span>模型调用</span><strong>${formatTokenCount(totals.requests)}</strong><small>${state.usageRange === 'today' ? '近实时记录' : '所选时段'}</small></div>
+      <div class="usage-metric"><span>输入</span><strong title="${formatTokenCount(totals.inputTokens)}">${formatTokenCount(totals.inputTokens, true)}</strong><small>缓存 ${formatTokenCount(totals.cachedInputTokens, true)} · 命中 ${formatCacheHitRate(totals)}</small></div>
+      <div class="usage-metric"><span>输出</span><strong title="${formatTokenCount(totals.outputTokens)}">${formatTokenCount(totals.outputTokens, true)}</strong><small>其中推理 ${formatTokenCount(totals.reasoningOutputTokens, true)}</small></div>
+    </div>`;
+}
+
+function renderAccountUsage(account) {
+  const usage = state.usage?.accounts?.[account.id] || {};
+  const rangeLabels = { today: '今日用量', yesterday: '昨日用量', '7d': '近 7 天', '30d': '近 30 天', all: '全部记录' };
+  const collapsed = state.viewMode === 'list' && state.collapsedUsage.has(account.id);
+  return `<div class="account-usage-strip${collapsed ? ' collapsed' : ''}" aria-label="账号用量">
+    <div class="account-usage-title">
+      <span><i></i>${rangeLabels[state.usageRange] || '用量'}</span>
+      <div class="account-usage-total"><strong title="${formatTokenCount(usage.totalTokens)}">${formatTokenCount(usage.totalTokens, true)} <small>Token</small></strong>${formatYiTokenNote(usage.totalTokens)}<button class="usage-collapse-button" data-action="toggle-usage" type="button" aria-expanded="${!collapsed}" aria-label="${collapsed ? '展开账号用量' : '收起账号用量'}" title="${collapsed ? '展开用量' : '收起用量'}"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"></path></svg></button></div>
+    </div>
+    <div class="account-usage-line">
+      <b>${formatTokenCount(usage.requests)} <small>模型调用</small></b>
+      <b class="usage-estimate">${formatUsageCost(usage)} <small>Token 估值</small></b>
+      <span>输入 ${formatTokenCount(usage.inputTokens, true)} · 缓存 ${formatTokenCount(usage.cachedInputTokens, true)} · 命中 ${formatCacheHitRate(usage)} · 输出 ${formatTokenCount(usage.outputTokens, true)}</span>
+    </div>
+  </div>`;
 }
 
 function sortedAccounts(activeAccount) {
@@ -309,6 +393,7 @@ function renderQuota(account) {
 
 function render() {
   applyViewMode();
+  renderUsage();
   const occupied = state.accounts.filter((account) => account.lease || account.codexActive).length;
   elements.summary.innerHTML = `<span><strong>${state.accounts.length}</strong> 个账号</span><i aria-hidden="true"></i><span class="${occupied ? 'has-active' : ''}"><strong>${occupied}</strong> 使用中</span>`;
   const activeAccount = state.accounts.find((account) => account.codexActive);
@@ -399,6 +484,7 @@ function render() {
         <button class="icon-action" data-action="quota" title="刷新额度" aria-label="刷新额度" ${account.codexInitialized ? '' : 'disabled'}>↻</button>
         ${account.lease && !account.codexActive ? '<button class="icon-action release-action" data-action="release" title="释放账号占用（不会关闭网页）" aria-label="释放账号占用"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="10" width="12" height="10" rx="2"></rect><path d="M9 10V7a3 3 0 0 1 5.6-1.5"></path></svg></button>' : '<button class="icon-action danger-button" data-action="remove" title="移除账号" aria-label="移除账号">×</button>'}
       </div>
+      ${renderAccountUsage(account)}
       ${codexLoginPanel}
     </article>`;
   }).join('');
@@ -408,6 +494,7 @@ async function refresh() {
   try {
     const data = await api('/api/bootstrap');
     Object.assign(state, data);
+    if (state.usageRange !== 'today') state.usage = await api(`/api/usage?range=${encodeURIComponent(state.usageRange)}`);
     render();
     refreshStaleQuotas();
   } catch (error) {
@@ -449,6 +536,13 @@ elements.accounts.addEventListener('click', async (event) => {
   const button = event.target.closest('button[data-action]');
   const card = event.target.closest('[data-id]');
   if (!button || !card) return;
+  if (button.dataset.action === 'toggle-usage') {
+    if (state.collapsedUsage.has(card.dataset.id)) state.collapsedUsage.delete(card.dataset.id);
+    else state.collapsedUsage.add(card.dataset.id);
+    localStorage.setItem(collapsedUsageStorageKey, JSON.stringify([...state.collapsedUsage]));
+    render();
+    return;
+  }
   button.disabled = true;
   try {
     const action = button.dataset.action;
@@ -657,6 +751,27 @@ elements.viewSwitcher.addEventListener('click', (event) => {
   state.viewMode = button.dataset.view;
   localStorage.setItem(viewStorageKey, state.viewMode);
   applyViewMode();
+});
+
+elements.usageRange.addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-range]');
+  if (!button || button.dataset.range === state.usageRange) return;
+  const previous = state.usageRange;
+  state.usageRange = button.dataset.range;
+  localStorage.setItem(usageRangeStorageKey, state.usageRange);
+  renderUsage();
+  elements.usageRange.querySelectorAll('button').forEach((item) => { item.disabled = true; });
+  try {
+    state.usage = await api(`/api/usage?range=${encodeURIComponent(state.usageRange)}`);
+    render();
+  } catch (error) {
+    state.usageRange = previous;
+    localStorage.setItem(usageRangeStorageKey, previous);
+    renderUsage();
+    showToast(error.message, true);
+  } finally {
+    elements.usageRange.querySelectorAll('button').forEach((item) => { item.disabled = false; });
+  }
 });
 elements.sortPopover.addEventListener('click', (event) => {
   const option = event.target.closest('[data-sort]');

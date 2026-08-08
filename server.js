@@ -12,6 +12,7 @@ const {
   validateAccountId,
 } = require('./lib/core');
 const { readCodexQuota } = require('./lib/codex-quota');
+const { CodexUsageTracker } = require('./lib/codex-usage');
 const { readModelCatalog } = require('./lib/model-catalog');
 const { detectQuotaReset, localDateKey, normalizeWakeSettings, quotaObservation, shouldWakeAccount } = require('./lib/wake');
 
@@ -33,7 +34,10 @@ const ACCESS_TOKEN_FILE = path.join(DATA_DIR, 'access-token.txt');
 const AUDIT_FILE = path.join(DATA_DIR, 'audit.jsonl');
 const PID_FILE = path.join(DATA_DIR, 'server.pid');
 const ACTIVE_CODEX_AUTH_FILE = path.join(DATA_DIR, 'active-codex-auth.json');
-const SHARED_CODEX_HOME = path.join(os.homedir(), '.codex');
+const CODEX_USAGE_FILE = path.join(DATA_DIR, 'codex-usage.json');
+const SHARED_CODEX_HOME = process.env.CODEX_MANAGER_MOCK_LAUNCH === '1'
+  ? path.join(RUNTIME_ROOT, 'shared-codex')
+  : path.join(os.homedir(), '.codex');
 const SHARED_CODEX_AUTH_FILE = path.join(SHARED_CODEX_HOME, 'auth.json');
 const SHARED_AUTH_BACKUP_DIR = path.join(CODEX_PROFILES_DIR, '_shared');
 const SHARED_AUTH_BACKUP_FILE = path.join(SHARED_AUTH_BACKUP_DIR, 'original-auth.json');
@@ -94,6 +98,7 @@ let leases = Object.fromEntries(Object.entries(readJson(LEASES_FILE, {})).map(([
 const pendingCodexLogins = new Map();
 const wakeRuns = new Map();
 let wakeScheduleRunning = false;
+let usageTracker = null;
 const csrfToken = crypto.randomBytes(24).toString('base64url');
 
 function getAccessToken() {
@@ -155,6 +160,51 @@ function audit(event, details = {}) {
     result: String(details.result || 'ok').replace(/[\r\n]/g, ' ').slice(0, 100),
   };
   fs.appendFileSync(AUDIT_FILE, `${JSON.stringify(record)}\n`);
+}
+
+let usageIntervalsCache = { modified: -1, activeSignature: '', intervals: [] };
+
+function codexUsageIntervals() {
+  let modified = 0;
+  try { modified = fs.statSync(AUDIT_FILE).mtimeMs; } catch {}
+  const active = readJson(ACTIVE_CODEX_AUTH_FILE, null);
+  const activeSignature = active ? `${active.accountId}:${active.activatedAt}` : '';
+  if (usageIntervalsCache.modified === modified && usageIntervalsCache.activeSignature === activeSignature) {
+    return usageIntervalsCache.intervals;
+  }
+
+  const intervals = [];
+  let open = null;
+  let lines = [];
+  try { lines = fs.readFileSync(AUDIT_FILE, 'utf8').split(/\r?\n/); } catch {}
+  for (const line of lines) {
+    if (!line) continue;
+    let entry;
+    try { entry = JSON.parse(line); } catch { continue; }
+    const time = Date.parse(entry.time || '');
+    if (!Number.isFinite(time)) continue;
+    if (entry.event === 'launch.success' && entry.result === 'codex' && validateAccountId(entry.accountId)) {
+      if (open) open.endMs = Math.max(open.startMs, time - 1);
+      open = { accountId: entry.accountId, startMs: time, endMs: null };
+      intervals.push(open);
+    } else if (entry.event === 'codex.auth.restored' && open && (!entry.accountId || entry.accountId === open.accountId)) {
+      open.endMs = Math.max(open.startMs, time);
+      open = null;
+    }
+  }
+  if (active && validateAccountId(active.accountId)) {
+    const activatedAt = Date.parse(active.activatedAt || '');
+    const current = intervals.at(-1);
+    if (!current || current.endMs != null || current.accountId !== active.accountId) {
+      intervals.push({
+        accountId: active.accountId,
+        startMs: Number.isFinite(activatedAt) ? activatedAt : Date.now(),
+        endMs: null,
+      });
+    }
+  }
+  usageIntervalsCache = { modified, activeSignature, intervals };
+  return intervals;
 }
 
 function readBody(request) {
@@ -299,6 +349,15 @@ function accountPaths(account) {
     codexSqliteDir: path.join(codexDir, 'sqlite'),
   };
 }
+
+usageTracker = new CodexUsageTracker({
+  storeFile: CODEX_USAGE_FILE,
+  sharedCodexHome: SHARED_CODEX_HOME,
+  getAccounts: () => accounts,
+  getAccountHome: (account) => accountPaths(account).codexHomeDir,
+  getActiveAccountId: () => readActiveCodexAuth()?.accountId || null,
+  getSharedIntervals: codexUsageIntervals,
+});
 
 function isCodexAuthenticated(account) {
   const { codexDir, codexHomeDir } = accountPaths(account);
@@ -530,6 +589,7 @@ function activateSharedCodexAuth(account) {
 }
 
 function restoreSharedCodexAuth(accountId) {
+  usageTracker?.sync(true);
   const active = readActiveCodexAuth();
   if (!active || active.accountId !== accountId) return;
   const account = accounts.find((item) => item.id === accountId);
@@ -916,6 +976,7 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === 'GET' && url.pathname === '/api/bootstrap') {
       cleanLeases();
+      usageTracker.sync();
       return sendJson(response, 200, {
         ok: true,
         data: {
@@ -926,8 +987,14 @@ const server = http.createServer(async (request, response) => {
           mockLaunch: settings.mockLaunch,
           wakeSettings: publicWakeSettings(),
           wakeModelOptions: wakeModelCatalog(),
+          usage: usageTracker.summary('today'),
         },
       });
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/usage') {
+      usageTracker.sync();
+      return sendJson(response, 200, { ok: true, data: usageTracker.summary(url.searchParams.get('range') || 'today') });
     }
 
     if (request.method === 'POST' && url.pathname === '/api/wake-settings') {
