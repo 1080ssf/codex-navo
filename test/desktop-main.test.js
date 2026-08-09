@@ -38,3 +38,12 @@ test('桌面安装版将运行数据放到 LocalAppData 并接入自动更新', 
   assert.match(source, /mainWindow\.setTitle\('Codex Navo'\)/);
   assert.match(source, /端口 \$\{port\} 已被其他程序或旧版 Codex Navo 占用/);
 });
+
+test('退出应用和手动安装都会清理托盘服务进程', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'desktop-src', 'main.js'), 'utf8');
+  const installer = fs.readFileSync(path.join(__dirname, '..', 'build', 'installer.nsh'), 'utf8');
+  assert.match(source, /managedServerPid/);
+  assert.match(source, /taskkill\.exe/);
+  assert.match(source, /\['\/PID', String\(serverPid\), '\/T', '\/F'\]/);
+  assert.match(installer, /taskkill \/F \/T \/IM "Codex Navo\.exe"/);
+});

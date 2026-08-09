@@ -42,6 +42,9 @@
               <button class="refresh-all-button" id="refresh-all-quotas" type="button" data-tooltip="刷新全部账号额度" aria-label="刷新全部账号额度">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.1 8A7.5 7.5 0 0 0 6.4 5.4L4.5 7.2"></path><path d="M4.5 3.8v3.4h3.4"></path><path d="M4.9 16A7.5 7.5 0 0 0 17.6 18.6l1.9-1.8"></path><path d="M19.5 20.2v-3.4h-3.4"></path></svg>
               </button>
+              <button class="account-tools-button" id="account-tools-button" type="button" data-tooltip="授权健康与账号迁移" aria-label="打开授权工具">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6z"></path><path d="m9.3 12 1.8 1.8 3.8-4"></path></svg>
+              </button>
               <div class="view-switcher" id="view-switcher" role="group" aria-label="账号显示方式">
                 <button type="button" data-view="list" aria-label="列表视图" title="列表视图">
                   <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h2M8 5h9M3 10h2M8 10h9M3 15h2M8 15h9"></path></svg>
@@ -158,6 +161,43 @@
           <button class="secondary-button" value="cancel" type="submit" formnovalidate>取消</button>
           <button class="primary-button" value="default" type="submit">保存设置</button>
         </div>
+      </form>
+    </dialog>
+
+    <dialog id="account-tools-dialog" class="account-tools-dialog">
+      <form method="dialog">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">AUTH VAULT</p>
+            <h2>授权健康与迁移</h2>
+          </div>
+          <button class="icon-button" value="cancel" aria-label="关闭" type="submit" formnovalidate>×</button>
+        </div>
+        <p class="dialog-copy">检查每个账号的 Codex 授权状态，或通过单个授权包迁移到另一台电脑。授权包不包含 Chrome Cookie 和网页历史。</p>
+        <div class="tools-status" id="tools-status" role="status" aria-live="polite" hidden></div>
+        <section class="health-center" aria-labelledby="health-center-title">
+          <div class="tools-section-head">
+            <div><span>AUTH HEALTH</span><h3 id="health-center-title">账号健康</h3></div>
+            <button class="secondary-button compact-button" id="check-all-health" type="button">检查全部</button>
+          </div>
+          <div class="health-list" id="health-list"></div>
+        </section>
+        <section class="package-center" aria-labelledby="package-center-title">
+          <div class="tools-section-head"><div><span>ACCOUNT PACKAGE</span><h3 id="package-center-title">账号授权包</h3></div></div>
+          <div class="package-grid">
+            <div class="package-panel">
+              <div class="package-panel-title"><i class="package-arrow">↑</i><div><strong>导出授权</strong><small>生成单个 .codexnavo 账号授权包</small></div></div>
+              <label>选择账号<select id="export-account"></select></label>
+              <button class="primary-button package-action" id="export-auth-package" type="button">生成授权包</button>
+            </div>
+            <div class="package-panel">
+              <div class="package-panel-title"><i class="package-arrow">↓</i><div><strong>导入授权</strong><small>验证通过后创建新的 Codex 账号环境</small></div></div>
+              <label class="file-picker">授权包<input id="import-package-file" type="file" accept=".codexnavo,application/json"><span id="import-file-name">选择 .codexnavo 文件</span></label>
+              <p class="package-note">导入只恢复 Codex 授权；不导入项目、任务、Cookie 或网页历史，网页端仍需单独登录。</p>
+              <button class="primary-button package-action" id="import-auth-package" type="button">验证并导入</button>
+            </div>
+          </div>
+        </section>
       </form>
     </dialog>
 

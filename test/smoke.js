@@ -33,7 +33,29 @@ async function run() {
   testAccountId = accountId;
   const codexHome = path.join(runtimeRoot, 'profiles', 'codex', accountId, 'home');
   fs.mkdirSync(codexHome, { recursive: true });
-  fs.writeFileSync(path.join(codexHome, 'auth.json'), '{}');
+  fs.writeFileSync(path.join(codexHome, 'auth.json'), JSON.stringify({
+    auth_mode: 'chatgpt',
+    tokens: {
+      access_token: 'smoke-access-token-value-long-enough',
+      refresh_token: 'smoke-refresh-token-value-long-enough',
+      account_id: 'smoke-account-identity',
+    },
+  }));
+
+  const healthResponse = await fetch(`${baseUrl}/api/accounts/${accountId}/health`, {
+    method: 'POST', headers, body: JSON.stringify({ operator: '冒烟测试' }),
+  });
+  const health = await healthResponse.json();
+  if (!healthResponse.ok || health.data?.health?.status !== 'healthy') throw new Error('授权健康检查接口失败');
+  const exportResponse = await fetch(`${baseUrl}/api/accounts/${accountId}/export-auth`, {
+    method: 'POST', headers, body: JSON.stringify({ operator: '冒烟测试' }),
+  });
+  const exported = await exportResponse.json();
+  if (!exportResponse.ok || exported.data?.package?.type !== 'codex-navo-auth-package') throw new Error('授权包导出接口失败');
+  const duplicateImportResponse = await fetch(`${baseUrl}/api/auth-packages/import`, {
+    method: 'POST', headers, body: JSON.stringify({ operator: '冒烟测试', package: exported.data.package }),
+  });
+  if (duplicateImportResponse.status !== 409) throw new Error('授权包重复账号检查失败');
 
   const wakeSettingsResponse = await fetch(`${baseUrl}/api/wake-settings`, {
     method: 'POST', headers, body: JSON.stringify({ enabled: false, mode: 'manual', model: 'gpt-5.6-sol', reasoningEffort: 'low', prompt: 'hi' }),
@@ -66,7 +88,7 @@ async function run() {
   });
   if (!removeResponse.ok) throw new Error('移除接口失败');
 
-  console.log('Smoke API: OK (bootstrap, add, wake settings, wake, wake all, launch, reopen, release, remove)');
+  console.log('Smoke API: OK (bootstrap, add, health, auth package, wake, launch, release, remove)');
 }
 
 run()

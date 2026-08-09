@@ -1,4 +1,4 @@
-const state = { accounts: [], csrfToken: '', timer: null, quotaRefreshing: false, wakeSettings: {}, wakeModelOptions: [], usage: null };
+const state = { accounts: [], csrfToken: '', timer: null, quotaRefreshing: false, wakeSettings: {}, wakeModelOptions: [], usage: null, importPackageText: '' };
 const elements = {
   accounts: document.querySelector('#accounts'),
   summary: document.querySelector('#account-summary'),
@@ -18,6 +18,16 @@ const elements = {
   wakeDialog: document.querySelector('#wake-dialog'),
   wakeForm: document.querySelector('#wake-form'),
   wakeModelHelp: document.querySelector('#wake-model-help'),
+  accountToolsButton: document.querySelector('#account-tools-button'),
+  accountToolsDialog: document.querySelector('#account-tools-dialog'),
+  healthList: document.querySelector('#health-list'),
+  checkAllHealth: document.querySelector('#check-all-health'),
+  toolsStatus: document.querySelector('#tools-status'),
+  exportAccount: document.querySelector('#export-account'),
+  exportAuthPackage: document.querySelector('#export-auth-package'),
+  importPackageFile: document.querySelector('#import-package-file'),
+  importFileName: document.querySelector('#import-file-name'),
+  importAuthPackage: document.querySelector('#import-auth-package'),
   updateChip: document.querySelector('#update-chip'),
   updateDialog: document.querySelector('#update-dialog'),
   updateDialogTitle: document.querySelector('#update-dialog-title'),
@@ -314,6 +324,21 @@ function showToast(message, error = false) {
   showToast.timeout = setTimeout(() => { elements.toast.className = 'toast'; }, 3200);
 }
 
+function showToolsStatus(message, error = false) {
+  elements.toolsStatus.hidden = false;
+  elements.toolsStatus.textContent = message;
+  elements.toolsStatus.className = `tools-status${error ? ' error' : ' success'}`;
+}
+
+function syncModalScrollLock() {
+  const open = Boolean(document.querySelector('dialog[open]'));
+  document.documentElement.classList.toggle('modal-open', open);
+  document.body.classList.toggle('modal-open', open);
+}
+
+const modalObserver = new MutationObserver(syncModalScrollLock);
+document.querySelectorAll('dialog').forEach((dialog) => modalObserver.observe(dialog, { attributes: true, attributeFilter: ['open'] }));
+
 function setSortMenuOpen(open) {
   elements.sortPopover.hidden = !open;
   elements.sortTrigger.setAttribute('aria-expanded', String(open));
@@ -338,6 +363,46 @@ async function api(url, options = {}) {
   try { payload = await response.json(); } catch { throw new Error('本地服务返回了无法识别的内容'); }
   if (!response.ok || !payload.ok) throw new Error(payload.error || `请求失败（${response.status}）`);
   return payload.data;
+}
+
+function renderHealthCenter() {
+  elements.healthList.innerHTML = state.accounts.length
+    ? state.accounts.map((account) => {
+      const health = account.health || { status: 'attention', label: '等待检查', detail: '尚未读取授权状态' };
+      const action = ['needs_auth', 'expired', 'invalid', 'interrupted'].includes(health.status)
+        ? `<button type="button" data-health-action="authorize" data-account-id="${account.id}">${health.status === 'interrupted' ? '继续' : '授权'}</button>`
+        : `<button type="button" data-health-action="check" data-account-id="${account.id}">检查</button>`;
+      return `<div class="health-row" data-health="${escapeHtml(health.status)}">
+        <div class="health-account" title="${escapeHtml(account.label)}">${escapeHtml(account.label)}</div>
+        <div class="health-state"><i></i>${escapeHtml(health.label)}</div>
+        <div class="health-detail" title="${escapeHtml(health.detail)}">${escapeHtml(health.detail)}</div>
+        ${action}
+      </div>`;
+    }).join('')
+    : '<div class="health-empty">账号池为空，暂无可检查的授权。</div>';
+
+  const selected = elements.exportAccount.value;
+  elements.exportAccount.replaceChildren();
+  for (const account of state.accounts.filter((item) => item.codexInitialized)) {
+    const option = document.createElement('option');
+    option.value = account.id;
+    option.textContent = account.label;
+    elements.exportAccount.append(option);
+  }
+  if ([...elements.exportAccount.options].some((option) => option.value === selected)) elements.exportAccount.value = selected;
+  elements.exportAuthPackage.disabled = !elements.exportAccount.value;
+}
+
+function downloadJsonFile(fileName, value) {
+  const blob = new Blob([`${JSON.stringify(value, null, 2)}\n`], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
 function operator() {
@@ -419,10 +484,10 @@ function render() {
     const setupSteps = !account.codexInitialized ? `<div class="setup-steps one-step" aria-label="账号入池进度">
       <span class="active"><i>1</i>${account.setupStage === 'device-auth' ? '设备代码授权' : '登录并授权'}</span>
     </div>` : '';
-    const codexLoginPanel = account.codexLogin ? `<div class="codex-login-panel ${account.codexLogin.status === 'error' ? 'error' : ''}">
+    const codexLoginPanel = account.codexLogin ? `<div class="codex-login-panel ${['error', 'interrupted'].includes(account.codexLogin.status) ? 'error' : ''}">
       ${setupSteps}
-      ${account.codexLogin.status === 'error'
-        ? `<strong>登录授权未完成</strong><span>${escapeHtml(account.codexLogin.error)}</span><button class="login-fallback" data-action="authorize-device" type="button">改用设备代码</button>`
+      ${['error', 'interrupted'].includes(account.codexLogin.status)
+        ? `<strong>${account.codexLogin.status === 'interrupted' ? '授权流程已中断' : '登录授权未完成'}</strong><span>${escapeHtml(account.codexLogin.error)}</span><div class="login-recovery-actions"><button class="login-fallback" data-action="authorize" type="button">继续授权</button>${account.codexLogin.status === 'error' ? '<button class="login-fallback" data-action="authorize-device" type="button">设备代码</button>' : ''}<button class="login-cancel" data-action="cancel-authorization" type="button">取消</button></div>`
         : account.codexLogin.flow === 'device'
           ? `<strong>请在独立浏览器中完成设备代码授权</strong><span>设备验证码</span><code>${escapeHtml(account.codexLogin.userCode || '正在获取…')}</code><small>备用流程需要先在 ChatGPT 设置中开启设备代码授权。</small>`
           : `<strong>请在独立浏览器中完成登录与授权</strong><small>这是一个连续的官方流程，完成后会自动入池，无需开启设备代码授权。</small>`}
@@ -450,6 +515,10 @@ function render() {
     const sessionBadge = browserOccupied
       ? '<span class="session-badge"><i></i>网页使用中</span>'
       : '';
+    const health = account.health || {};
+    const healthBadge = health.status && health.status !== 'healthy'
+      ? `<span class="health-badge health-${escapeHtml(health.status)}" title="${escapeHtml(health.detail || health.label)}">${escapeHtml(health.label || '待检查')}</span>`
+      : '';
     let codexAction;
     if (!account.codexInitialized) {
       codexAction = `<button class="action-primary action-codex" data-action="authorize" ${codexLoginPending ? 'disabled' : ''}>${codexLoginPending ? '等待登录授权' : account.quotaErrorCode === 'auth_expired' ? '重新登录授权' : '登录并授权'}</button>`;
@@ -471,7 +540,7 @@ function render() {
       <div class="account-overview">
         <div class="account-identity">
           <div class="identity-title"><h3>${escapeHtml(account.label)}</h3></div>
-          ${(planBadge || creditBadge || balanceBadge || sessionBadge) ? `<div class="identity-badges">${planBadge}${creditBadge}${balanceBadge}${sessionBadge}</div>` : ''}
+          ${(planBadge || creditBadge || balanceBadge || sessionBadge || healthBadge) ? `<div class="identity-badges">${planBadge}${creditBadge}${balanceBadge}${sessionBadge}${healthBadge}</div>` : ''}
           ${secondaryIdentity}
         </div>
       </div>
@@ -559,6 +628,12 @@ elements.accounts.addEventListener('click', async (event) => {
     } else if (action === 'wake') {
       await api(`/api/accounts/${card.dataset.id}/wake`, { method: 'POST', body: JSON.stringify({ operator: currentOperator }) });
       showToast('账号已唤醒，额度状态已同步');
+    } else if (action === 'cancel-authorization') {
+      await api(`/api/accounts/${card.dataset.id}/cancel-authorization`, {
+        method: 'POST',
+        body: JSON.stringify({ operator: currentOperator }),
+      });
+      showToast('已取消未完成的授权流程');
     } else if (action === 'authorize' || action === 'authorize-device') {
       if (action === 'authorize-device' && !confirm('设备代码是备用流程。请先在 ChatGPT 设置 → 账户安全与登录中开启“为 Codex 启用设备代码授权”。继续吗？')) return;
       await api(`/api/accounts/${card.dataset.id}/${action}`, {
@@ -593,6 +668,110 @@ document.querySelector('#add-account').addEventListener('click', () => {
   elements.dialog.showModal();
   requestAnimationFrame(() => elements.form.elements.label.focus());
 });
+
+elements.accountToolsButton.addEventListener('click', () => {
+  renderHealthCenter();
+  elements.toolsStatus.hidden = true;
+  elements.accountToolsDialog.showModal();
+});
+
+elements.healthList.addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-health-action]');
+  if (!button) return;
+  button.disabled = true;
+  try {
+    if (button.dataset.healthAction === 'authorize') {
+      await api(`/api/accounts/${button.dataset.accountId}/authorize`, {
+        method: 'POST', body: JSON.stringify({ operator: operator() }),
+      });
+      showToolsStatus('已继续官方登录授权流程，请在账号独立浏览器中完成操作。');
+    } else {
+      await api(`/api/accounts/${button.dataset.accountId}/health`, {
+        method: 'POST', body: JSON.stringify({ operator: operator() }),
+      });
+      showToolsStatus('账号授权状态已检查，结果已更新在上方列表。');
+    }
+    await refresh();
+    renderHealthCenter();
+  } catch (error) {
+    showToolsStatus(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+elements.checkAllHealth.addEventListener('click', async () => {
+  elements.checkAllHealth.disabled = true;
+  elements.checkAllHealth.textContent = '检查中…';
+  try {
+    await api('/api/accounts/health-all', {
+      method: 'POST', body: JSON.stringify({ operator: operator() }),
+    });
+    await refresh();
+    renderHealthCenter();
+    const unhealthy = state.accounts.filter((account) => account.health?.status !== 'healthy').length;
+    showToolsStatus(unhealthy ? `检查完成：${unhealthy} 个账号需要处理。` : '检查完成：全部账号授权正常。', Boolean(unhealthy));
+  } catch (error) {
+    showToolsStatus(error.message, true);
+  } finally {
+    elements.checkAllHealth.disabled = false;
+    elements.checkAllHealth.textContent = '检查全部';
+  }
+});
+
+elements.exportAuthPackage.addEventListener('click', async () => {
+  elements.exportAuthPackage.disabled = true;
+  try {
+    const result = await api(`/api/accounts/${elements.exportAccount.value}/export-auth`, {
+      method: 'POST', body: JSON.stringify({ operator: operator() }),
+    });
+    downloadJsonFile(result.fileName, result.package);
+    showToolsStatus('单文件授权包已生成。它包含可用登录令牌，请通过可信渠道传输。');
+  } catch (error) {
+    showToolsStatus(error.message, true);
+  } finally {
+    elements.exportAuthPackage.disabled = !elements.exportAccount.value;
+  }
+});
+
+elements.importPackageFile.addEventListener('change', async () => {
+  const file = elements.importPackageFile.files?.[0];
+  state.importPackageText = '';
+  elements.importFileName.textContent = file ? file.name : '选择 .codexnavo 文件';
+  if (!file) return;
+  if (file.size > 768 * 1024) {
+    elements.importPackageFile.value = '';
+    elements.importFileName.textContent = '文件过大，请选择有效授权包';
+    return showToolsStatus('授权包文件过大', true);
+  }
+  try {
+    state.importPackageText = await file.text();
+  } catch {
+    showToolsStatus('无法读取授权包文件', true);
+  }
+});
+
+elements.importAuthPackage.addEventListener('click', async () => {
+  if (!state.importPackageText) return showToolsStatus('请先选择 .codexnavo 授权包', true);
+  elements.importAuthPackage.disabled = true;
+  try {
+    await api('/api/auth-packages/import', {
+      method: 'POST',
+      body: JSON.stringify({ operator: operator(), package: state.importPackageText }),
+    });
+    state.importPackageText = '';
+    elements.importPackageFile.value = '';
+    elements.importFileName.textContent = '选择 .codexnavo 文件';
+    await refresh();
+    renderHealthCenter();
+    showToolsStatus('授权包验证通过，账号已成功导入。');
+  } catch (error) {
+    showToolsStatus(error.message, true);
+  } finally {
+    elements.importAuthPackage.disabled = false;
+  }
+});
+
 elements.closeExternalCodex.addEventListener('click', async () => {
   if (!confirm('关闭外部 Codex？正在进行的任务会被中断。')) return;
   elements.closeExternalCodex.disabled = true;
@@ -846,5 +1025,5 @@ syncSortMenu();
 initializeApplicationUpdater();
 refresh();
 state.timer = setInterval(() => {
-  if (!elements.dialog.open && !elements.wakeDialog.open && !elements.updateDialog.open && document.visibilityState === 'visible') refresh();
+  if (!elements.dialog.open && !elements.wakeDialog.open && !elements.updateDialog.open && !elements.accountToolsDialog.open && document.visibilityState === 'visible') refresh();
 }, 5_000);

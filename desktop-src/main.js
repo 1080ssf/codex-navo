@@ -1,6 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, Tray } = require('electron');
 const { autoUpdater } = require('electron-updater');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
@@ -18,6 +18,7 @@ app.setAppUserModelId('com.codexswitchboard.app');
 let mainWindow = null;
 let serverProcess = null;
 let startedServer = false;
+let managedServerPid = null;
 let tray = null;
 let isQuitting = false;
 let updateTimer = null;
@@ -129,8 +130,13 @@ function delay(milliseconds) {
 
 async function ensureServer(root, port) {
   const tokenFile = path.join(USER_DATA_ROOT, 'data', 'access-token.txt');
+  const pidFile = path.join(USER_DATA_ROOT, 'data', 'server.pid');
   if (await isReady(port)) {
-    if (fs.existsSync(tokenFile)) return;
+    if (fs.existsSync(tokenFile)) {
+      const existingPid = Number.parseInt(fs.existsSync(pidFile) ? fs.readFileSync(pidFile, 'utf8').trim() : '', 10);
+      managedServerPid = Number.isInteger(existingPid) && existingPid > 0 ? existingPid : null;
+      return;
+    }
     throw new Error(`端口 ${port} 已被其他程序或旧版 Codex Navo 占用。请先退出旧版程序，再重新启动。`);
   }
   const serverExecutable = app.isPackaged ? process.execPath : 'node.exe';
@@ -147,6 +153,7 @@ async function ensureServer(root, port) {
     },
   });
   startedServer = true;
+  managedServerPid = serverProcess.pid;
   for (let attempt = 0; attempt < 40; attempt += 1) {
     await delay(200);
     if (await isReady(port)) return;
@@ -343,7 +350,20 @@ app.on('before-quit', () => {
     tray.destroy();
     tray = null;
   }
-  if (startedServer && serverProcess && !serverProcess.killed) {
-    try { serverProcess.kill(); } catch {}
+  const serverPid = managedServerPid || serverProcess?.pid;
+  if (Number.isInteger(serverPid) && serverPid > 0 && serverPid !== process.pid) {
+    try {
+      const result = spawnSync('taskkill.exe', ['/PID', String(serverPid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+        timeout: 5_000,
+      });
+      if (result.error && startedServer && serverProcess && !serverProcess.killed) serverProcess.kill();
+    } catch {
+      if (startedServer && serverProcess && !serverProcess.killed) {
+        try { serverProcess.kill(); } catch {}
+      }
+    }
   }
+  managedServerPid = null;
 });

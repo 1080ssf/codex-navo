@@ -197,3 +197,41 @@ test('首次创建账号时直接打开官方 OAuth 地址', () => {
   assert.match(server, /launchAccountBrowser\(account, authUrl\)/);
   assert.match(server, /args\.push\('--new-window', \.\.\.initialUrls\)/);
 });
+
+test('账号授权具备可恢复状态、健康检查与账号迁移入口', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(html, /id="account-tools-button"/);
+  assert.match(html, /id="account-tools-dialog"/);
+  assert.match(html, /账号授权包/);
+  assert.match(client, /\/api\/accounts\/health-all/);
+  assert.match(client, /\/api\/auth-packages\/import/);
+  assert.match(client, /data-action="cancel-authorization"/);
+  assert.match(server, /AUTH_ATTEMPTS_FILE/);
+  assert.match(server, /status: 'interrupted'/);
+  assert.match(server, /createAuthPackage/);
+  assert.match(server, /readAuthPackage/);
+});
+
+test('授权工具锁定底层滚动并在弹窗内显示操作结果', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(html, /id="tools-status"/);
+  assert.match(client, /function showToolsStatus/);
+  assert.match(client, /MutationObserver\(syncModalScrollLock\)/);
+  assert.match(styles, /html\.modal-open, body\.modal-open \{ overflow: hidden/);
+  assert.match(styles, /\.tools-status\.error/);
+});
+
+test('授权包使用单个文件且不要求密码或密钥文件', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(html, /单个 \.codexnavo/);
+  assert.doesNotMatch(html, /id="export-password"|id="import-password"|id="import-key-file"/);
+  assert.doesNotMatch(client, /keyFileName|importKeyFile/);
+  assert.match(server, /createAuthPackage/);
+  assert.match(server, /readAuthPackage/);
+});

@@ -16,6 +16,7 @@ const { readCodexQuota } = require('./lib/codex-quota');
 const { CodexUsageTracker } = require('./lib/codex-usage');
 const { readModelCatalog } = require('./lib/model-catalog');
 const { detectQuotaReset, localDateKey, normalizeWakeSettings, quotaObservation, shouldWakeAccount } = require('./lib/wake');
+const { authIdentity, createAuthPackage, readAuthPackage, validateAuthPayload } = require('./lib/auth-package');
 const { version: APP_VERSION } = require('./package.json');
 
 const ROOT = __dirname;
@@ -37,6 +38,7 @@ const AUDIT_FILE = path.join(DATA_DIR, 'audit.jsonl');
 const PID_FILE = path.join(DATA_DIR, 'server.pid');
 const ACTIVE_CODEX_AUTH_FILE = path.join(DATA_DIR, 'active-codex-auth.json');
 const CODEX_USAGE_FILE = path.join(DATA_DIR, 'codex-usage.json');
+const AUTH_ATTEMPTS_FILE = path.join(DATA_DIR, 'auth-attempts.json');
 const SHARED_CODEX_HOME = process.env.CODEX_MANAGER_MOCK_LAUNCH === '1'
   ? path.join(RUNTIME_ROOT, 'shared-codex')
   : path.join(os.homedir(), '.codex');
@@ -97,6 +99,20 @@ let leases = Object.fromEntries(Object.entries(readJson(LEASES_FILE, {})).map(([
   accountId,
   { ...lease, operator: '本机用户' },
 ]));
+let authAttempts = readJson(AUTH_ATTEMPTS_FILE, {});
+for (const [accountId, attempt] of Object.entries(authAttempts)) {
+  if (!validateAccountId(accountId) || !attempt || typeof attempt !== 'object') {
+    delete authAttempts[accountId];
+  } else if (['starting', 'waiting'].includes(attempt.status)) {
+    authAttempts[accountId] = {
+      ...attempt,
+      status: 'interrupted',
+      updatedAt: new Date().toISOString(),
+      error: '上次授权因应用关闭而中断，可以继续发起官方授权',
+    };
+  }
+}
+writeJsonAtomic(AUTH_ATTEMPTS_FILE, authAttempts);
 const pendingCodexLogins = new Map();
 const wakeRuns = new Map();
 let wakeScheduleRunning = false;
@@ -215,7 +231,7 @@ function readBody(request) {
     let size = 0;
     request.on('data', (chunk) => {
       size += chunk.length;
-      if (size > 32_768) {
+      if (size > 1_048_576) {
         reject(new Error('请求内容过大'));
         request.destroy();
         return;
@@ -364,6 +380,81 @@ usageTracker = new CodexUsageTracker({
 function isCodexAuthenticated(account) {
   const { codexDir, codexHomeDir } = accountPaths(account);
   return fs.existsSync(path.join(codexHomeDir, 'auth.json')) || fs.existsSync(path.join(codexDir, 'auth.json'));
+}
+
+function accountAuthFile(account) {
+  const { codexDir, codexHomeDir } = accountPaths(account);
+  const current = path.join(codexHomeDir, 'auth.json');
+  const legacy = path.join(codexDir, 'auth.json');
+  return fs.existsSync(current) ? current : legacy;
+}
+
+function readAccountAuth(account) {
+  if (!isCodexAuthenticated(account)) throw new Error('该账号还没有 Codex 授权');
+  const auth = readJson(accountAuthFile(account), null);
+  return validateAuthPayload(auth);
+}
+
+function saveAuthAttempt(accountId, patch) {
+  const previous = authAttempts[accountId] || {};
+  authAttempts = {
+    ...authAttempts,
+    [accountId]: {
+      ...previous,
+      ...patch,
+      accountId,
+      updatedAt: new Date().toISOString(),
+    },
+  };
+  writeJsonAtomic(AUTH_ATTEMPTS_FILE, authAttempts);
+}
+
+function clearAuthAttempt(accountId) {
+  if (!authAttempts[accountId]) return;
+  const next = { ...authAttempts };
+  delete next[accountId];
+  authAttempts = next;
+  writeJsonAtomic(AUTH_ATTEMPTS_FILE, authAttempts);
+}
+
+function publicAuthAttempt(accountId) {
+  const pending = pendingCodexLogins.get(accountId);
+  const attempt = pending || authAttempts[accountId];
+  if (!attempt) return null;
+  return {
+    flow: attempt.flow || 'browser',
+    status: attempt.status,
+    userCode: pending?.userCode || '',
+    deviceUrl: pending?.deviceUrl || '',
+    error: attempt.error || '',
+    startedAt: attempt.startedAt || attempt.updatedAt || null,
+  };
+}
+
+function inspectAccountHealth(account) {
+  const checkedAt = new Date().toISOString();
+  const attempt = publicAuthAttempt(account.id);
+  if (attempt && ['starting', 'waiting'].includes(attempt.status)) {
+    return { status: 'authorizing', label: '正在授权', detail: '请在账号独立浏览器中完成官方流程', checkedAt };
+  }
+  if (attempt?.status === 'interrupted') {
+    return { status: 'interrupted', label: '授权已中断', detail: '可以从当前账号继续发起官方授权', checkedAt };
+  }
+  if (!isCodexAuthenticated(account)) {
+    return { status: 'needs_auth', label: '需要授权', detail: '尚未保存 Codex 登录凭证', checkedAt };
+  }
+  try {
+    readAccountAuth(account);
+  } catch {
+    return { status: 'invalid', label: '凭证异常', detail: '授权文件无法识别，请重新授权', checkedAt };
+  }
+  if (account.quotaErrorCode === 'auth_expired') {
+    return { status: 'expired', label: '授权已失效', detail: '官方服务拒绝了当前凭证，请重新授权', checkedAt };
+  }
+  if (account.quotaErrorCode === 'fetch_failed') {
+    return { status: 'attention', label: '需要检查', detail: '凭证存在，但最近一次在线检查失败', checkedAt };
+  }
+  return { status: 'healthy', label: '授权正常', detail: '本地凭证完整，可直接启动 Codex', checkedAt };
 }
 
 function saveWakeSettings(next) {
@@ -769,6 +860,7 @@ function completeCodexLogin(account, operator, pending) {
   pending.status = 'complete';
   clearTimeout(pending.timeout);
   pendingCodexLogins.delete(account.id);
+  clearAuthAttempt(account.id);
   account.setupStage = 'complete';
   account.quotaError = '';
   account.quotaErrorCode = '';
@@ -809,11 +901,13 @@ function startCodexBrowserLogin(account, operator) {
     fail: null,
   };
   pendingCodexLogins.set(account.id, pending);
+  saveAuthAttempt(account.id, { flow: 'browser', status: 'starting', startedAt: pending.startedAt, error: '' });
 
   const fail = (message) => {
     if (pending.status === 'complete' || pending.status === 'error') return;
     pending.status = 'error';
     pending.error = message;
+    saveAuthAttempt(account.id, { flow: 'browser', status: 'error', error: message });
     clearTimeout(pending.timeout);
     const lease = leases[account.id];
     if (lease?.operator === operator) {
@@ -865,6 +959,7 @@ function startCodexBrowserLogin(account, operator) {
       pending.authUrl = authUrl;
       pending.loginId = String(message.result?.loginId || '');
       pending.status = 'waiting';
+      saveAuthAttempt(account.id, { flow: 'browser', status: 'waiting', error: '' });
       if (!pending.browserOpened) {
         pending.browserOpened = true;
         launchAccountBrowser(account, authUrl)
@@ -924,11 +1019,13 @@ function startCodexDeviceLogin(account, operator) {
     timeout: null,
   };
   pendingCodexLogins.set(account.id, pending);
+  saveAuthAttempt(account.id, { flow: 'device', status: 'starting', startedAt: pending.startedAt, error: '' });
 
   const fail = (message) => {
     if (pending.status === 'complete' || pending.status === 'error') return;
     pending.status = 'error';
     pending.error = message;
+    saveAuthAttempt(account.id, { flow: 'device', status: 'error', error: message });
     clearTimeout(pending.timeout);
     const lease = leases[account.id];
     if (lease?.operator === operator) {
@@ -947,6 +1044,7 @@ function startCodexDeviceLogin(account, operator) {
     if (!code || pending.browserOpened) return;
     pending.userCode = code;
     pending.status = 'waiting';
+    saveAuthAttempt(account.id, { flow: 'device', status: 'waiting', error: '' });
     pending.browserOpened = true;
     try {
       await launchAccountBrowser(account, pending.deviceUrl);
@@ -1017,20 +1115,14 @@ function accountView(account) {
     quotaError: account.quotaError || '',
     quotaErrorCode: account.quotaErrorCode || '',
     quotaCheckedAt: account.quotaCheckedAt || null,
+    authSource: account.authSource || 'local-login',
+    importedAt: account.importedAt || null,
+    health: inspectAccountHealth(account),
     wake: {
       ...wakeState(account.id),
       running: wakeRuns.has(account.id),
     },
-    codexLogin: pendingCodexLogins.has(account.id) ? (() => {
-      const login = pendingCodexLogins.get(account.id);
-      return {
-        flow: login.flow || 'device',
-        status: login.status,
-        userCode: login.userCode,
-        deviceUrl: login.deviceUrl,
-        error: login.error || '',
-      };
-    })() : null,
+    codexLogin: publicAuthAttempt(account.id),
     lease: leases[account.id] ? {
       accountId: leases[account.id].accountId,
       operator: leases[account.id].operator,
@@ -1048,6 +1140,89 @@ function saveLeases(next) {
 function saveAccounts(next) {
   accounts = next;
   writeJsonAtomic(ACCOUNTS_FILE, accounts);
+}
+
+async function checkAccountHealth(account, operator) {
+  if (!isCodexAuthenticated(account)) return inspectAccountHealth(account);
+  try {
+    readAccountAuth(account);
+    if (!settings.mockLaunch) {
+      const { codexHomeDir } = accountPaths(account);
+      account.quota = await readCodexQuota(findCodexCli(), codexHomeDir);
+      account.quotaCheckedAt = account.quota.refreshedAt;
+    }
+    account.quotaError = '';
+    account.quotaErrorCode = '';
+    saveAccounts([...accounts]);
+    audit('account.health', { accountId: account.id, operator, result: 'healthy' });
+  } catch (error) {
+    const authExpired = /401|unauthorized|token_revoked|invalidated oauth/i.test(error.message);
+    account.quotaError = authExpired ? '登录已失效，请重新授权' : '授权在线检查失败，请稍后重试';
+    account.quotaErrorCode = authExpired ? 'auth_expired' : 'fetch_failed';
+    account.quotaCheckedAt = new Date().toISOString();
+    saveAccounts([...accounts]);
+    audit('account.health', { accountId: account.id, operator, result: error.message });
+  }
+  return inspectAccountHealth(account);
+}
+
+function uniqueImportedLabel(label) {
+  const base = String(label || '导入账号').replace(/[\r\n\t]/g, ' ').trim().slice(0, 60) || '导入账号';
+  if (!accounts.some((account) => account.label === base)) return base;
+  let index = 2;
+  while (accounts.some((account) => account.label === `${base} (${index})`)) index += 1;
+  return `${base} (${index})`.slice(0, 60);
+}
+
+function existingAuthIdentity(identity) {
+  if (!identity) return null;
+  for (const account of accounts) {
+    try {
+      if (authIdentity(readAccountAuth(account)) === identity) return account;
+    } catch {}
+  }
+  return null;
+}
+
+async function importAuthorizationPackage(envelope, operator) {
+  const payload = readAuthPackage(envelope);
+  const auth = payload.files?.['auth.json'] || payload.account?.auth;
+  const identity = authIdentity(auth);
+  const duplicate = existingAuthIdentity(identity);
+  if (duplicate) throw new Error(`该 Codex 授权已经存在于“${duplicate.label}”`);
+  const account = {
+    id: `account-${crypto.randomBytes(6).toString('hex')}`,
+    label: uniqueImportedLabel(payload.account?.label),
+    emailHint: String(payload.account?.emailHint || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 100),
+    browserType: 'chrome',
+    enabled: true,
+    setupStage: 'complete',
+    authSource: 'authorization-package',
+    importedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+  };
+  const { codexDir, codexHomeDir } = accountPaths(account);
+  try {
+    ensureCodexProfileConfig(codexHomeDir);
+    writeJsonAtomic(path.join(codexHomeDir, 'auth.json'), auth);
+    if (!settings.mockLaunch) {
+      try {
+        account.quota = await readCodexQuota(findCodexCli(), codexHomeDir);
+        account.quotaCheckedAt = account.quota.refreshedAt;
+      } catch (error) {
+        if (/401|unauthorized|token_revoked|invalidated oauth/i.test(error.message)) throw error;
+        account.quotaError = '授权已导入，但在线检查暂时失败';
+        account.quotaErrorCode = 'fetch_failed';
+        account.quotaCheckedAt = new Date().toISOString();
+      }
+    }
+    saveAccounts([...accounts, account]);
+    audit('auth.package.imported', { accountId: account.id, operator, result: 'validated' });
+    return account;
+  } catch (error) {
+    if (isWithin(CODEX_PROFILES_DIR, codexDir)) fs.rmSync(codexDir, { recursive: true, force: true });
+    throw new Error(`授权包验证失败，未写入账号池：${error.message}`);
+  }
 }
 
 function cleanLeases() {
@@ -1195,6 +1370,28 @@ const server = http.createServer(async (request, response) => {
       }
     }
 
+    if (request.method === 'POST' && url.pathname === '/api/accounts/health-all') {
+      const body = await readBody(request);
+      const operator = requireOperator(body.operator);
+      const results = [];
+      for (const account of accounts) {
+        results.push({ accountId: account.id, health: await checkAccountHealth(account, operator) });
+      }
+      return sendJson(response, 200, { ok: true, data: { results, accounts: accounts.map(accountView) } });
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/auth-packages/import') {
+      const body = await readBody(request);
+      const operator = requireOperator(body.operator);
+      try {
+        const envelope = typeof body.package === 'string' ? JSON.parse(body.package) : body.package;
+        const account = await importAuthorizationPackage(envelope, operator);
+        return sendJson(response, 201, { ok: true, data: accountView(account) });
+      } catch (error) {
+        return sendError(response, /已经存在/.test(error.message) ? 409 : 400, error.message);
+      }
+    }
+
     if (request.method === 'POST' && url.pathname === '/api/accounts') {
       const body = await readBody(request);
       const operator = requireOperator(body.operator);
@@ -1230,7 +1427,7 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 201, { ok: true, data: accountView(account) });
     }
 
-    const match = url.pathname.match(/^\/api\/accounts\/([a-z0-9-]+)\/(launch|release|toggle|authorize|authorize-device|quota|wake|quit-codex)$/);
+    const match = url.pathname.match(/^\/api\/accounts\/([a-z0-9-]+)\/(launch|release|toggle|authorize|authorize-device|cancel-authorization|quota|health|export-auth|wake|quit-codex)$/);
     if (match && request.method === 'POST') {
       const [, accountId, operation] = match;
       if (!validateAccountId(accountId)) return sendError(response, 400, '账号 ID 无效');
@@ -1239,6 +1436,46 @@ const server = http.createServer(async (request, response) => {
       const body = await readBody(request);
       const operator = requireOperator(body.operator);
       cleanLeases();
+
+      if (operation === 'health') {
+        const health = await checkAccountHealth(account, operator);
+        return sendJson(response, 200, { ok: true, data: { health, account: accountView(account) } });
+      }
+
+      if (operation === 'export-auth') {
+        try {
+          const auth = readAccountAuth(account);
+          const authorizationPackage = createAuthPackage({
+            manifest: {
+              type: 'codex-navo-account-transfer',
+              schemaVersion: 1,
+              createdAt: new Date().toISOString(),
+              appVersion: APP_VERSION,
+            },
+            account: { label: account.label, emailHint: account.emailHint || '', authSource: account.authSource || 'local-login' },
+            identity: { fingerprint: authIdentity(auth) },
+            files: { 'auth.json': auth },
+          });
+          const safeName = account.label.replace(/[^a-z0-9\u4e00-\u9fff_-]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'codex-account';
+          audit('auth.package.exported', { accountId, operator, result: 'single-file' });
+          return sendJson(response, 200, { ok: true, data: {
+            fileName: `${safeName}.codexnavo`,
+            package: authorizationPackage,
+          } });
+        } catch (error) {
+          return sendError(response, 400, error.message);
+        }
+      }
+
+      if (operation === 'cancel-authorization') {
+        cancelPendingCodexLogin(accountId);
+        clearAuthAttempt(accountId);
+        const next = { ...leases };
+        delete next[accountId];
+        saveLeases(next);
+        audit('codex.login.cancelled', { accountId, operator, result: 'user-request' });
+        return sendJson(response, 200, { ok: true, data: accountView(account) });
+      }
 
       if (operation === 'quit-codex') {
         const lease = leases[accountId];
@@ -1328,6 +1565,7 @@ const server = http.createServer(async (request, response) => {
         if (!lease) return sendJson(response, 200, { ok: true, data: accountView(account) });
         if (lease.operator !== operator) return sendError(response, 409, `账号由 ${lease.operator} 占用，只能由本人释放`);
         cancelPendingCodexLogin(accountId);
+        clearAuthAttempt(accountId);
         const next = { ...leases };
         delete next[accountId];
         saveLeases(next);
@@ -1376,6 +1614,7 @@ const server = http.createServer(async (request, response) => {
       if (leases[accountId]) return sendError(response, 409, '请先释放账号再移除');
       if (!accounts.some((item) => item.id === accountId)) return sendError(response, 404, '账号不存在');
       saveAccounts(accounts.filter((item) => item.id !== accountId));
+      clearAuthAttempt(accountId);
       const nextWakeStates = { ...wakeSettings.accountStates };
       delete nextWakeStates[accountId];
       saveWakeSettings({ ...wakeSettings, accountStates: nextWakeStates });

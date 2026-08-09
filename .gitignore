@@ -12,6 +12,7 @@ profiles/
 
 # Runtime credentials, state, logs, and screenshots
 data/
+*.codexnavo
 
 # Temporary and editor files
 *.tmp

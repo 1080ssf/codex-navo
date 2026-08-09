@@ -2,7 +2,7 @@
   "name": "codex-navo",
   "productName": "Codex Navo",
   "private": true,
-  "version": "1.1.29",
+  "version": "1.1.33",
   "description": "A local Windows account environment switcher for Codex.",
   "main": "desktop-src/main.js",
   "author": "1080ssf",
@@ -46,6 +46,7 @@
       "artifactName": "Codex-Navo-Setup-${version}-windows-${arch}.${ext}"
     },
     "nsis": {
+      "include": "build/installer.nsh",
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
