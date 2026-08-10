@@ -1,8 +1,8 @@
-<!-- README 预览稿：确认后再替换正式 README.md -->
+# Codex Navo — Codex 多账号管理与切换工具
 
-# Codex Navo
+**Windows 上的 ChatGPT / Codex 多账号管理器（multi-account manager & account switcher）。**
 
-**多个 ChatGPT / Codex 账号，一个地方管理。**
+Codex Navo 是一款开源的 Codex 账号管理、账号切换与额度查看桌面工具，支持独立 Chrome 登录环境、Codex Desktop / CLI OAuth、Token 用量统计、账号唤醒、授权检查与迁移。
 
 如果你有多个 Codex 账号，最麻烦的通常不是使用，而是：
 
