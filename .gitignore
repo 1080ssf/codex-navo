@@ -2,6 +2,8 @@
 node_modules/
 desktop-build/
 release/
+research/
+verification/
 
 # Local configuration may contain usernames or absolute paths
 config/settings.json

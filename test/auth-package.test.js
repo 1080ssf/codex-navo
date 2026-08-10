@@ -1,9 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  authAccessExpiry,
   authIdentity,
   createAuthPackage,
   readAuthPackage,
+  validateAuthPayload,
 } = require('../lib/auth-package');
 
 function fixtureAuth(accountId = 'acct-test-001') {
@@ -76,4 +78,21 @@ test('旧版只含 auth.json 的授权包继续兼容，其他站点 Cookie 被�
       },
     },
   }), /网页会话 Cookie 内容无效/);
+});
+
+test('temporary auth requires explicit opt-in and remains exportable', () => {
+  const auth = fixtureAuth();
+  auth.tokens.id_token = `${Buffer.from(JSON.stringify({ alg: 'none', cpa_synthetic: true })).toString('base64url')}.payload.synthetic`;
+  auth.tokens.refresh_token = 'placeholder';
+  assert.throws(() => validateAuthPayload(auth), /OAuth refresh token|Codex/);
+  assert.equal(validateAuthPayload(auth, { allowTemporary: true }), auth);
+  const payload = { account: {}, files: { 'auth.json': auth } };
+  assert.deepEqual(readAuthPackage(createAuthPackage(payload)), payload);
+});
+
+test('临时授权可以读取 Access Token 到期时间而不暴露令牌', () => {
+  const payload = Buffer.from(JSON.stringify({ exp: 2_000_000_000 })).toString('base64url');
+  const auth = fixtureAuth();
+  auth.tokens.access_token = `header.${payload}.signature`;
+  assert.equal(authAccessExpiry(auth), '2033-05-18T03:33:20.000Z');
 });

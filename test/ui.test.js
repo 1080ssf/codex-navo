@@ -258,11 +258,17 @@ test('授权包使用单个文件且不要求密码或密钥文件', () => {
   assert.match(server, /readAuthPackage/);
 });
 
-test('账号界面移除邮箱接口检测并采用协议登录免接码名称', () => {
+test('添加账号突出官方登录并将后台交互登录收纳到更多方式', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  assert.match(html, /协议登录（免接码）/);
+  assert.match(html, /class="login-method-primary"[\s\S]*<strong>登录并授权<\/strong>/);
+  assert.match(html, /<details class="login-method-more">[\s\S]*<strong>更多登录方式<\/strong>/);
+  assert.match(html, /<strong>后台交互登录<\/strong>/);
+  assert.match(html, /验证码、手机号或 2FA 会在应用内提示/);
+  assert.match(client, /if \(more\) more\.open = method !== 'official'/);
+  assert.match(client, /data-action="authorize" type="button">改用官方登录/);
+  assert.match(server, /account\.loginMethod = useProtocol \? 'protocol' : 'official'/);
   assert.doesNotMatch(html, /protocol-login-note|mail-interface-endpoint|邮箱接口检测/);
   assert.doesNotMatch(client, /mailInterfaceEndpoint|checkMailInterface|\/api\/mail-interface\/check/);
   assert.doesNotMatch(server, /fetchPublicMetadata|\/api\/mail-interface\/check/);
@@ -307,12 +313,26 @@ test('授权包导出和导入同时处理 Codex 授权与独立 Chrome 网页�
   assert.match(client, /Codex 授权与网页会话均已验证/);
 });
 
+test('协议登录移除临时凭证续期并保留官方重新授权入口', () => {
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.doesNotMatch(server, /operation === 'renew'|runScheduledAuthRenewals|beginProtocolRenewal/);
+  assert.match(server, /return !isNonRefreshableWebSessionAuth\(auth\)/);
+  assert.match(server, /旧版临时凭证不可刷新，请完成官方 Codex OAuth/);
+  assert.doesNotMatch(client, /formatAuthExpiry|data-action="renew"|renewAction/);
+  assert.match(client, /data-action="codex">登录 Codex</);
+  assert.doesNotMatch(styles, /\.auth-expiry-badge|\.action-renew|\.account-grid \.account-actions\.has-renew/);
+});
+
 test('account creation keeps official and protocol login with manual prompts only', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.match(html, /name="loginMethod" value="official"/);
   assert.match(html, /name="loginMethod" value="protocol"/);
+  assert.match(html, /name="loginMethod" value="official" checked/);
+  assert.match(html, /class="login-method-more"/);
   assert.doesNotMatch(html, /value="cdk"|name="mockOtpEndpoint"|name="protocolPaste"/);
   assert.match(client, /function renderProtocolPrompt/);
   assert.match(client, /\['email_otp', 'totp', 'phone_otp'\]/);

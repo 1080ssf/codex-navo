@@ -233,7 +233,7 @@ h1 { font-size: clamp(30px, 3vw, 38px); line-height: 1; letter-spacing: -.035em;
 .identity-title { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .account-identity h3 { min-width: 0; margin: 0; overflow-wrap: anywhere; font: 680 18px/1.22 "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", sans-serif; letter-spacing: -.01em; }
 .account-identity p { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
-.identity-badges { display: flex; align-items: center; gap: 7px; margin-top: 8px; }
+.identity-badges { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
 .identity-badges + p { margin-top: 7px; }
 .plan-badge { flex: 0 0 auto; padding: 3px 8px; border: 1px solid #a9dfcf; border-radius: 999px; color: #157459; background: #e8faf4; font: 700 10px/1 "Cascadia Code", monospace; letter-spacing: .04em; }
 .plan-badge.plan-pro { color: #4f46a5; border-color: #c7c3ef; background: #f0efff; }
@@ -366,15 +366,25 @@ dialog textarea { resize: vertical; line-height: 1.55; }
 .fixed-browser-value { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 48px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; }
 .fixed-browser-value strong { color: var(--ink); font-size: 14px; }
 .fixed-browser-value small { color: var(--muted); font-size: 12px; text-align: right; }
-.login-method-picker { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 18px 0 0; padding: 0; border: 0; }
-.login-method-picker legend { grid-column: 1 / -1; margin-bottom: 8px; color: var(--ink); font-size: 13px; font-weight: 700; }
+.login-method-picker { display: grid; gap: 10px; margin: 18px 0 0; padding: 0; border: 0; }
+.login-method-picker legend { margin-bottom: 8px; color: var(--ink); font-size: 13px; font-weight: 700; }
 .login-method-picker label { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #f8fafc; cursor: pointer; }
 .login-method-picker label:has(input:checked) { border-color: #8fb1f4; background: #f0f5ff; box-shadow: inset 0 0 0 1px #8fb1f4; }
 .login-method-picker input { width: auto; margin: 3px 0 0; padding: 0; }
 .login-method-picker span { display: grid; gap: 4px; }
 .login-method-picker strong { font-size: 13px; }
 .login-method-picker small { color: var(--muted); font-size: 11px; line-height: 1.5; }
-.login-method-picker .login-method-import { grid-column: 1 / -1; }
+.login-method-primary { position: relative; align-items: center !important; min-height: 66px; padding: 14px 16px !important; background: #fff !important; }
+.login-method-primary span { flex: 1; }
+.login-method-primary em { align-self: center; padding: 4px 8px; border-radius: 999px; color: #1c5ac7; background: #eaf2ff; font-size: 10px; font-style: normal; font-weight: 700; }
+.login-method-more { border: 1px solid var(--line); border-radius: 10px; background: #f8fafc; overflow: hidden; }
+.login-method-more summary { display: flex; align-items: center; min-height: 54px; padding: 0 16px; color: var(--ink); cursor: pointer; list-style: none; }
+.login-method-more summary::-webkit-details-marker { display: none; }
+.login-method-more summary::after { content: '⌄'; margin-left: auto; color: var(--muted); font-size: 18px; transition: transform .18s ease; }
+.login-method-more[open] summary::after { transform: rotate(180deg); }
+.login-method-more summary span { gap: 2px; }
+.login-method-secondary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 0 10px 10px; border-top: 1px solid #e4eaf2; }
+.login-method-secondary label { margin-top: 10px; background: #fff; }
 .account-manual-field[hidden], .account-import-panel[hidden] { display: none; }
 .account-import-panel { display: grid; gap: 8px; margin-top: 12px; padding: 12px; border: 1px solid #c9d7ea; border-radius: 10px; background: #f7faff; }
 .account-import-panel .file-picker { margin: 0; }
@@ -405,7 +415,7 @@ dialog textarea { resize: vertical; line-height: 1.55; }
 .protocol-progress-actions { display: flex; justify-content: center; gap: 10px; margin-top: 24px; }
 @keyframes protocol-spin { to { transform: rotate(360deg); } }
 @media (max-width: 900px) { .protocol-inline-input { width: 100%; min-width: 0; margin-left: 0; } }
-@media (max-width: 720px) { .login-method-picker { grid-template-columns: 1fr; } }
+@media (max-width: 720px) { .login-method-secondary { grid-template-columns: 1fr; } }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 26px; }
 .update-dialog { width: min(560px, calc(100% - 28px)); }
 .wake-dialog { width: min(600px, calc(100% - 28px)); }

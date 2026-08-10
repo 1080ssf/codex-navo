@@ -365,9 +365,11 @@ function syncAccountLoginMethod() {
   const method = String(new FormData(elements.form).get('loginMethod') || 'official');
   const importing = method === 'import';
   const protocol = method === 'protocol';
+  const more = elements.form.querySelector('.login-method-more');
   const labelInput = elements.form.elements.label;
   const emailInput = elements.form.elements.emailHint;
   elements.accountImportPanel.hidden = !importing;
+  if (more) more.open = method !== 'official';
   elements.form.querySelectorAll('.account-manual-field').forEach((field) => { field.hidden = importing; });
   labelInput.required = !importing;
   labelInput.disabled = importing;
@@ -639,7 +641,7 @@ function render() {
     const codexLoginPanel = account.codexLogin ? `<div class="codex-login-panel ${['error', 'interrupted'].includes(account.codexLogin.status) ? 'error' : ''}">
       ${setupSteps}
       ${['error', 'interrupted'].includes(account.codexLogin.status)
-        ? `<strong>${account.codexLogin.status === 'interrupted' ? '授权流程已中断' : '登录授权未完成'}</strong><span>${escapeHtml(account.codexLogin.error)}</span><div class="login-recovery-actions"><button class="login-fallback" data-action="${account.loginMethod === 'protocol' ? 'authorize-protocol' : 'authorize'}" type="button">继续授权</button>${account.codexLogin.status === 'error' && account.loginMethod !== 'protocol' ? '<button class="login-fallback" data-action="authorize-device" type="button">设备代码</button>' : ''}<button class="login-cancel" data-action="cancel-authorization" type="button">取消</button></div>`
+        ? `<strong>${account.codexLogin.status === 'interrupted' ? '授权流程已中断' : '登录授权未完成'}</strong><span>${escapeHtml(account.codexLogin.error)}</span><div class="login-recovery-actions"><button class="login-fallback" data-action="${account.loginMethod === 'protocol' ? 'authorize-protocol' : 'authorize'}" type="button">继续授权</button>${account.codexLogin.status === 'error' && account.loginMethod === 'protocol' ? '<button class="login-fallback" data-action="authorize" type="button">改用官方登录</button>' : account.codexLogin.status === 'error' ? '<button class="login-fallback" data-action="authorize-device" type="button">设备代码</button>' : ''}<button class="login-cancel" data-action="cancel-authorization" type="button">取消</button></div>`
         : account.codexLogin.flow === 'protocol'
         ? account.codexLogin.promptKind
             ? renderProtocolPrompt(account.codexLogin)
@@ -693,7 +695,7 @@ function render() {
     } else if (activeAccount) {
       codexAction = '<button class="action-primary action-blocked" type="button" disabled title="请先退出当前 Codex">暂不可切换</button>';
     } else {
-      codexAction = '<button class="action-primary action-codex" data-action="codex">启动 Codex</button>';
+      codexAction = '<button class="action-primary action-codex" data-action="codex">登录 Codex</button>';
     }
     const wakeTitle = account.wake?.running
       ? '正在唤醒账号'
@@ -857,6 +859,8 @@ document.querySelector('#add-account').addEventListener('click', () => {
   state.accountImportPackageText = '';
   elements.accountImportPackageFile.value = '';
   elements.accountImportFileName.textContent = '选择 .codexnavo 文件';
+  const more = elements.form.querySelector('.login-method-more');
+  if (more) more.open = false;
   syncAccountLoginMethod();
   elements.dialog.showModal();
   requestAnimationFrame(() => elements.form.elements.label.focus());

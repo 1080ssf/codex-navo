@@ -15,6 +15,7 @@ const {
   validateProtocolInput,
 } = require('../lib/protocol-login');
 const { buildCodexAuthFromWebSession } = require('../lib/web-session-auth');
+const { isNonRefreshableWebSessionAuth, validateAuthPayload } = require('../lib/auth-package');
 
 class MockChromeSocket {
   constructor() {
@@ -197,7 +198,7 @@ test('Headless 403 延后验证路径真实执行三次重试并主动关闭浏�
   assert.ok(socket.methods.includes('Browser.close'));
 });
 
-test('网页会话可转换为经过 Codex 校验的临时 auth.json 结构', () => {
+test('web session builds an identifiable temporary auth.json', () => {
   const jwt = (payload) => `${Buffer.from('{}').toString('base64url')}.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.signature`;
   const accessToken = jwt({
     exp: 2_000_000_000,
@@ -210,26 +211,21 @@ test('网页会话可转换为经过 Codex 校验的临时 auth.json 结构', ()
     account: { id: 'account-from-session', planType: 'pro' },
     user: { id: 'user-fixture', email: 'fixture@example.invalid' },
   }, now);
-  assert.equal(auth.auth_mode, 'chatgpt');
-  assert.equal(auth.tokens.account_id, 'account-from-session');
-  assert.equal(auth.tokens.access_token, accessToken);
-  assert.equal(auth.tokens.refresh_token, accessToken);
-  assert.equal(auth.last_refresh, now.toISOString());
-  const idClaims = JSON.parse(Buffer.from(auth.tokens.id_token.split('.')[1], 'base64url').toString('utf8'));
-  assert.equal(idClaims['https://api.openai.com/auth'].chatgpt_account_id, 'account-from-session');
+  assert.equal(auth.tokens.refresh_token, 'placeholder');
+  assert.equal(isNonRefreshableWebSessionAuth(auth), true);
+  assert.equal(validateAuthPayload(auth, { allowTemporary: true }), auth);
+  assert.throws(() => validateAuthPayload(auth), /OAuth refresh token|Codex/);
 });
 
-test('协议登录遇到手机号绑定时先执行网页凭证在线校验回退', () => {
+test('phone binding stays in the official OAuth prompt flow and only real OAuth is pooled', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  assert.match(source, /if \(prompt\.kind === 'phone'\) \{/);
-  assert.match(source, /status: 'finalizing'/);
-  assert.match(source, /persistedBrowserResult = await injectProtocolCookies/);
-  assert.match(source, /cookies: \[\]/);
-  assert.match(source, /独立 Chrome 会话写入后未能持久保存/);
-  assert.match(source, /waitForProtocolBrowserExit\(pending\.browser\)/);
-  assert.match(source, /launchAccountBrowserForProtocol\(account, \{ visibleOffscreen: true \}\)/);
-  assert.match(source, /readCodexQuota\(findCodexCli\(\), stagingHome, 20_000\)/);
-  assert.match(source, /authSource = 'web-session-fallback'/);
+  assert.doesNotMatch(source, /if \(prompt\.kind === 'phone'\) \{/);
+  assert.doesNotMatch(source, /finalizeTemporaryWebSession|buildCodexAuthFromWebSession/);
+  assert.match(source, /pending\.promptKind = prompt\.kind/);
+  assert.match(source, /writeJsonAtomic\(path\.join\(codexHomeDir, 'auth\.json'\), validateAuthPayload\(oauth\.auth\)\)/);
+  assert.match(source, /authSource = 'protocol-web-and-codex-oauth'/);
+  assert.match(source, /setupStage = 'complete'/);
+  assert.match(source, /result: 'web-and-codex-pooled'/);
 });
 
 test('Chrome closes gracefully so protocol cookies can reach disk', () => {
@@ -242,20 +238,17 @@ test('Chrome closes gracefully so protocol cookies can reach disk', () => {
 test('协议登录异常不会带崩本地服务，重启后 finalizing 会标记为中断', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.match(source, /\['starting', 'waiting', 'finalizing'\]\.includes\(attempt\.status\)/);
-  assert.match(source, /completeWithWebSession\(\)\.catch\(\(error\) => fail/);
+  assert.doesNotMatch(source, /finalizeTemporaryWebSession/);
   assert.match(source, /const consumeSafely = \(chunk\) =>/);
   assert.match(source, /try \{ cleanupProtocolLoginFiles\(paths\); \} catch \{\}/);
 });
 
-test('网页凭证校验目录遇到 Windows EPERM 时延迟清理且不影响入池', () => {
+test('temporary renewal path is removed in favor of official reauthorization', () => {
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  const quota = fs.readFileSync(path.join(__dirname, '..', 'lib', 'codex-quota.js'), 'utf8');
-  assert.match(server, /web-session-check-\$\{process\.pid\}-\$\{Date\.now\(\)\}/);
-  assert.match(server, /async function removeDirectoryWithRetry/);
-  assert.match(server, /\['EPERM', 'EBUSY', 'ENOTEMPTY'\]/);
-  assert.match(server, /cleanupDirectoryEventually\(stagingHome\)/);
-  assert.match(quota, /child\.once\('exit', complete\)/);
-  assert.match(quota, /setTimeout\(complete, 2_000\)/);
+  assert.doesNotMatch(server, /beginProtocolRenewal|runScheduledAuthRenewals|operation === 'renew'/);
+  assert.match(server, /return !isNonRefreshableWebSessionAuth\(auth\)/);
+  assert.match(server, /requires-official-oauth/);
+  assert.match(server, /label: '需要官方授权'/);
 });
 
 test('协议登录入池后不自动打开窗口，手动网页端仍绑定账号独立目录', () => {

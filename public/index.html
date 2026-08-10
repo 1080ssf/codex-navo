@@ -118,9 +118,14 @@
         <label class="account-manual-field">邮箱提示<input name="emailHint" maxlength="100" placeholder="例如：de***@company.com"></label>
         <fieldset class="login-method-picker">
           <legend>登录方式</legend>
-          <label><input type="radio" name="loginMethod" value="official" checked><span><strong>官方浏览器登录</strong><small>默认方式，在独立 Chrome 中完成登录与授权</small></span></label>
-          <label><input type="radio" name="loginMethod" value="protocol"><span><strong>协议登录（免接码）</strong><small>后台完成网页登录和 Codex 授权，成功后直接入池</small></span></label>
-          <label class="login-method-import"><input type="radio" name="loginMethod" value="import"><span><strong>导入授权包</strong><small>选择 .codexnavo 文件，直接恢复 Codex 授权与可用的网页会话</small></span></label>
+          <label class="login-method-primary"><input type="radio" name="loginMethod" value="official" checked><span><strong>登录并授权</strong><small>推荐方式，在账号独立 Chrome 中完成官方登录与 Codex OAuth</small></span><em>推荐</em></label>
+          <details class="login-method-more">
+            <summary><span><strong>更多登录方式</strong><small>后台交互登录或导入已有授权包</small></span></summary>
+            <div class="login-method-secondary">
+              <label><input type="radio" name="loginMethod" value="protocol"><span><strong>后台交互登录</strong><small>后台完成网页登录与官方 Codex OAuth；验证码、手机号或 2FA 会在应用内提示</small></span></label>
+              <label class="login-method-import"><input type="radio" name="loginMethod" value="import"><span><strong>导入授权包</strong><small>选择 .codexnavo 文件，恢复 Codex 授权与可用网页会话</small></span></label>
+            </div>
+          </details>
         </fieldset>
         <div class="account-import-panel" id="account-import-panel" hidden>
           <label class="file-picker">账号授权包<input id="account-import-package-file" type="file" accept=".codexnavo,application/json"><span id="account-import-file-name">选择 .codexnavo 文件</span></label>
