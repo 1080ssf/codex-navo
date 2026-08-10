@@ -23,6 +23,7 @@ let tray = null;
 let isQuitting = false;
 let updateTimer = null;
 let updaterConfigured = false;
+let serverRestartTimer = null;
 let updateState = {
   status: 'idle',
   currentVersion: app.getVersion(),
@@ -141,16 +142,38 @@ async function ensureServer(root, port) {
   }
   const serverExecutable = app.isPackaged ? process.execPath : 'node.exe';
   const serverArguments = app.isPackaged ? [path.join(root, 'server.js')] : ['server.js'];
+  const logDirectory = path.join(USER_DATA_ROOT, 'data');
+  fs.mkdirSync(logDirectory, { recursive: true });
+  const serverLog = fs.openSync(path.join(logDirectory, 'server.log'), 'a');
   serverProcess = spawn(serverExecutable, serverArguments, {
     cwd: app.isPackaged ? path.dirname(process.execPath) : root,
     windowsHide: true,
-    stdio: 'ignore',
+    stdio: ['ignore', serverLog, serverLog],
     env: {
       ...process.env,
       CODEX_MANAGER_NO_OPEN: '1',
       CODEX_SWITCHBOARD_USER_DATA: USER_DATA_ROOT,
       ...(app.isPackaged ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
     },
+  });
+  fs.closeSync(serverLog);
+  const launchedServer = serverProcess;
+  launchedServer.once('exit', () => {
+    if (serverProcess === launchedServer) serverProcess = null;
+    managedServerPid = null;
+    if (isQuitting || serverRestartTimer) return;
+    serverRestartTimer = setTimeout(async () => {
+      serverRestartTimer = null;
+      if (isQuitting) return;
+      try {
+        await ensureServer(root, port);
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.reload();
+      } catch (error) {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('server:restart-failed', String(error.message || error));
+        }
+      }
+    }, 800);
   });
   startedServer = true;
   managedServerPid = serverProcess.pid;
@@ -342,6 +365,10 @@ app.on('window-all-closed', () => app.quit());
 
 app.on('before-quit', () => {
   isQuitting = true;
+  if (serverRestartTimer) {
+    clearTimeout(serverRestartTimer);
+    serverRestartTimer = null;
+  }
   if (updateTimer) {
     clearInterval(updateTimer);
     updateTimer = null;
@@ -353,7 +380,9 @@ app.on('before-quit', () => {
   const serverPid = managedServerPid || serverProcess?.pid;
   if (Number.isInteger(serverPid) && serverPid > 0 && serverPid !== process.pid) {
     try {
-      const result = spawnSync('taskkill.exe', ['/PID', String(serverPid), '/T', '/F'], {
+      // Stop only Navo's local service. /T would also terminate an independently
+      // running Codex desktop process that was originally launched by the service.
+      const result = spawnSync('taskkill.exe', ['/PID', String(serverPid), '/F'], {
         windowsHide: true,
         stdio: 'ignore',
         timeout: 5_000,

@@ -350,10 +350,13 @@ h1 { font-size: clamp(30px, 3vw, 38px); line-height: 1; letter-spacing: -.035em;
 dialog { width: min(520px, calc(100% - 28px)); border: 1px solid var(--line); border-radius: 14px; padding: 0; color: var(--ink); background: var(--paper); box-shadow: 0 30px 100px rgba(21,36,58,.25); }
 #account-dialog { width: min(620px, calc(100% - 28px)); max-height: calc(100vh - 38px); overflow-x: hidden; overflow-y: auto; }
 #account-dialog form { width: 100%; min-width: 0; }
-dialog::backdrop { background: rgba(21,36,58,.38); backdrop-filter: blur(3px); }
+dialog::backdrop { background: rgba(21,36,58,.18); backdrop-filter: none; }
 dialog form { padding: 26px; }
 .dialog-head { display: flex; justify-content: space-between; gap: 20px; }
 .dialog-copy { color: var(--muted); font-size: 13px; line-height: 1.7; }
+.account-dialog-status { margin: 12px 0 4px; padding: 11px 13px; border: 1px solid #e3a8ae; border-radius: 9px; background: #fff4f5; color: #a22e3b; font-size: 12px; font-weight: 650; line-height: 1.55; overflow-wrap: anywhere; }
+.account-dialog-status[hidden] { display: none; }
+.account-dialog-status.success { border-color: #9bd8c2; background: #f0fbf7; color: #16765a; }
 .icon-button { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: transparent; font-size: 22px; line-height: 1; }
 dialog label { display: grid; gap: 8px; margin-top: 18px; font-size: 13px; font-weight: 650; }
 dialog input, dialog select, dialog textarea { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; color: var(--ink); font: inherit; }
@@ -363,14 +366,70 @@ dialog textarea { resize: vertical; line-height: 1.55; }
 .fixed-browser-value { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 48px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; }
 .fixed-browser-value strong { color: var(--ink); font-size: 14px; }
 .fixed-browser-value small { color: var(--muted); font-size: 12px; text-align: right; }
+.login-method-picker { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 18px 0 0; padding: 0; border: 0; }
+.login-method-picker legend { grid-column: 1 / -1; margin-bottom: 8px; color: var(--ink); font-size: 13px; font-weight: 700; }
+.login-method-picker label { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #f8fafc; cursor: pointer; }
+.login-method-picker label:has(input:checked) { border-color: #8fb1f4; background: #f0f5ff; box-shadow: inset 0 0 0 1px #8fb1f4; }
+.login-method-picker input { width: auto; margin: 3px 0 0; padding: 0; }
+.login-method-picker span { display: grid; gap: 4px; }
+.login-method-picker strong { font-size: 13px; }
+.login-method-picker small { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.login-method-picker .login-method-import { grid-column: 1 / -1; }
+.account-manual-field[hidden], .account-import-panel[hidden] { display: none; }
+.account-import-panel { display: grid; gap: 8px; margin-top: 12px; padding: 12px; border: 1px solid #c9d7ea; border-radius: 10px; background: #f7faff; }
+.account-import-panel .file-picker { margin: 0; }
+.account-import-panel p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.protocol-inline-input { display: flex; align-items: center; gap: 8px; min-width: 320px; margin-left: auto; }
+.protocol-inline-input input { flex: 1; min-width: 180px; height: 38px; padding: 0 12px; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: var(--ink); outline: none; }
+.protocol-inline-input input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(42, 100, 219, .12); }
+.protocol-inline-input button { height: 38px; padding: 0 16px; border: 0; border-radius: 9px; background: var(--blue); color: #fff; font-weight: 700; cursor: pointer; }
+.protocol-progress-active > .dialog-copy,
+.protocol-progress-active > label,
+.protocol-progress-active > fieldset,
+.protocol-progress-active > .fixed-browser,
+.protocol-progress-active > .dialog-actions { display: none; }
+.protocol-dialog-progress { margin-top: 20px; padding: 26px; border: 1px solid #c8d6e8; border-radius: 13px; background: linear-gradient(145deg, #f8fbff, #f3f7fc); text-align: center; }
+.protocol-dialog-progress[hidden] { display: none; }
+.protocol-progress-mark { display: grid; width: 46px; height: 46px; margin: 0 auto 14px; place-items: center; border-radius: 14px; background: #e8f0ff; }
+.protocol-progress-mark span { width: 13px; height: 13px; border: 3px solid #b4c6e4; border-top-color: var(--blue); border-radius: 50%; animation: protocol-spin .9s linear infinite; }
+.protocol-dialog-progress.success .protocol-progress-mark { background: #e9f8f2; }
+.protocol-dialog-progress.success .protocol-progress-mark span { width: 16px; height: 9px; border: 0; border-left: 3px solid #16815e; border-bottom: 3px solid #16815e; border-radius: 0; transform: rotate(-45deg); animation: none; }
+.protocol-dialog-progress.error .protocol-progress-mark { background: #fff0f1; }
+.protocol-dialog-progress.error .protocol-progress-mark span { width: 18px; height: 3px; border: 0; border-radius: 2px; background: #b43c47; transform: rotate(45deg); animation: none; }
+.protocol-dialog-progress h3 { margin: 5px 0 8px; font: 700 22px/1.2 "Bahnschrift", "Microsoft YaHei UI", sans-serif; }
+.protocol-dialog-progress > p:not(.eyebrow) { margin: 0 auto; max-width: 460px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+#protocol-progress-input { margin-top: 22px; text-align: left; }
+#protocol-progress-input > strong, #protocol-progress-input > small { display: block; }
+#protocol-progress-input > small { margin-top: 5px; color: var(--muted); line-height: 1.5; }
+#protocol-progress-input .protocol-inline-input { width: 100%; min-width: 0; margin: 12px 0 0; }
+.protocol-progress-actions { display: flex; justify-content: center; gap: 10px; margin-top: 24px; }
+@keyframes protocol-spin { to { transform: rotate(360deg); } }
+@media (max-width: 900px) { .protocol-inline-input { width: 100%; min-width: 0; margin-left: 0; } }
+@media (max-width: 720px) { .login-method-picker { grid-template-columns: 1fr; } }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 26px; }
 .update-dialog { width: min(560px, calc(100% - 28px)); }
 .wake-dialog { width: min(600px, calc(100% - 28px)); }
 .account-tools-dialog { width: min(860px, calc(100% - 28px)); max-height: calc(100vh - 36px); overflow-y: auto; overscroll-behavior: contain; }
 .account-tools-dialog form { padding: 28px; }
-.tools-status { position: sticky; top: 0; z-index: 4; margin: 14px 0 0; padding: 11px 13px; border: 1px solid #a9d9c5; border-radius: 8px; color: #176b54; background: #edf9f4; box-shadow: 0 5px 16px rgba(28,86,67,.08); font-size: 11px; font-weight: 620; line-height: 1.55; }
+.mail-interface-center { margin-top: 18px; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: #fbfcfe; }
+.mail-interface-copy { margin: 8px 0 16px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.mail-interface-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px; }
+.mail-interface-form label { min-width: 0; }
+.mail-interface-form input { width: 100%; }
+.mail-interface-form button { height: 50px; white-space: nowrap; }
+.mail-interface-result { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-top: 14px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--line); }
+.mail-interface-result[hidden] { display: none; }
+.mail-interface-result div { padding: 12px; background: #fff; }
+.mail-interface-result span, .mail-interface-result strong { display: block; }
+.mail-interface-result span { color: var(--muted); font-size: 10px; }
+.mail-interface-result strong { margin-top: 4px; color: var(--ink); font-size: 14px; }
+@media (max-width: 720px) { .mail-interface-form { grid-template-columns: 1fr; } .mail-interface-result { grid-template-columns: repeat(2, 1fr); } }
+.tools-status { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; gap: 12px; margin: 14px 0 0; padding: 9px 9px 9px 13px; border: 1px solid #a9d9c5; border-radius: 8px; color: #176b54; background: #edf9f4; box-shadow: 0 5px 16px rgba(28,86,67,.08); font-size: 11px; font-weight: 620; line-height: 1.55; }
 .tools-status[hidden] { display: none; }
 .tools-status.error { color: #9b3f48; border-color: #e1b1b6; background: #fff2f3; box-shadow: 0 5px 16px rgba(139,52,60,.08); }
+.tools-status-copy { min-width: 0; flex: 1; }
+.tools-status-close { width: 26px; height: 26px; flex: 0 0 26px; padding: 0; border: 0; border-radius: 6px; color: currentColor; background: transparent; font-size: 18px; line-height: 1; opacity: .62; }
+.tools-status-close:hover { background: color-mix(in srgb, currentColor 9%, transparent); opacity: 1; }
 .health-center, .package-center { margin-top: 20px; overflow: hidden; border: 1px solid #ccd8e7; border-radius: 12px; background: #fff; }
 .tools-section-head { display: flex; min-height: 64px; align-items: center; justify-content: space-between; gap: 20px; padding: 13px 16px; border-bottom: 1px solid #e0e7f0; background: #f7f9fc; }
 .tools-section-head span { display: block; margin-bottom: 5px; color: #6e82a0; font: 700 9px/1 "Cascadia Mono", "Cascadia Code", monospace; letter-spacing: .12em; }
@@ -390,6 +449,10 @@ dialog textarea { resize: vertical; line-height: 1.55; }
 .health-detail { overflow: hidden; color: #77879a; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .health-row button { min-width: 58px; height: 30px; padding: 0 9px; border: 1px solid #cfdae8; border-radius: 7px; color: #526b88; background: #fff; font-size: 10px; font-weight: 650; }
 .health-row button:hover { color: var(--blue); border-color: #9ab3dd; }
+.health-row.is-checking { background: #f8fbff; }
+.health-row button.is-loading { position: relative; padding-left: 25px; color: var(--blue); border-color: #9ab3dd; background: #f2f6fd; }
+.health-row button.is-loading::before { content: ""; position: absolute; top: 50%; left: 9px; width: 9px; height: 9px; margin-top: -6px; border: 2px solid #b9c9e3; border-top-color: var(--blue); border-radius: 50%; animation: health-check-spin .7s linear infinite; }
+@keyframes health-check-spin { to { transform: rotate(360deg); } }
 .health-empty { padding: 24px; color: var(--muted); font-size: 12px; text-align: center; }
 .package-grid { display: grid; grid-template-columns: 1fr 1fr; }
 .package-panel { display: flex; min-width: 0; flex-direction: column; padding: 18px; }

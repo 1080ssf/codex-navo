@@ -113,8 +113,19 @@
           <button class="icon-button" value="cancel" aria-label="关闭" type="submit" formnovalidate>×</button>
         </div>
         <p class="dialog-copy">创建后会在该账号的独立 Chrome 环境中打开官方登录授权页。完成登录后将自动入池，无需返回应用执行第二步。</p>
-        <label>账号名称<input name="label" required maxlength="60" placeholder="例如：设计组 01"></label>
-        <label>邮箱提示<input name="emailHint" maxlength="100" placeholder="例如：de***@company.com"></label>
+        <div class="account-dialog-status" id="account-dialog-status" role="alert" aria-live="assertive" hidden></div>
+        <label class="account-manual-field">账号名称<input name="label" required maxlength="60" placeholder="例如：设计组 01"></label>
+        <label class="account-manual-field">邮箱提示<input name="emailHint" maxlength="100" placeholder="例如：de***@company.com"></label>
+        <fieldset class="login-method-picker">
+          <legend>登录方式</legend>
+          <label><input type="radio" name="loginMethod" value="official" checked><span><strong>官方浏览器登录</strong><small>默认方式，在独立 Chrome 中完成登录与授权</small></span></label>
+          <label><input type="radio" name="loginMethod" value="protocol"><span><strong>协议登录（免接码）</strong><small>后台完成网页登录和 Codex 授权，成功后直接入池</small></span></label>
+          <label class="login-method-import"><input type="radio" name="loginMethod" value="import"><span><strong>导入授权包</strong><small>选择 .codexnavo 文件，直接恢复 Codex 授权与可用的网页会话</small></span></label>
+        </fieldset>
+        <div class="account-import-panel" id="account-import-panel" hidden>
+          <label class="file-picker">账号授权包<input id="account-import-package-file" type="file" accept=".codexnavo,application/json"><span id="account-import-file-name">选择 .codexnavo 文件</span></label>
+          <p>导入会新建独立账号环境；旧版 Codex 单端授权包仍然兼容。</p>
+        </div>
         <div class="fixed-browser" aria-label="浏览器">
           <span class="fixed-browser-label">浏览器</span>
           <div class="fixed-browser-value">
@@ -124,8 +135,20 @@
         </div>
         <div class="dialog-actions">
           <button class="secondary-button" value="cancel" type="submit" formnovalidate>取消</button>
-          <button class="primary-button" value="default" type="submit">登录并授权</button>
+          <button class="primary-button" id="account-submit" value="default" type="submit">登录并授权</button>
         </div>
+        <section class="protocol-dialog-progress" id="protocol-dialog-progress" hidden aria-live="polite">
+          <div class="protocol-progress-mark" aria-hidden="true"><span></span></div>
+          <p class="eyebrow">PROTOCOL LOGIN</p>
+          <h3 id="protocol-progress-title">正在登录并授权</h3>
+          <p id="protocol-progress-copy">正在启动该账号的独立登录流程。</p>
+          <div id="protocol-progress-input"></div>
+          <div class="protocol-progress-actions">
+            <button type="button" class="secondary-button" id="protocol-progress-cancel">取消</button>
+            <button type="button" class="primary-button" id="protocol-progress-retry" hidden>重新授权</button>
+            <button type="button" class="primary-button" id="protocol-progress-close" hidden>完成</button>
+          </div>
+        </section>
       </form>
     </dialog>
 
@@ -173,7 +196,7 @@
           </div>
           <button class="icon-button" value="cancel" aria-label="关闭" type="submit" formnovalidate>×</button>
         </div>
-        <p class="dialog-copy">检查每个账号的 Codex 授权状态，或通过单个授权包迁移到另一台电脑。授权包不包含 Chrome Cookie 和网页历史。</p>
+        <p class="dialog-copy">检查每个账号的 Codex 授权状态，或通过单个授权包迁移到另一台电脑。新版授权包可同时携带 Codex 授权与 ChatGPT 网页会话，不包含项目、历史记录或其他网站数据。</p>
         <div class="tools-status" id="tools-status" role="status" aria-live="polite" hidden></div>
         <section class="health-center" aria-labelledby="health-center-title">
           <div class="tools-section-head">
@@ -193,7 +216,7 @@
             <div class="package-panel">
               <div class="package-panel-title"><i class="package-arrow">↓</i><div><strong>导入授权</strong><small>验证通过后创建新的 Codex 账号环境</small></div></div>
               <label class="file-picker">授权包<input id="import-package-file" type="file" accept=".codexnavo,application/json"><span id="import-file-name">选择 .codexnavo 文件</span></label>
-              <p class="package-note">导入只恢复 Codex 授权；不导入项目、任务、Cookie 或网页历史，网页端仍需单独登录。</p>
+              <p class="package-note">新版授权包可同时恢复 Codex 授权与网页会话；旧版单端包继续兼容。项目、任务和网页历史不会导入。</p>
               <button class="primary-button package-action" id="import-auth-package" type="button">验证并导入</button>
             </div>
           </div>

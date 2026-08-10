@@ -1,9 +1,22 @@
-const state = { accounts: [], csrfToken: '', timer: null, quotaRefreshing: false, wakeSettings: {}, wakeModelOptions: [], usage: null, importPackageText: '' };
+const state = { accounts: [], csrfToken: '', timer: null, quotaRefreshing: false, wakeSettings: {}, wakeModelOptions: [], usage: null, importPackageText: '', accountImportPackageText: '', protocolDialogAccountId: '', protocolDialogPromptKind: '' };
+let toolsStatusTimer = null;
 const elements = {
   accounts: document.querySelector('#accounts'),
   summary: document.querySelector('#account-summary'),
   dialog: document.querySelector('#account-dialog'),
   form: document.querySelector('#account-form'),
+  accountDialogStatus: document.querySelector('#account-dialog-status'),
+  accountImportPanel: document.querySelector('#account-import-panel'),
+  accountImportPackageFile: document.querySelector('#account-import-package-file'),
+  accountImportFileName: document.querySelector('#account-import-file-name'),
+  accountSubmit: document.querySelector('#account-submit'),
+  protocolProgress: document.querySelector('#protocol-dialog-progress'),
+  protocolProgressTitle: document.querySelector('#protocol-progress-title'),
+  protocolProgressCopy: document.querySelector('#protocol-progress-copy'),
+  protocolProgressInput: document.querySelector('#protocol-progress-input'),
+  protocolProgressCancel: document.querySelector('#protocol-progress-cancel'),
+  protocolProgressRetry: document.querySelector('#protocol-progress-retry'),
+  protocolProgressClose: document.querySelector('#protocol-progress-close'),
   toast: document.querySelector('#toast'),
   currentCodex: document.querySelector('#current-codex'),
   closeExternalCodex: document.querySelector('#close-external-codex'),
@@ -324,10 +337,148 @@ function showToast(message, error = false) {
   showToast.timeout = setTimeout(() => { elements.toast.className = 'toast'; }, 3200);
 }
 
-function showToolsStatus(message, error = false) {
+function showAccountDialogError(message) {
+  elements.accountDialogStatus.textContent = String(message || '操作失败');
+  elements.accountDialogStatus.className = 'account-dialog-status error';
+  elements.accountDialogStatus.hidden = false;
+}
+
+async function readAuthorizationPackageFile(file, { onName, onClear }) {
+  if (!file) {
+    onName('选择 .codexnavo 文件');
+    return '';
+  }
+  onName(file.name);
+  if (file.size > 768 * 1024) {
+    onClear();
+    onName('文件过大，请选择有效授权包');
+    throw new Error('授权包文件过大');
+  }
+  try {
+    return await file.text();
+  } catch {
+    throw new Error('无法读取授权包文件');
+  }
+}
+
+function syncAccountLoginMethod() {
+  const method = String(new FormData(elements.form).get('loginMethod') || 'official');
+  const importing = method === 'import';
+  const protocol = method === 'protocol';
+  const labelInput = elements.form.elements.label;
+  const emailInput = elements.form.elements.emailHint;
+  elements.accountImportPanel.hidden = !importing;
+  elements.form.querySelectorAll('.account-manual-field').forEach((field) => { field.hidden = importing; });
+  labelInput.required = !importing;
+  labelInput.disabled = importing;
+  emailInput.disabled = importing;
+  emailInput.placeholder = protocol ? '完整邮箱，例如：name@example.com' : '例如：de***@company.com';
+  elements.accountSubmit.textContent = importing ? '导入账号' : '登录并授权';
+}
+
+function renderProtocolPrompt(login, action = 'protocol-input') {
+  const kind = String(login?.promptKind || '');
+  const otp = ['email_otp', 'totp', 'phone_otp'].includes(kind);
+  const phone = kind === 'phone';
+  const type = kind === 'password' ? 'password' : phone ? 'tel' : 'text';
+  const autocomplete = kind === 'password' ? 'current-password' : otp ? 'one-time-code' : 'off';
+  const inputMode = otp ? 'numeric' : phone ? 'tel' : 'text';
+  const submitLabel = phone ? '确认手机号' : kind === 'password' ? '确认密码' : otp ? '确认验证码' : '确认';
+  const maxlength = phone ? 16 : otp ? 8 : 256;
+  return `<strong>${escapeHtml(login.promptLabel || '继续验证')}</strong>
+    <small>${escapeHtml(login.promptHint || '输入仅传给当前登录进程，不会保存。')}</small>
+    <div class="protocol-inline-input" data-prompt-kind="${escapeHtml(kind)}">
+      <input type="${type}" inputmode="${inputMode}" autocomplete="${autocomplete}" maxlength="${maxlength}" placeholder="${escapeHtml(login.promptLabel || '请输入')}" aria-label="${escapeHtml(login.promptLabel || '协议登录输入')}">
+      <button data-action="${escapeHtml(action)}" type="button">${submitLabel}</button>
+    </div>`;
+}
+
+function resetProtocolDialog() {
+  state.protocolDialogAccountId = '';
+  state.protocolDialogPromptKind = '';
+  elements.form.classList.remove('protocol-progress-active');
+  elements.protocolProgress.hidden = true;
+  elements.protocolProgress.className = 'protocol-dialog-progress';
+  elements.protocolProgressInput.innerHTML = '';
+  elements.form.querySelector('.dialog-head .eyebrow').textContent = 'NEW TRACK';
+  elements.form.querySelector('.dialog-head h2').textContent = '添加账号环境';
+}
+
+function openProtocolDialog(account) {
+  state.protocolDialogAccountId = account.id;
+  state.protocolDialogPromptKind = '';
+  elements.form.classList.add('protocol-progress-active');
+  elements.protocolProgress.hidden = false;
+  elements.form.querySelector('.dialog-head .eyebrow').textContent = 'PROTOCOL LOGIN';
+  elements.form.querySelector('.dialog-head h2').textContent = '登录并授权';
+  renderProtocolDialogProgress();
+}
+
+function renderProtocolDialogProgress() {
+  if (!state.protocolDialogAccountId || !elements.dialog.open) return;
+  const account = state.accounts.find((item) => item.id === state.protocolDialogAccountId);
+  if (!account) return;
+  const login = account.codexLogin;
+  const completed = account.codexInitialized && !login;
+  const failed = ['error', 'interrupted'].includes(login?.status);
+  elements.protocolProgress.className = `protocol-dialog-progress${completed ? ' success' : failed ? ' error' : ''}`;
+  elements.protocolProgressTitle.textContent = completed ? '账号已完成入池' : failed ? '登录授权未完成' : account.label;
+  elements.protocolProgressCopy.textContent = completed
+    ? '网页登录凭证与 Codex 授权已经写入独立账号环境。'
+    : failed
+      ? (login?.error || '登录进程已经结束，可以重新发起。')
+      : login?.status === 'finalizing'
+        ? (login.promptHint || '正在校验并写入 Codex 登录凭证。')
+        : login?.promptKind
+          ? '请在下方完成当前验证步骤，内容只传给本次登录进程。'
+          : '后台正在推进 ChatGPT 网页登录与 Codex 授权，请稍候。';
+  const nextPromptKind = String(login?.promptKind || '');
+  if (state.protocolDialogPromptKind !== nextPromptKind) {
+    state.protocolDialogPromptKind = nextPromptKind;
+    elements.protocolProgressInput.innerHTML = nextPromptKind ? renderProtocolPrompt(login, 'protocol-modal-input') : '';
+    elements.protocolProgressInput.querySelector('input')?.focus();
+  }
+  elements.protocolProgressCancel.hidden = completed;
+  elements.protocolProgressRetry.hidden = !failed;
+  elements.protocolProgressClose.hidden = !completed;
+}
+
+function showProtocolDialogConnectionError(message) {
+  if (!state.protocolDialogAccountId || !elements.dialog.open) return false;
+  const detail = String(message || '本地服务连接中断');
+  elements.protocolProgress.className = 'protocol-dialog-progress error';
+  elements.protocolProgressTitle.textContent = '后台服务连接中断';
+  elements.protocolProgressCopy.textContent = `${detail}。Codex Navo 正在尝试恢复后台服务；关闭弹窗后可重新发起授权。`;
+  elements.protocolProgressInput.innerHTML = '';
+  elements.protocolProgressCancel.hidden = true;
+  elements.protocolProgressRetry.hidden = true;
+  elements.protocolProgressClose.hidden = false;
+  showAccountDialogError(`后台服务连接中断：${detail}`);
+  return true;
+}
+
+function hideToolsStatus() {
+  clearTimeout(toolsStatusTimer);
+  toolsStatusTimer = null;
+  elements.toolsStatus.hidden = true;
+  elements.toolsStatus.replaceChildren();
+}
+
+function showToolsStatus(message, error = false, autoHideMs = error ? 0 : 5_000) {
+  clearTimeout(toolsStatusTimer);
   elements.toolsStatus.hidden = false;
-  elements.toolsStatus.textContent = message;
   elements.toolsStatus.className = `tools-status${error ? ' error' : ' success'}`;
+  const copy = document.createElement('span');
+  copy.className = 'tools-status-copy';
+  copy.textContent = message;
+  const close = document.createElement('button');
+  close.className = 'tools-status-close';
+  close.type = 'button';
+  close.setAttribute('aria-label', '关闭提示');
+  close.textContent = '×';
+  close.addEventListener('click', hideToolsStatus, { once: true });
+  elements.toolsStatus.replaceChildren(copy, close);
+  if (autoHideMs > 0) toolsStatusTimer = setTimeout(hideToolsStatus, autoHideMs);
 }
 
 function syncModalScrollLock() {
@@ -456,6 +607,7 @@ function renderQuota(account) {
 }
 
 function render() {
+  renderProtocolDialogProgress();
   applyViewMode();
   renderUsage();
   const occupied = state.accounts.filter((account) => account.lease || account.codexActive).length;
@@ -480,17 +632,27 @@ function render() {
 
   elements.accounts.innerHTML = sortedAccounts(activeAccount).map((account) => {
     const status = account.enabled === false ? 'disabled' : account.lease || account.codexActive ? 'occupied' : 'free';
-    const codexLoginPending = account.codexLogin && ['starting', 'waiting'].includes(account.codexLogin.status);
+    const codexLoginPending = account.codexLogin && ['starting', 'waiting', 'finalizing'].includes(account.codexLogin.status);
     const setupSteps = !account.codexInitialized ? `<div class="setup-steps one-step" aria-label="账号入池进度">
       <span class="active"><i>1</i>${account.setupStage === 'device-auth' ? '设备代码授权' : '登录并授权'}</span>
     </div>` : '';
     const codexLoginPanel = account.codexLogin ? `<div class="codex-login-panel ${['error', 'interrupted'].includes(account.codexLogin.status) ? 'error' : ''}">
       ${setupSteps}
       ${['error', 'interrupted'].includes(account.codexLogin.status)
-        ? `<strong>${account.codexLogin.status === 'interrupted' ? '授权流程已中断' : '登录授权未完成'}</strong><span>${escapeHtml(account.codexLogin.error)}</span><div class="login-recovery-actions"><button class="login-fallback" data-action="authorize" type="button">继续授权</button>${account.codexLogin.status === 'error' ? '<button class="login-fallback" data-action="authorize-device" type="button">设备代码</button>' : ''}<button class="login-cancel" data-action="cancel-authorization" type="button">取消</button></div>`
+        ? `<strong>${account.codexLogin.status === 'interrupted' ? '授权流程已中断' : '登录授权未完成'}</strong><span>${escapeHtml(account.codexLogin.error)}</span><div class="login-recovery-actions"><button class="login-fallback" data-action="${account.loginMethod === 'protocol' ? 'authorize-protocol' : 'authorize'}" type="button">继续授权</button>${account.codexLogin.status === 'error' && account.loginMethod !== 'protocol' ? '<button class="login-fallback" data-action="authorize-device" type="button">设备代码</button>' : ''}<button class="login-cancel" data-action="cancel-authorization" type="button">取消</button></div>`
+        : account.codexLogin.flow === 'protocol'
+        ? account.codexLogin.promptKind
+            ? renderProtocolPrompt(account.codexLogin)
+            : account.codexLogin.status === 'finalizing'
+              ? '<strong>正在完成登录与授权</strong><small>正在写入独立 Chrome 网页会话和 Codex OAuth 凭证，请稍候。</small>'
+              : '<strong>登录与 Codex 授权正在后台运行</strong><small>需要邮箱验证码、密码、两步验证、手机号或短信验证码时，会在这里显示输入框。</small>'
         : account.codexLogin.flow === 'device'
           ? `<strong>请在独立浏览器中完成设备代码授权</strong><span>设备验证码</span><code>${escapeHtml(account.codexLogin.userCode || '正在获取…')}</code><small>备用流程需要先在 ChatGPT 设置中开启设备代码授权。</small>`
           : `<strong>请在独立浏览器中完成登录与授权</strong><small>这是一个连续的官方流程，完成后会自动入池，无需开启设备代码授权。</small>`}
+    </div>` : account.webLoginComplete && !account.codexInitialized ? `<div class="codex-login-panel setup-ready">
+      ${setupSteps}
+      <strong>网页端已登录并入池</strong>
+      <small>该账号的独立 Chrome 会话已经验证；点击右侧按钮继续完成 Codex 授权。</small>
     </div>` : !account.codexInitialized ? `<div class="codex-login-panel setup-ready">
       ${setupSteps}
       <strong>登录授权尚未完成</strong>
@@ -520,8 +682,10 @@ function render() {
       ? `<span class="health-badge health-${escapeHtml(health.status)}" title="${escapeHtml(health.detail || health.label)}">${escapeHtml(health.label || '待检查')}</span>`
       : '';
     let codexAction;
-    if (!account.codexInitialized) {
-      codexAction = `<button class="action-primary action-codex" data-action="authorize" ${codexLoginPending ? 'disabled' : ''}>${codexLoginPending ? '等待登录授权' : account.quotaErrorCode === 'auth_expired' ? '重新登录授权' : '登录并授权'}</button>`;
+    if (account.webLoginComplete && !account.codexInitialized) {
+      codexAction = '<button class="action-primary action-codex" data-action="authorize-protocol">继续 Codex 授权</button>';
+    } else if (!account.codexInitialized) {
+      codexAction = `<button class="action-primary action-codex" data-action="${account.loginMethod === 'protocol' ? 'authorize-protocol' : 'authorize'}" ${codexLoginPending ? 'disabled' : ''}>${codexLoginPending ? '等待登录授权' : account.quotaErrorCode === 'auth_expired' ? '重新登录授权' : '登录并授权'}</button>`;
     } else if (account.codexActive) {
       codexAction = '<button class="action-primary action-exit" data-action="quit-codex">退出 Codex</button>';
     } else if (externalCodexRunning) {
@@ -566,6 +730,7 @@ async function refresh() {
     render();
     refreshStaleQuotas();
   } catch (error) {
+    if (showProtocolDialogConnectionError(error.message)) return;
     elements.accounts.innerHTML = `<div class="empty-state"><strong>无法读取本地状态</strong><p>${escapeHtml(error.message)}。请确认启动窗口仍在运行，然后刷新页面。</p></div>`;
     showToast(error.message, true);
   }
@@ -599,6 +764,12 @@ async function refreshStaleQuotas() {
     state.quotaRefreshing = false;
   }
 }
+
+elements.accounts.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' || !event.target.matches('.protocol-inline-input input')) return;
+  event.preventDefault();
+  event.target.closest('.protocol-inline-input')?.querySelector('[data-action="protocol-input"]')?.click();
+});
 
 elements.accounts.addEventListener('click', async (event) => {
   const button = event.target.closest('button[data-action]');
@@ -634,15 +805,30 @@ elements.accounts.addEventListener('click', async (event) => {
         body: JSON.stringify({ operator: currentOperator }),
       });
       showToast('已取消未完成的授权流程');
-    } else if (action === 'authorize' || action === 'authorize-device') {
+    } else if (action === 'protocol-input') {
+      const input = card.querySelector('.protocol-inline-input input');
+      const value = String(input?.value || '').trim();
+      if (!value) {
+        showToast('请输入当前验证步骤需要的内容', true);
+        return;
+      }
+      await api(`/api/accounts/${card.dataset.id}/protocol-input`, {
+        method: 'POST',
+        body: JSON.stringify({ operator: currentOperator, value }),
+      });
+      if (input) input.value = '';
+      showToast('已提交，正在继续登录授权');
+    } else if (action === 'authorize' || action === 'authorize-device' || action === 'authorize-protocol') {
       if (action === 'authorize-device' && !confirm('设备代码是备用流程。请先在 ChatGPT 设置 → 账户安全与登录中开启“为 Codex 启用设备代码授权”。继续吗？')) return;
       await api(`/api/accounts/${card.dataset.id}/${action}`, {
         method: 'POST',
         body: JSON.stringify({ operator: currentOperator }),
       });
-      showToast(action === 'authorize-device'
-        ? '已打开设备代码授权页，完成后账号会自动入池'
-        : '已打开官方登录授权页，完成后账号会自动入池');
+      showToast(action === 'authorize-protocol'
+        ? '登录与 Codex 授权已在后台启动；需要验证时会在账号卡片中提示'
+        : action === 'authorize-device'
+          ? '已打开设备代码授权页，完成后账号会自动入池'
+          : '已打开官方登录授权页，完成后账号会自动入池');
     } else if (action === 'quit-codex') {
       if (!confirm('退出当前 Codex？正在进行的任务会被中断。')) return;
       await api(`/api/accounts/${card.dataset.id}/quit-codex`, { method: 'POST', body: JSON.stringify({ operator: currentOperator }) });
@@ -664,21 +850,96 @@ elements.accounts.addEventListener('click', async (event) => {
 });
 
 document.querySelector('#add-account').addEventListener('click', () => {
+  resetProtocolDialog();
   elements.form.reset();
+  elements.accountDialogStatus.hidden = true;
+  elements.accountDialogStatus.textContent = '';
+  state.accountImportPackageText = '';
+  elements.accountImportPackageFile.value = '';
+  elements.accountImportFileName.textContent = '选择 .codexnavo 文件';
+  syncAccountLoginMethod();
   elements.dialog.showModal();
   requestAnimationFrame(() => elements.form.elements.label.focus());
 });
 
+elements.protocolProgressInput.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' || !event.target.matches('.protocol-inline-input input')) return;
+  event.preventDefault();
+  elements.protocolProgressInput.querySelector('[data-action="protocol-modal-input"]')?.click();
+});
+
+elements.protocolProgressInput.addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-action="protocol-modal-input"]');
+  if (!button || !state.protocolDialogAccountId) return;
+  const input = elements.protocolProgressInput.querySelector('.protocol-inline-input input');
+  const value = String(input?.value || '').trim();
+  if (!value) return showAccountDialogError('请输入当前验证步骤需要的内容');
+  button.disabled = true;
+  try {
+    await api(`/api/accounts/${state.protocolDialogAccountId}/protocol-input`, {
+      method: 'POST',
+      body: JSON.stringify({ operator: operator(), value }),
+    });
+    if (input) input.value = '';
+    state.protocolDialogPromptKind = '';
+    elements.protocolProgressInput.innerHTML = '';
+    elements.protocolProgressCopy.textContent = '已提交，正在继续登录授权。';
+    await refresh();
+  } catch (error) {
+    showAccountDialogError(error.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+elements.protocolProgressCancel.addEventListener('click', async () => {
+  if (state.protocolDialogAccountId) {
+    try {
+      await api(`/api/accounts/${state.protocolDialogAccountId}/cancel-authorization`, {
+        method: 'POST', body: JSON.stringify({ operator: operator() }),
+      });
+    } catch {}
+  }
+  elements.dialog.close();
+});
+
+elements.protocolProgressRetry.addEventListener('click', async () => {
+  if (!state.protocolDialogAccountId) return;
+  elements.protocolProgressRetry.disabled = true;
+  try {
+    await api(`/api/accounts/${state.protocolDialogAccountId}/authorize-protocol`, {
+      method: 'POST', body: JSON.stringify({ operator: operator() }),
+    });
+    state.protocolDialogPromptKind = '';
+    await refresh();
+  } catch (error) {
+    showAccountDialogError(error.message);
+  } finally {
+    elements.protocolProgressRetry.disabled = false;
+  }
+});
+
+elements.protocolProgressClose.addEventListener('click', () => elements.dialog.close());
+elements.dialog.addEventListener('close', resetProtocolDialog);
+
 elements.accountToolsButton.addEventListener('click', () => {
   renderHealthCenter();
-  elements.toolsStatus.hidden = true;
+  hideToolsStatus();
   elements.accountToolsDialog.showModal();
 });
 
 elements.healthList.addEventListener('click', async (event) => {
   const button = event.target.closest('[data-health-action]');
   if (!button) return;
+  const row = button.closest('.health-row');
+  const originalText = button.textContent;
   button.disabled = true;
+  row?.classList.add('is-checking');
+  if (button.dataset.healthAction === 'check') {
+    button.classList.add('is-loading');
+    button.textContent = '检查中…';
+    button.setAttribute('aria-busy', 'true');
+  }
   try {
     if (button.dataset.healthAction === 'authorize') {
       await api(`/api/accounts/${button.dataset.accountId}/authorize`, {
@@ -689,14 +950,27 @@ elements.healthList.addEventListener('click', async (event) => {
       await api(`/api/accounts/${button.dataset.accountId}/health`, {
         method: 'POST', body: JSON.stringify({ operator: operator() }),
       });
-      showToolsStatus('账号授权状态已检查，结果已更新在上方列表。');
+      await refresh();
+      const checked = state.accounts.find((account) => account.id === button.dataset.accountId);
+      const health = checked?.health;
+      const unhealthy = health?.status !== 'healthy';
+      showToolsStatus(
+        health
+          ? `${checked.label}：${health.label}。${health.detail}`
+          : '账号授权状态已检查，结果已更新。',
+        unhealthy,
+      );
     }
-    await refresh();
+    if (button.dataset.healthAction === 'authorize') await refresh();
     renderHealthCenter();
   } catch (error) {
     showToolsStatus(error.message, true);
   } finally {
     button.disabled = false;
+    button.classList.remove('is-loading');
+    button.removeAttribute('aria-busy');
+    button.textContent = originalText;
+    row?.classList.remove('is-checking');
   }
 });
 
@@ -726,7 +1000,9 @@ elements.exportAuthPackage.addEventListener('click', async () => {
       method: 'POST', body: JSON.stringify({ operator: operator() }),
     });
     downloadJsonFile(result.fileName, result.package);
-    showToolsStatus('单文件授权包已生成。它包含可用登录令牌，请通过可信渠道传输。');
+    showToolsStatus(result.webSessionIncluded
+      ? '双端授权包已生成：包含 Codex 授权和网页会话。'
+      : '授权包已生成，但该账号没有可导出的有效网页会话，因此仅包含 Codex 授权。');
   } catch (error) {
     showToolsStatus(error.message, true);
   } finally {
@@ -737,17 +1013,27 @@ elements.exportAuthPackage.addEventListener('click', async () => {
 elements.importPackageFile.addEventListener('change', async () => {
   const file = elements.importPackageFile.files?.[0];
   state.importPackageText = '';
-  elements.importFileName.textContent = file ? file.name : '选择 .codexnavo 文件';
-  if (!file) return;
-  if (file.size > 768 * 1024) {
-    elements.importPackageFile.value = '';
-    elements.importFileName.textContent = '文件过大，请选择有效授权包';
-    return showToolsStatus('授权包文件过大', true);
-  }
   try {
-    state.importPackageText = await file.text();
-  } catch {
-    showToolsStatus('无法读取授权包文件', true);
+    state.importPackageText = await readAuthorizationPackageFile(file, {
+      onName: (name) => { elements.importFileName.textContent = name; },
+      onClear: () => { elements.importPackageFile.value = ''; },
+    });
+  } catch (error) {
+    showToolsStatus(error.message, true);
+  }
+});
+
+elements.accountImportPackageFile.addEventListener('change', async () => {
+  const file = elements.accountImportPackageFile.files?.[0];
+  state.accountImportPackageText = '';
+  try {
+    state.accountImportPackageText = await readAuthorizationPackageFile(file, {
+      onName: (name) => { elements.accountImportFileName.textContent = name; },
+      onClear: () => { elements.accountImportPackageFile.value = ''; },
+    });
+    elements.accountDialogStatus.hidden = true;
+  } catch (error) {
+    showAccountDialogError(error.message);
   }
 });
 
@@ -755,7 +1041,7 @@ elements.importAuthPackage.addEventListener('click', async () => {
   if (!state.importPackageText) return showToolsStatus('请先选择 .codexnavo 授权包', true);
   elements.importAuthPackage.disabled = true;
   try {
-    await api('/api/auth-packages/import', {
+    const result = await api('/api/auth-packages/import', {
       method: 'POST',
       body: JSON.stringify({ operator: operator(), package: state.importPackageText }),
     });
@@ -764,7 +1050,12 @@ elements.importAuthPackage.addEventListener('click', async () => {
     elements.importFileName.textContent = '选择 .codexnavo 文件';
     await refresh();
     renderHealthCenter();
-    showToolsStatus('授权包验证通过，账号已成功导入。');
+    const status = result.importStatus || {};
+    showToolsStatus(status.web === 'imported'
+      ? '导入完成：Codex 授权与网页会话均已验证。'
+      : status.web === 'failed'
+        ? `Codex 授权已导入；网页会话验证失败，需要重新登录网页端：${status.webError || '会话已失效'}`
+        : 'Codex 授权已导入；该授权包不包含网页会话。', status.web === 'failed');
   } catch (error) {
     showToolsStatus(error.message, true);
   } finally {
@@ -1002,28 +1293,77 @@ elements.form.addEventListener('submit', async (event) => {
   if (event.submitter?.value === 'cancel') return;
   event.preventDefault();
   const formData = new FormData(elements.form);
+  const requestedLoginMethod = String(formData.get('loginMethod') || 'official');
+  if (requestedLoginMethod === 'import') {
+    if (!state.accountImportPackageText) return showAccountDialogError('请先选择 .codexnavo 授权包');
+    elements.accountSubmit.disabled = true;
+    elements.accountSubmit.textContent = '正在导入…';
+    try {
+      const result = await api('/api/auth-packages/import', {
+        method: 'POST',
+        body: JSON.stringify({ operator: operator(), package: state.accountImportPackageText }),
+      });
+      const status = result.importStatus || {};
+      state.accountImportPackageText = '';
+      elements.form.reset();
+      elements.dialog.close();
+      await refresh();
+      showToast(status.web === 'imported'
+        ? '账号已导入：Codex 授权与网页会话均已验证'
+        : status.web === 'failed'
+          ? 'Codex 授权已导入，网页会话需要重新登录'
+          : '账号已导入：授权包仅包含 Codex 授权', status.web === 'failed');
+    } catch (error) {
+      showAccountDialogError(error.message);
+    } finally {
+      elements.accountSubmit.disabled = false;
+      syncAccountLoginMethod();
+    }
+    return;
+  }
+  const loginMethod = requestedLoginMethod === 'protocol' ? 'protocol' : 'official';
+  const emailHint = String(formData.get('emailHint') || '').trim();
+  elements.accountDialogStatus.hidden = true;
+  elements.accountDialogStatus.textContent = '';
+  if (loginMethod === 'protocol' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailHint)) {
+    showAccountDialogError('协议登录需要填写完整邮箱地址');
+    return;
+  }
   try {
     const currentOperator = operator();
-    await api('/api/accounts', {
+    const created = await api('/api/accounts', {
       method: 'POST',
       body: JSON.stringify({
         operator: currentOperator,
         label: formData.get('label'),
-        emailHint: formData.get('emailHint'),
+        emailHint,
+        loginMethod,
       }),
     });
-    elements.form.reset();
-    elements.dialog.close();
-    showToast('账号已创建，请在独立浏览器中完成登录与授权');
-    await refresh();
+    if (loginMethod === 'protocol') {
+      Object.assign(state, await api('/api/bootstrap'));
+      openProtocolDialog(created);
+      showToast('协议登录已启动，后续验证步骤将在当前弹窗中完成');
+    } else {
+      elements.form.reset();
+      elements.dialog.close();
+      showToast('账号已创建，请在独立浏览器中完成登录与授权');
+      await refresh();
+    }
   } catch (error) {
-    showToast(error.message, true);
+    showAccountDialogError(error.message);
   }
+});
+
+elements.form.addEventListener('change', (event) => {
+  if (event.target.name !== 'loginMethod') return;
+  syncAccountLoginMethod();
 });
 
 syncSortMenu();
 initializeApplicationUpdater();
 refresh();
 state.timer = setInterval(() => {
-  if (!elements.dialog.open && !elements.wakeDialog.open && !elements.updateDialog.open && !elements.accountToolsDialog.open && document.visibilityState === 'visible') refresh();
+  const protocolDialogActive = Boolean(elements.dialog.open && state.protocolDialogAccountId);
+  if ((protocolDialogActive || (!elements.dialog.open && !elements.wakeDialog.open && !elements.updateDialog.open && !elements.accountToolsDialog.open)) && !document.activeElement?.closest('.protocol-inline-input') && document.visibilityState === 'visible') refresh();
 }, 5_000);

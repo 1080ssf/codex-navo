@@ -17,6 +17,16 @@ const { CodexUsageTracker } = require('./lib/codex-usage');
 const { readModelCatalog } = require('./lib/model-catalog');
 const { detectQuotaReset, localDateKey, normalizeWakeSettings, quotaObservation, shouldWakeAccount } = require('./lib/wake');
 const { authIdentity, createAuthPackage, readAuthPackage, validateAuthPayload } = require('./lib/auth-package');
+const { buildCodexAuthFromWebSession } = require('./lib/web-session-auth');
+const {
+  injectProtocolCookies,
+  protocolPromptFromOutput,
+  readProtocolCookies,
+  readProtocolOauthExport,
+  readProtocolSession,
+  resolveProtocolProxyEnvironment,
+  validateProtocolInput,
+} = require('./lib/protocol-login');
 const { version: APP_VERSION } = require('./package.json');
 
 const ROOT = __dirname;
@@ -103,7 +113,7 @@ let authAttempts = readJson(AUTH_ATTEMPTS_FILE, {});
 for (const [accountId, attempt] of Object.entries(authAttempts)) {
   if (!validateAccountId(accountId) || !attempt || typeof attempt !== 'object') {
     delete authAttempts[accountId];
-  } else if (['starting', 'waiting'].includes(attempt.status)) {
+  } else if (['starting', 'waiting', 'finalizing'].includes(attempt.status)) {
     authAttempts[accountId] = {
       ...attempt,
       status: 'interrupted',
@@ -114,6 +124,7 @@ for (const [accountId, attempt] of Object.entries(authAttempts)) {
 }
 writeJsonAtomic(AUTH_ATTEMPTS_FILE, authAttempts);
 const pendingCodexLogins = new Map();
+const protocolLoginImports = new Set();
 const wakeRuns = new Map();
 let wakeScheduleRunning = false;
 let usageTracker = null;
@@ -368,6 +379,298 @@ function accountPaths(account) {
   };
 }
 
+function protocolLoginPaths(account) {
+  const { codexDir } = accountPaths(account);
+  const directory = path.join(codexDir, 'protocol-login');
+  return {
+    directory,
+    outputFile: path.join(directory, 'oauth.json'),
+    sessionFile: path.join(directory, 'session.json'),
+    checkpointFile: path.join(directory, 'checkpoint.json'),
+    statusFile: path.join(directory, 'status.json'),
+  };
+}
+
+function cleanupProtocolLoginFiles(paths) {
+  for (const file of [paths.outputFile, paths.sessionFile, paths.statusFile, paths.checkpointFile]) {
+    try { fs.rmSync(file, { force: true }); } catch {}
+  }
+}
+
+async function removeDirectoryWithRetry(directory, attempts = 12, delayMs = 250) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      fs.rmSync(directory, { recursive: true, force: true });
+      return true;
+    } catch (error) {
+      if (!['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(error.code)) throw error;
+      if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return false;
+}
+
+function cleanupDirectoryEventually(directory) {
+  setTimeout(() => {
+    void removeDirectoryWithRetry(directory, 20, 500).catch(() => {});
+  }, 500).unref?.();
+}
+
+async function startProtocolLogin(account, operator) {
+  cancelPendingCodexLogin(account.id);
+  const email = String(account.emailHint || '').trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error('协议登录需要填写完整邮箱地址');
+  }
+  const paths = protocolLoginPaths(account);
+  fs.mkdirSync(paths.directory, { recursive: true });
+  cleanupProtocolLoginFiles(paths);
+  const protocolScript = path.join(ROOT, 'vendor', 'tosub2', 'protocol-login.mjs');
+  if (!fs.existsSync(protocolScript)) throw new Error('协议登录组件缺失');
+  const browser = await launchAccountBrowserForProtocol(account);
+  const environment = resolveProtocolProxyEnvironment({
+    ...process.env,
+    NODE_NO_WARNINGS: '1',
+    NO_COLOR: '1',
+    TERM: 'dumb',
+  });
+  if (process.versions.electron) environment.ELECTRON_RUN_AS_NODE = '1';
+  const child = spawn(process.execPath, [
+    protocolScript,
+    '--email', email,
+    '--output-mode', 'both',
+    '--out', paths.sessionFile,
+    '--sub2api-out', paths.outputFile,
+    '--sub2api-name', account.label,
+    '--checkpoint', paths.checkpointFile,
+  ], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
+    env: environment,
+  });
+  const pending = {
+    child,
+    operator,
+    flow: 'protocol',
+    status: 'starting',
+    promptKind: '',
+    promptLabel: '',
+    promptHint: '',
+    promptSecret: false,
+    output: '',
+    browser,
+    startedAt: new Date().toISOString(),
+    timeout: null,
+    fail: null,
+    lastProtocolError: '',
+    webFallbackStarted: false,
+  };
+  pendingCodexLogins.set(account.id, pending);
+  const fail = (message) => {
+    if (pending.status === 'complete' || pending.status === 'error') return;
+    pending.status = 'error';
+    pending.error = String(message || '协议登录没有完成').slice(0, 500);
+    try { saveAuthAttempt(account.id, { method: 'protocol', flow: 'protocol', status: 'error', error: pending.error }); } catch {}
+    clearTimeout(pending.timeout);
+    const next = { ...leases };
+    delete next[account.id];
+    try { saveLeases(next); } catch {}
+    try { cleanupProtocolLoginFiles(paths); } catch {}
+    try { audit('codex.protocol-login.failed', { accountId: account.id, operator, result: pending.error }); } catch {}
+    if (isProcessAlive(child.pid)) try { child.kill(); } catch {}
+    try { stopProtocolBrowser(pending.browser || browser); } catch {}
+  };
+  pending.fail = fail;
+  const completeWithWebSession = async () => {
+    if (pending.webFallbackStarted || pending.status === 'complete' || pending.status === 'error') return;
+    pending.webFallbackStarted = true;
+    pending.status = 'finalizing';
+    saveAuthAttempt(account.id, {
+      method: 'protocol', flow: 'protocol', status: 'finalizing', promptKind: '',
+      promptLabel: '', promptHint: '检测到手机号绑定，正在从已登录网页会话同步 Codex 凭证', error: '',
+    });
+    const stagingHome = path.join(paths.directory, `web-session-check-${process.pid}-${Date.now()}`);
+    try {
+      const checkpoint = readJson(paths.checkpointFile, null);
+      if (!Array.isArray(checkpoint?.cookies) || !checkpoint.cookies.length) {
+        throw new Error('协议网页登录状态尚未保存');
+      }
+      stopProtocolBrowser(pending.browser);
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      pending.browser = await launchAccountBrowserForProtocol(account, { visibleOffscreen: true });
+      const browserResult = await injectProtocolCookies({
+        port: pending.browser.port,
+        cookies: checkpoint.cookies,
+        closeBrowser: true,
+        verificationDelayMs: 1_000,
+      });
+      if (!browserResult.verified || !browserResult.session) throw new Error('独立 Chrome 网页会话校验失败');
+      if (!await waitForProtocolBrowserExit(pending.browser)) stopProtocolBrowser(pending.browser);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      pending.browser = await launchAccountBrowserForProtocol(account, { visibleOffscreen: true });
+      const persistedBrowserResult = await injectProtocolCookies({
+        port: pending.browser.port,
+        cookies: [],
+        closeBrowser: true,
+        verificationDelayMs: 1_000,
+      });
+      if (!persistedBrowserResult.verified || !persistedBrowserResult.session) {
+        throw new Error('独立 Chrome 会话写入后未能持久保存');
+      }
+      const auth = validateAuthPayload(buildCodexAuthFromWebSession(persistedBrowserResult.session));
+      ensureCodexProfileConfig(stagingHome);
+      writeJsonAtomic(path.join(stagingHome, 'auth.json'), auth);
+      const quota = settings.mockLaunch ? null : await readCodexQuota(findCodexCli(), stagingHome, 20_000);
+      if (!await removeDirectoryWithRetry(stagingHome)) cleanupDirectoryEventually(stagingHome);
+      const { codexHomeDir } = accountPaths(account);
+      ensureCodexProfileConfig(codexHomeDir);
+      writeJsonAtomic(path.join(codexHomeDir, 'auth.json'), auth);
+      account.webLoginComplete = true;
+      account.setupStage = 'complete';
+      account.authSource = 'web-session-fallback';
+      account.quota = quota;
+      account.quotaCheckedAt = quota?.refreshedAt || new Date().toISOString();
+      account.quotaError = '';
+      account.quotaErrorCode = '';
+      saveAccounts([...accounts]);
+      pending.status = 'complete';
+      clearTimeout(pending.timeout);
+      pendingCodexLogins.delete(account.id);
+      clearAuthAttempt(account.id);
+      const next = { ...leases };
+      delete next[account.id];
+      saveLeases(next);
+      if (isProcessAlive(child.pid)) try { child.kill(); } catch {}
+      stopProtocolBrowser(pending.browser);
+      try { cleanupProtocolLoginFiles(paths); } catch {}
+      audit('codex.protocol-login.web-session-fallback', { accountId: account.id, operator, result: 'validated-and-pooled' });
+    } catch (error) {
+      cleanupDirectoryEventually(stagingHome);
+      try { stopProtocolBrowser(pending.browser); } catch {}
+      pending.webFallbackStarted = false;
+      pending.status = 'waiting';
+      pending.promptKind = 'phone';
+      pending.promptLabel = '手机号验证';
+      pending.promptHint = `网页凭证导入失败：${String(error.message).slice(0, 180)}；可填写手机号继续官方授权`;
+      pending.promptSecret = false;
+      try {
+        saveAuthAttempt(account.id, {
+          method: 'protocol', flow: 'protocol', status: 'waiting', promptKind: 'phone',
+          promptLabel: pending.promptLabel, promptHint: pending.promptHint, promptSecret: false, error: '',
+        });
+      } catch {}
+      try { audit('codex.protocol-login.web-session-fallback', { accountId: account.id, operator, result: `failed: ${error.message}` }); } catch {}
+    }
+  };
+  const submitProtocolInput = (kind, input) => {
+    const value = validateProtocolInput(kind, input);
+    if (pending.child.stdin.destroyed) throw new Error('协议登录输入通道已关闭');
+    pending.child.stdin.write(`${value}\n`);
+    pending.status = 'starting';
+    pending.promptKind = '';
+    pending.promptLabel = '';
+    pending.promptHint = '';
+    pending.promptSecret = false;
+    pending.output = '';
+    saveAuthAttempt(account.id, {
+      method: 'protocol', flow: 'protocol', status: 'starting', promptKind: '',
+      promptLabel: '', promptHint: '', promptSecret: false, error: '',
+    });
+  };
+  const consume = (chunk) => {
+    pending.output = `${pending.output}${chunk}`.slice(-16_000);
+    const protocolError = [...pending.output.matchAll(/\[error\]\s*([^\r\n]+)/gi)].at(-1)?.[1];
+    if (protocolError) pending.lastProtocolError = protocolError.trim().slice(0, 320);
+    const prompt = protocolPromptFromOutput(pending.output);
+    if (!prompt || prompt.kind === pending.promptKind) return;
+    if (prompt.kind === 'phone') {
+      pending.promptKind = '';
+      pending.promptLabel = '';
+      pending.promptHint = '官方授权要求绑定手机号，正在验证已经取得的 Codex 凭证与独立 Chrome 会话';
+      pending.promptSecret = false;
+      pending.status = 'finalizing';
+      saveAuthAttempt(account.id, {
+        method: 'protocol', flow: 'protocol', status: 'finalizing',
+        promptKind: '', promptLabel: '', promptHint: pending.promptHint, promptSecret: false, error: '',
+      });
+      void completeWithWebSession().catch((error) => fail(`网页凭证验证异常：${error.message}`));
+      return;
+    }
+    pending.promptKind = prompt.kind;
+    pending.promptLabel = prompt.label;
+    pending.promptHint = prompt.hint;
+    pending.promptSecret = Boolean(prompt.secret);
+    pending.status = 'waiting';
+    saveAuthAttempt(account.id, {
+      method: 'protocol', flow: 'protocol', status: 'waiting',
+      promptKind: prompt.kind, promptLabel: prompt.label, promptHint: pending.promptHint, promptSecret: Boolean(prompt.secret), error: '',
+    });
+  };
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  const consumeSafely = (chunk) => {
+    try { consume(chunk); } catch (error) { fail(`协议登录状态处理失败：${error.message}`); }
+  };
+  child.stdout.on('data', consumeSafely);
+  child.stderr.on('data', consumeSafely);
+  child.stdin.on('error', (error) => fail(`协议登录输入失败：${error.message}`));
+  child.on('error', (error) => fail(`无法启动协议登录：${error.message}`));
+  child.on('exit', async (code) => {
+    if (pending.status === 'error' || pending.status === 'complete') return;
+    if (code !== 0) {
+      fail(pending.lastProtocolError
+        ? `协议登录失败：${pending.lastProtocolError}`
+        : `协议登录没有完成（退出码 ${code ?? '未知'}）`);
+      return;
+    }
+    try {
+      pending.status = 'finalizing';
+      saveAuthAttempt(account.id, { method: 'protocol', flow: 'protocol', status: 'finalizing', promptKind: '', error: '' });
+      const session = readProtocolSession(paths.sessionFile);
+      const oauth = readProtocolOauthExport(paths.outputFile);
+      await injectProtocolCookies({ port: browser.port, cookies: session.cookies, allowHeadlessBlocked: true, closeBrowser: true });
+      const { codexHomeDir } = accountPaths(account);
+      ensureCodexProfileConfig(codexHomeDir);
+      writeJsonAtomic(path.join(codexHomeDir, 'auth.json'), validateAuthPayload(oauth.auth));
+      stopProtocolBrowser(browser);
+      account.webLoginComplete = true;
+      account.setupStage = 'complete';
+      account.authSource = 'protocol-web-and-codex-oauth';
+      if (oauth.email && !account.emailHint) account.emailHint = oauth.email;
+      account.quotaError = '';
+      account.quotaErrorCode = '';
+      saveAccounts([...accounts]);
+      pending.status = 'complete';
+      clearTimeout(pending.timeout);
+      pendingCodexLogins.delete(account.id);
+      clearAuthAttempt(account.id);
+      const next = { ...leases };
+      delete next[account.id];
+      saveLeases(next);
+      cleanupProtocolLoginFiles(paths);
+      audit('codex.protocol-login.completed', { accountId: account.id, operator, result: 'web-and-codex-pooled' });
+    } catch (error) {
+      fail(error.message);
+    }
+  });
+  saveAuthAttempt(account.id, {
+    method: 'protocol',
+    flow: 'protocol',
+    status: 'starting',
+    startedAt: pending.startedAt,
+    processPid: child.pid,
+    promptKind: '',
+    error: '',
+  });
+  pending.timeout = setTimeout(() => fail('协议登录已超时，请重新发起'), 15 * 60 * 1000);
+  audit('codex.protocol-login.started', { accountId: account.id, operator, result: 'hidden-web-and-codex' });
+  return child.pid;
+}
+
+function pollProtocolLoginResults() {
+  // 协议登录现在由隐藏子进程直接驱动；保留空轮询入口兼容旧定时器。
+}
+
 usageTracker = new CodexUsageTracker({
   storeFile: CODEX_USAGE_FILE,
   sharedCodexHome: SHARED_CODEX_HOME,
@@ -422,11 +725,15 @@ function publicAuthAttempt(accountId) {
   const attempt = pending || authAttempts[accountId];
   if (!attempt) return null;
   return {
-    flow: attempt.flow || 'browser',
+    flow: attempt.flow || attempt.method || 'browser',
     status: attempt.status,
     userCode: pending?.userCode || '',
     deviceUrl: pending?.deviceUrl || '',
     error: attempt.error || '',
+    promptKind: pending?.promptKind || attempt.promptKind || '',
+    promptLabel: pending?.promptLabel || attempt.promptLabel || '',
+    promptHint: pending?.promptHint || attempt.promptHint || '',
+    promptSecret: Boolean(pending?.promptSecret || attempt.promptSecret),
     startedAt: attempt.startedAt || attempt.updatedAt || null,
   };
 }
@@ -434,8 +741,8 @@ function publicAuthAttempt(accountId) {
 function inspectAccountHealth(account) {
   const checkedAt = new Date().toISOString();
   const attempt = publicAuthAttempt(account.id);
-  if (attempt && ['starting', 'waiting'].includes(attempt.status)) {
-    return { status: 'authorizing', label: '正在授权', detail: '请在账号独立浏览器中完成官方流程', checkedAt };
+  if (attempt && ['starting', 'waiting', 'finalizing'].includes(attempt.status)) {
+    return { status: 'authorizing', label: '正在授权', detail: attempt.flow === 'protocol' ? '协议登录正在后台运行，请在应用内完成验证' : '请在账号独立浏览器中完成官方流程', checkedAt };
   }
   if (attempt?.status === 'interrupted') {
     return { status: 'interrupted', label: '授权已中断', detail: '可以从当前账号继续发起官方授权', checkedAt };
@@ -718,8 +1025,18 @@ function hasRestorableBrowserSession(browserDir) {
 async function launchAccountBrowser(account, url, options = {}) {
   const { browserDir } = accountPaths(account);
   fs.mkdirSync(browserDir, { recursive: true });
+  const activePortFile = path.join(browserDir, 'DevToolsActivePort');
+  const existingPort = await readLiveChromeDebugPort(activePortFile);
+  if (!existingPort) fs.rmSync(activePortFile, { force: true });
   const executable = findBrowser();
-  const args = [`--user-data-dir=${browserDir}`, '--no-first-run', '--disable-background-mode'];
+  const args = [
+    `--user-data-dir=${browserDir}`,
+    '--profile-directory=Default',
+    '--no-first-run',
+    '--disable-background-mode',
+    '--remote-debugging-address=127.0.0.1',
+    existingPort ? `--remote-debugging-port=${existingPort}` : '--remote-debugging-port=0',
+  ];
   if (options.restoreLastSession && hasRestorableBrowserSession(browserDir)) {
     args.push('--restore-last-session');
   } else {
@@ -728,11 +1045,172 @@ async function launchAccountBrowser(account, url, options = {}) {
       : [url];
     args.push('--new-window', ...initialUrls);
   }
-  return spawnDetached(executable, args, {
+  const processPid = await spawnDetached(executable, args, {
     detached: true,
     stdio: 'ignore',
     windowsHide: false,
   });
+  const verifiedPort = existingPort || await waitForChromeDebugPort(activePortFile);
+  if (!verifiedPort) {
+    throw new Error('独立 Chrome 环境启动后未绑定到对应账号目录');
+  }
+  return processPid;
+}
+
+function readChromeDebugPort(activePortFile) {
+  try {
+    const [portText] = fs.readFileSync(activePortFile, 'utf8').split(/\r?\n/);
+    const port = Number.parseInt(portText, 10);
+    return Number.isInteger(port) && port > 0 && port <= 65_535 ? port : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function isChromeDebugPortReady(port) {
+  if (!port) return false;
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(600) });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function readLiveChromeDebugPort(activePortFile) {
+  const port = readChromeDebugPort(activePortFile);
+  return await isChromeDebugPortReady(port) ? port : 0;
+}
+
+async function waitForChromeDebugPort(activePortFile, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const port = await readLiveChromeDebugPort(activePortFile);
+    if (port) return port;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return 0;
+}
+
+async function launchAccountBrowserForProtocol(account, options = {}) {
+  const { browserDir } = accountPaths(account);
+  fs.mkdirSync(browserDir, { recursive: true });
+  const activePortFile = path.join(browserDir, 'DevToolsActivePort');
+  fs.rmSync(activePortFile, { force: true });
+  const executable = findBrowser();
+  const browserArgs = [
+    `--user-data-dir=${browserDir}`,
+    '--profile-directory=Default',
+    '--no-first-run',
+    '--disable-background-mode',
+    '--window-size=1280,900',
+    '--remote-debugging-address=127.0.0.1',
+    '--remote-debugging-port=0',
+    settings.browserStartUrl,
+  ];
+  if (options.visibleOffscreen) browserArgs.splice(3, 0, '--window-position=-32000,-32000');
+  else browserArgs.splice(3, 0, '--headless=new');
+  const processPid = await spawnDetached(executable, browserArgs, {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    try {
+      const [portText] = fs.readFileSync(activePortFile, 'utf8').split(/\r?\n/);
+      const port = Number.parseInt(portText, 10);
+      if (Number.isInteger(port) && port > 0 && port <= 65_535) return { processPid, port };
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error('账号 Chrome 调试通道启动超时，请关闭该账号已有的 Chrome 窗口后重试');
+}
+
+function stopProtocolBrowser(browser) {
+  const processPid = Number(browser?.processPid);
+  if (!Number.isInteger(processPid) || processPid <= 0 || !isProcessAlive(processPid)) return;
+  if (process.platform === 'win32') {
+    spawnSync('taskkill.exe', ['/PID', String(processPid), '/T', '/F'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+    return;
+  }
+  try { process.kill(processPid, 'SIGTERM'); } catch {}
+}
+
+async function waitForProtocolBrowserExit(browser, timeoutMs = 5_000) {
+  const processPid = Number(browser?.processPid);
+  if (!Number.isInteger(processPid) || processPid <= 0) return true;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isProcessAlive(processPid)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return !isProcessAlive(processPid);
+}
+
+function transferableWebCookies(cookies) {
+  return cookies.filter((cookie) => {
+    const domain = String(cookie?.domain || '').replace(/^\./, '').toLowerCase();
+    return cookie?.name && typeof cookie.value === 'string' && cookie.value
+      && (domain === 'chatgpt.com' || domain.endsWith('.chatgpt.com')
+        || domain === 'openai.com' || domain.endsWith('.openai.com'));
+  });
+}
+
+async function exportAccountWebSession(account) {
+  const { browserDir } = accountPaths(account);
+  const activePortFile = path.join(browserDir, 'DevToolsActivePort');
+  let port = await readLiveChromeDebugPort(activePortFile);
+  let browser = null;
+  try {
+    if (!port) {
+      browser = await launchAccountBrowserForProtocol(account);
+      port = browser.port;
+    }
+    const cookies = transferableWebCookies(await readProtocolCookies({
+      port,
+      closeBrowser: Boolean(browser),
+    }));
+    if (!cookies.some((cookie) => /(?:^|-)next-auth\.session-token$/i.test(cookie.name))) return null;
+    return {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      cookies,
+    };
+  } finally {
+    if (browser && !await waitForProtocolBrowserExit(browser, 2_000)) stopProtocolBrowser(browser);
+  }
+}
+
+async function importAccountWebSession(account, webSession) {
+  let browser = null;
+  try {
+    browser = await launchAccountBrowserForProtocol(account, { visibleOffscreen: true });
+    const imported = await injectProtocolCookies({
+      port: browser.port,
+      cookies: webSession.cookies,
+      closeBrowser: true,
+      verificationDelayMs: 1_000,
+    });
+    if (!imported.verified) throw new Error(`网页会话验证失败（HTTP ${imported.status || '未知'}）`);
+    if (!await waitForProtocolBrowserExit(browser, 3_000)) stopProtocolBrowser(browser);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    browser = await launchAccountBrowserForProtocol(account, { visibleOffscreen: true });
+    const persisted = await injectProtocolCookies({
+      port: browser.port,
+      cookies: [],
+      closeBrowser: true,
+      verificationDelayMs: 1_000,
+    });
+    if (!persisted.verified) throw new Error('网页会话写入后未能持久保存');
+    account.webLoginComplete = true;
+    return true;
+  } finally {
+    if (browser && !await waitForProtocolBrowserExit(browser, 2_000)) stopProtocolBrowser(browser);
+  }
 }
 
 function spawnDetached(executable, args, options) {
@@ -843,6 +1321,7 @@ function cancelPendingCodexLogin(accountId) {
   if (pending.child && isProcessAlive(pending.child.pid)) {
     try { pending.child.kill(); } catch {}
   }
+  if (pending.flow === 'protocol') stopProtocolBrowser(pending.browser);
   pendingCodexLogins.delete(accountId);
 }
 
@@ -1110,12 +1589,14 @@ function accountView(account) {
     quota: account.quota || null,
     codexActive: readActiveCodexAuth()?.accountId === account.id,
     browserInitialized: fs.existsSync(path.join(browserDir, 'Local State')),
+    webLoginComplete: account.webLoginComplete === true,
     codexInitialized,
     setupStage: codexInitialized ? 'complete' : account.setupStage || 'web-login',
     quotaError: account.quotaError || '',
     quotaErrorCode: account.quotaErrorCode || '',
     quotaCheckedAt: account.quotaCheckedAt || null,
     authSource: account.authSource || 'local-login',
+    loginMethod: account.loginMethod || 'official',
     importedAt: account.importedAt || null,
     health: inspectAccountHealth(account),
     wake: {
@@ -1187,6 +1668,7 @@ function existingAuthIdentity(identity) {
 async function importAuthorizationPackage(envelope, operator) {
   const payload = readAuthPackage(envelope);
   const auth = payload.files?.['auth.json'] || payload.account?.auth;
+  const webSession = payload.files?.['web-session.json'] || null;
   const identity = authIdentity(auth);
   const duplicate = existingAuthIdentity(identity);
   if (duplicate) throw new Error(`该 Codex 授权已经存在于“${duplicate.label}”`);
@@ -1201,7 +1683,8 @@ async function importAuthorizationPackage(envelope, operator) {
     importedAt: new Date().toISOString(),
     createdAt: new Date().toISOString(),
   };
-  const { codexDir, codexHomeDir } = accountPaths(account);
+  const { browserDir, codexDir, codexHomeDir } = accountPaths(account);
+  const importStatus = { codex: 'pending', web: webSession ? 'pending' : 'not-included', webError: '' };
   try {
     ensureCodexProfileConfig(codexHomeDir);
     writeJsonAtomic(path.join(codexHomeDir, 'auth.json'), auth);
@@ -1216,9 +1699,26 @@ async function importAuthorizationPackage(envelope, operator) {
         account.quotaCheckedAt = new Date().toISOString();
       }
     }
+    importStatus.codex = 'imported';
+    if (webSession) {
+      try {
+        await importAccountWebSession(account, webSession);
+        importStatus.web = 'imported';
+        account.authSource = 'authorization-package-web-and-codex';
+      } catch (error) {
+        importStatus.web = 'failed';
+        importStatus.webError = String(error.message || '网页会话验证失败').slice(0, 180);
+        account.webLoginComplete = false;
+        if (isWithin(BROWSER_PROFILES_DIR, browserDir)) fs.rmSync(browserDir, { recursive: true, force: true });
+      }
+    }
     saveAccounts([...accounts, account]);
-    audit('auth.package.imported', { accountId: account.id, operator, result: 'validated' });
-    return account;
+    audit('auth.package.imported', {
+      accountId: account.id,
+      operator,
+      result: importStatus.web === 'imported' ? 'codex-and-web' : `codex-${importStatus.web}`,
+    });
+    return { account, importStatus };
   } catch (error) {
     if (isWithin(CODEX_PROFILES_DIR, codexDir)) fs.rmSync(codexDir, { recursive: true, force: true });
     throw new Error(`授权包验证失败，未写入账号池：${error.message}`);
@@ -1385,8 +1885,11 @@ const server = http.createServer(async (request, response) => {
       const operator = requireOperator(body.operator);
       try {
         const envelope = typeof body.package === 'string' ? JSON.parse(body.package) : body.package;
-        const account = await importAuthorizationPackage(envelope, operator);
-        return sendJson(response, 201, { ok: true, data: accountView(account) });
+        const imported = await importAuthorizationPackage(envelope, operator);
+        return sendJson(response, 201, { ok: true, data: {
+          account: accountView(imported.account),
+          importStatus: imported.importStatus,
+        } });
       } catch (error) {
         return sendError(response, /已经存在/.test(error.message) ? 409 : 400, error.message);
       }
@@ -1397,11 +1900,14 @@ const server = http.createServer(async (request, response) => {
       const operator = requireOperator(body.operator);
       const label = String(body.label || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 60);
       if (!label) return sendError(response, 400, '请输入账号名称');
+      const loginMethod = body.loginMethod === 'protocol' ? 'protocol' : 'official';
       const account = {
         id: `account-${crypto.randomBytes(6).toString('hex')}`,
         label,
         emailHint: String(body.emailHint || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 100),
         browserType: 'chrome',
+        loginMethod,
+        webLoginComplete: false,
         enabled: true,
         setupStage: 'oauth',
         createdAt: new Date().toISOString(),
@@ -1412,10 +1918,12 @@ const server = http.createServer(async (request, response) => {
         const result = acquireLease(leases, account.id, operator, 'setup');
         saveLeases(result.leases);
         try {
-          const processPid = startCodexBrowserLogin(account, operator);
+          const processPid = loginMethod === 'protocol'
+            ? await startProtocolLogin(account, operator)
+            : startCodexBrowserLogin(account, operator);
           result.lease.processPid = processPid;
           saveLeases({ ...leases, [account.id]: result.lease });
-          audit('codex.login.started', { accountId: account.id, operator, result: 'account-create-browser-oauth' });
+          audit('codex.login.started', { accountId: account.id, operator, result: loginMethod === 'protocol' ? 'account-create-protocol' : 'account-create-browser-oauth' });
         } catch (error) {
           const next = { ...leases };
           delete next[account.id];
@@ -1427,7 +1935,7 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 201, { ok: true, data: accountView(account) });
     }
 
-    const match = url.pathname.match(/^\/api\/accounts\/([a-z0-9-]+)\/(launch|release|toggle|authorize|authorize-device|cancel-authorization|quota|health|export-auth|wake|quit-codex)$/);
+    const match = url.pathname.match(/^\/api\/accounts\/([a-z0-9-]+)\/(launch|release|toggle|authorize|authorize-device|authorize-protocol|protocol-input|cancel-authorization|quota|health|export-auth|wake|quit-codex)$/);
     if (match && request.method === 'POST') {
       const [, accountId, operation] = match;
       if (!validateAccountId(accountId)) return sendError(response, 400, '账号 ID 无效');
@@ -1437,6 +1945,28 @@ const server = http.createServer(async (request, response) => {
       const operator = requireOperator(body.operator);
       cleanLeases();
 
+      if (operation === 'protocol-input') {
+        const pending = pendingCodexLogins.get(accountId);
+        if (!pending || pending.flow !== 'protocol' || pending.status !== 'waiting' || !pending.promptKind) {
+          return sendError(response, 409, '当前协议登录没有等待输入');
+        }
+        try {
+          const value = validateProtocolInput(pending.promptKind, body.value);
+          if (pending.child.stdin.destroyed) throw new Error('协议登录输入通道已关闭');
+          pending.child.stdin.write(`${value}\n`);
+          pending.status = 'starting';
+          pending.promptKind = '';
+          pending.promptLabel = '';
+          pending.promptHint = '';
+          pending.promptSecret = false;
+          pending.output = '';
+          saveAuthAttempt(accountId, { method: 'protocol', flow: 'protocol', status: 'starting', promptKind: '', promptLabel: '', promptHint: '', promptSecret: false, error: '' });
+          return sendJson(response, 200, { ok: true, data: accountView(account) });
+        } catch (error) {
+          return sendError(response, 400, error.message);
+        }
+      }
+
       if (operation === 'health') {
         const health = await checkAccountHealth(account, operator);
         return sendJson(response, 200, { ok: true, data: { health, account: accountView(account) } });
@@ -1445,22 +1975,31 @@ const server = http.createServer(async (request, response) => {
       if (operation === 'export-auth') {
         try {
           const auth = readAccountAuth(account);
+          let webSession = null;
+          try {
+            webSession = await exportAccountWebSession(account);
+          } catch (error) {
+            audit('auth.package.web-export-failed', { accountId, operator, result: error.message });
+          }
+          const files = { 'auth.json': auth };
+          if (webSession) files['web-session.json'] = webSession;
           const authorizationPackage = createAuthPackage({
             manifest: {
               type: 'codex-navo-account-transfer',
-              schemaVersion: 1,
+              schemaVersion: 2,
               createdAt: new Date().toISOString(),
               appVersion: APP_VERSION,
             },
             account: { label: account.label, emailHint: account.emailHint || '', authSource: account.authSource || 'local-login' },
             identity: { fingerprint: authIdentity(auth) },
-            files: { 'auth.json': auth },
+            files,
           });
           const safeName = account.label.replace(/[^a-z0-9\u4e00-\u9fff_-]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'codex-account';
-          audit('auth.package.exported', { accountId, operator, result: 'single-file' });
+          audit('auth.package.exported', { accountId, operator, result: webSession ? 'codex-and-web' : 'codex-only' });
           return sendJson(response, 200, { ok: true, data: {
             fileName: `${safeName}.codexnavo`,
             package: authorizationPackage,
+            webSessionIncluded: Boolean(webSession),
           } });
         } catch (error) {
           return sendError(response, 400, error.message);
@@ -1468,7 +2007,12 @@ const server = http.createServer(async (request, response) => {
       }
 
       if (operation === 'cancel-authorization') {
+        const attempt = authAttempts[accountId];
+        if (attempt?.flow === 'protocol' && Number.isInteger(attempt.processPid)) {
+          spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', `Stop-Process -Id ${attempt.processPid} -Force -ErrorAction SilentlyContinue`], { windowsHide: true });
+        }
         cancelPendingCodexLogin(accountId);
+        if (attempt?.flow === 'protocol') cleanupProtocolLoginFiles(protocolLoginPaths(account));
         clearAuthAttempt(accountId);
         const next = { ...leases };
         delete next[accountId];
@@ -1519,7 +2063,7 @@ const server = http.createServer(async (request, response) => {
         }
       }
 
-      if (operation === 'authorize' || operation === 'authorize-device') {
+      if (operation === 'authorize' || operation === 'authorize-device' || operation === 'authorize-protocol') {
         if (isCodexAuthenticated(account) && account.quotaErrorCode !== 'auth_expired') {
           return sendJson(response, 200, { ok: true, data: accountView(account) });
         }
@@ -1541,14 +2085,18 @@ const server = http.createServer(async (request, response) => {
         saveLeases(result.leases);
         try {
           const useDeviceCode = operation === 'authorize-device';
+          const useProtocol = operation === 'authorize-protocol';
           account.setupStage = useDeviceCode ? 'device-auth' : 'oauth';
+          account.loginMethod = useProtocol ? 'protocol' : account.loginMethod || 'official';
           saveAccounts([...accounts]);
           const processPid = useDeviceCode
             ? startCodexDeviceLogin(account, operator)
-            : startCodexBrowserLogin(account, operator);
+            : useProtocol
+              ? await startProtocolLogin(account, operator)
+              : startCodexBrowserLogin(account, operator);
           result.lease.processPid = processPid;
           saveLeases({ ...leases, [accountId]: result.lease });
-          audit('codex.login.started', { accountId, operator, result: useDeviceCode ? 'device-fallback' : 'browser-oauth-retry' });
+          audit('codex.login.started', { accountId, operator, result: useDeviceCode ? 'device-fallback' : useProtocol ? 'protocol-retry' : 'browser-oauth-retry' });
           return sendJson(response, 200, { ok: true, data: accountView(account) });
         } catch (error) {
           account.setupStage = 'oauth';
@@ -1645,6 +2193,9 @@ server.listen(settings.port, '127.0.0.1', () => {
 
 const wakeScheduleTimer = setInterval(runScheduledWakes, 60_000);
 wakeScheduleTimer.unref?.();
+
+const protocolLoginTimer = setInterval(pollProtocolLoginResults, 2_000);
+protocolLoginTimer.unref?.();
 
 server.on('error', (error) => {
   console.error(`启动失败：${error.message}`);

@@ -41,3 +41,39 @@ test('相同 Codex 账号可以通过不暴露凭证的指纹识别', () => {
   assert.equal(authIdentity(fixtureAuth('same-account')), authIdentity(fixtureAuth('same-account')));
   assert.notEqual(authIdentity(fixtureAuth('same-account')), authIdentity(fixtureAuth('another-account')));
 });
+
+test('授权包可同时携带 Codex 授权和标准化网页会话', () => {
+  const payload = {
+    manifest: { type: 'codex-navo-account-transfer', schemaVersion: 2 },
+    account: { label: '双端账号' },
+    files: {
+      'auth.json': fixtureAuth(),
+      'web-session.json': {
+        version: 1,
+        cookies: [{
+          name: '__Secure-next-auth.session-token',
+          value: 'web-session-value',
+          domain: '.chatgpt.com',
+          path: '/',
+          secure: true,
+          httpOnly: true,
+        }],
+      },
+    },
+  };
+  assert.deepEqual(readAuthPackage(createAuthPackage(payload)), payload);
+});
+
+test('旧版只含 auth.json 的授权包继续兼容，其他站点 Cookie 被拒绝', () => {
+  const codexOnly = { account: {}, files: { 'auth.json': fixtureAuth() } };
+  assert.deepEqual(readAuthPackage(createAuthPackage(codexOnly)), codexOnly);
+  assert.throws(() => createAuthPackage({
+    account: {},
+    files: {
+      'auth.json': fixtureAuth(),
+      'web-session.json': {
+        cookies: [{ name: 'session', value: 'value', domain: '.example.com', path: '/' }],
+      },
+    },
+  }), /网页会话 Cookie 内容无效/);
+});

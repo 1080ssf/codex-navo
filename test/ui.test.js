@@ -11,6 +11,28 @@ test('添加账号弹窗的关闭按钮不会触发必填校验', () => {
   assert.equal(cancelButtons.every((button) => /\bformnovalidate\b/.test(button)), true);
 });
 
+test('协议登录的全部交互步骤保留在添加账号弹窗中', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(html, /id="protocol-dialog-progress"/);
+  assert.match(html, /id="protocol-progress-input"/);
+  assert.match(app, /openProtocolDialog\(created\)/);
+  assert.match(app, /renderProtocolPrompt\(login, 'protocol-modal-input'\)/);
+  assert.match(app, /state\.protocolDialogAccountId/);
+  assert.match(styles, /\.protocol-progress-active/);
+});
+
+test('协议登录弹窗直接显示后台连接错误且背景不使用磨砂模糊', () => {
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(client, /function showProtocolDialogConnectionError\(message\)/);
+  assert.match(client, /elements\.protocolProgressTitle\.textContent = '后台服务连接中断'/);
+  assert.match(client, /if \(showProtocolDialogConnectionError\(error\.message\)\) return/);
+  assert.match(styles, /dialog::backdrop \{ background: rgba\(21,36,58,\.18\); backdrop-filter: none; \}/);
+  assert.doesNotMatch(styles, /dialog::backdrop[^}]*blur\(/);
+});
+
 test('桌面端提供克制的更新入口和可取消的更新弹窗', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   assert.match(html, /id="update-chip"/);
@@ -234,4 +256,70 @@ test('授权包使用单个文件且不要求密码或密钥文件', () => {
   assert.doesNotMatch(client, /keyFileName|importKeyFile/);
   assert.match(server, /createAuthPackage/);
   assert.match(server, /readAuthPackage/);
+});
+
+test('账号界面移除邮箱接口检测并采用协议登录免接码名称', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(html, /协议登录（免接码）/);
+  assert.doesNotMatch(html, /protocol-login-note|mail-interface-endpoint|邮箱接口检测/);
+  assert.doesNotMatch(client, /mailInterfaceEndpoint|checkMailInterface|\/api\/mail-interface\/check/);
+  assert.doesNotMatch(server, /fetchPublicMetadata|\/api\/mail-interface\/check/);
+});
+
+test('添加账号弹窗可直接导入单个授权包', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(html, /name="loginMethod" value="import"/);
+  assert.match(html, /id="account-import-package-file"/);
+  assert.match(html, /id="account-import-panel"/);
+  assert.match(app, /state\.accountImportPackageText/);
+  assert.match(app, /requestedLoginMethod === 'import'/);
+  assert.match(app, /readAuthorizationPackageFile/);
+  assert.match(app, /\/api\/auth-packages\/import/);
+  assert.match(styles, /\.account-import-panel/);
+});
+
+test('单账号授权检查显示进行中交互，完成提示可关闭并自动消失', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(app, /button\.textContent = '检查中…'/);
+  assert.match(app, /button\.setAttribute\('aria-busy', 'true'\)/);
+  assert.match(app, /checked\.label.*health\.label.*health\.detail/s);
+  assert.match(app, /close\.addEventListener\('click', hideToolsStatus/);
+  assert.match(app, /autoHideMs = error \? 0 : 5_000/);
+  assert.match(styles, /\.tools-status-close/);
+  assert.match(styles, /\.health-row button\.is-loading/);
+});
+
+test('授权包导出和导入同时处理 Codex 授权与独立 Chrome 网页会话', () => {
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  const protocol = fs.readFileSync(path.join(__dirname, '..', 'lib', 'protocol-login.js'), 'utf8');
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  assert.match(server, /async function exportAccountWebSession/);
+  assert.match(server, /async function importAccountWebSession/);
+  assert.match(server, /files\['web-session\.json'\] = webSession/);
+  assert.match(server, /webSessionIncluded: Boolean\(webSession\)/);
+  assert.match(protocol, /async function readProtocolCookies/);
+  assert.match(client, /双端授权包已生成/);
+  assert.match(client, /Codex 授权与网页会话均已验证/);
+});
+
+test('account creation keeps official and protocol login with manual prompts only', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(html, /name="loginMethod" value="official"/);
+  assert.match(html, /name="loginMethod" value="protocol"/);
+  assert.doesNotMatch(html, /value="cdk"|name="mockOtpEndpoint"|name="protocolPaste"/);
+  assert.match(client, /function renderProtocolPrompt/);
+  assert.match(client, /\['email_otp', 'totp', 'phone_otp'\]/);
+  assert.match(client, /submitLabel = phone/);
+  assert.match(client, /autocomplete = kind === 'password' \? 'current-password' : otp \? 'one-time-code'/);
+  assert.match(client, /inputMode = otp \? 'numeric' : phone \? 'tel'/);
+  assert.match(client, /\/protocol-input/);
+  assert.doesNotMatch(client, /cdkImportToken|mockOtpEndpoint|protocolPaste/);
+  assert.doesNotMatch(server, /pendingCdkImports|\/api\/cdk\/redeem|MailOtpSession|mockOtpEndpoint|otpSession|otpController/);
 });
