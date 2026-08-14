@@ -8,6 +8,10 @@ verification/
 # Local configuration may contain usernames or absolute paths
 config/settings.json
 config/accounts.json
+config/proxy-settings.json
+config/network-settings.json
+network-core/
+.cache/
 
 # Browser profiles and Codex authentication
 profiles/

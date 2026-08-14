@@ -2,13 +2,14 @@
   "name": "codex-navo",
   "productName": "Codex Navo",
   "private": true,
-  "version": "1.2.13",
-  "description": "Windows desktop app for ChatGPT and Codex multi-account management, account switching, quota tracking, independent Chrome profiles, and Codex Desktop OAuth.",
+  "version": "1.2.89",
+  "description": "Open-source Windows workspace for Codex multi-account isolation, quota and token tracking, API pooling and failover, per-account proxies, sessions, notifications, and floating status.",
   "main": "desktop-src/main.js",
   "author": "1080ssf",
   "license": "MIT",
   "dependencies": {
-    "electron-updater": "^6.6.2"
+    "electron-updater": "^6.6.2",
+    "undici": "^7.29.0"
   },
   "devDependencies": {
     "electron": "^43.2.0",
@@ -17,12 +18,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "electron .",
-    "test": "node --test test/*.test.js",
-    "test:mail-otp-mock": "node scripts/mail-otp-mock-server.js --fixture test/fixtures/mail-otp.json --port 48080",
-    "test:mail-otp": "node scripts/mail-otp-check.js --fixture test/fixtures/mail-otp.json",
-    "test:mail-otp:interactive": "node scripts/mail-otp-check.js",
-    "collect:mail-metadata": "node scripts/mail-metadata-collector.js",
-    "test:smoke": "node test/smoke.js",
+    "test:encoding": "node scripts/check-utf8.js",
+    "test": "node scripts/check-utf8.js && node --test test/*.test.js",
+    "prebuild:desktop": "node scripts/check-utf8.js && node scripts/prepare-network-core.js",
     "build:desktop": "electron-builder --win nsis --x64 --publish never"
   },
   "build": {
@@ -43,6 +41,12 @@
       "THIRD_PARTY_NOTICES.md",
       "LICENSE",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": ".cache/network-core/mihomo-v1.19.29.exe",
+        "to": "network-core/mihomo-v1.19.29.exe"
+      }
     ],
     "win": {
       "target": [

@@ -135,36 +135,17 @@ test('协议网页会话转换为仅供本机 Chrome 写入的 Cookie', () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('服务端协议登录使用隐藏子进程连续完成网页会话与 Codex OAuth', () => {
+test('服务端不再暴露协议登录或协议输入入口', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  assert.match(source, /stdio: \['pipe', 'pipe', 'pipe'\]/);
-  assert.match(source, /windowsHide: true/);
-  assert.match(source, /--output-mode', 'both'/);
-  assert.doesNotMatch(source, /'--web-only'/);
-  assert.doesNotMatch(source, /'--no-sub2api-export'/);
-  assert.match(source, /'--sub2api-out', paths\.outputFile/);
-  assert.match(source, /'--sub2api-name', account\.label/);
-  assert.match(source, /--remote-debugging-address=127\.0\.0\.1/);
-  assert.match(source, /'--headless=new'/);
-  assert.match(source, /windowsHide: true/);
-  assert.match(source, /stopProtocolBrowser\(browser\)/);
-  assert.match(source, /taskkill\.exe/);
-  assert.match(source, /injectProtocolCookies/);
-  assert.match(source, /readProtocolOauthExport\(paths\.outputFile\)/);
-  assert.match(source, /writeJsonAtomic\(path\.join\(codexHomeDir, 'auth\.json'\), validateAuthPayload\(oauth\.auth\)\)/);
-  assert.match(source, /webLoginComplete = true/);
-  assert.match(source, /setupStage = 'complete'/);
-  assert.match(source, /authSource = 'protocol-web-and-codex-oauth'/);
-  assert.match(source, /protocol-input/);
-  assert.doesNotMatch(source, /Start-Process -FilePath 'powershell\.exe'/);
+  assert.doesNotMatch(source, /authorize-protocol/);
+  assert.doesNotMatch(source, /operation === 'protocol-input'/);
 });
 
-test('邮箱验证码与其他验证步骤均通过账号卡片人工写入当前子进程', () => {
+test('账号创建只允许官方浏览器登录或授权包导入', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  assert.match(source, /operation === 'protocol-input'/);
-  assert.match(source, /validateProtocolInput\(pending\.promptKind, body\.value\)/);
-  assert.match(source, /pending\.child\.stdin\.write\(`\$\{value\}\\n`\)/);
-  assert.doesNotMatch(source, /MailOtpSession|mockOtpEndpoint|otpSession|otpController/);
+  assert.match(source, /const loginMethod = 'official'/);
+  assert.match(source, /startCodexBrowserLogin\(account, operator\)/);
+  assert.doesNotMatch(source, /body\.loginMethod === 'protocol'/);
 });
 
 test('Headless Chrome 写入 Cookie 后重试会话校验，并允许 403 延后到可见浏览器验证', () => {
@@ -246,7 +227,9 @@ test('协议登录异常不会带崩本地服务，重启后 finalizing 会标�
 test('temporary renewal path is removed in favor of official reauthorization', () => {
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.doesNotMatch(server, /beginProtocolRenewal|runScheduledAuthRenewals|operation === 'renew'/);
-  assert.match(server, /return !isNonRefreshableWebSessionAuth\(auth\)/);
+  assert.match(server, /const temporary = isNonRefreshableWebSessionAuth\(auth\)/);
+  assert.match(server, /if \(temporary && account\.accountKind === 'relay'\)/);
+  assert.match(server, /return !temporary/);
   assert.match(server, /requires-official-oauth/);
   assert.match(server, /label: '需要官方授权'/);
 });

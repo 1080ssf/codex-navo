@@ -1,0 +1,58 @@
+:root { color-scheme: light; font-family: "Segoe UI Variable Text", "Microsoft YaHei UI", "Segoe UI", sans-serif; }
+* { box-sizing: border-box; }
+html, body { width: 100%; min-height: 100%; margin: 0; overflow: hidden; background: transparent; }
+body { --panel: rgba(244,248,253,.94); --panel-strong: rgba(255,255,255,.88); --line: rgba(127,151,184,.28); --ink: #142740; --muted: #71839a; --accent: #3474e8; --accent-soft: rgba(52,116,232,.14); color: var(--ink); }
+body[data-theme="midnight"] { color-scheme: dark; --panel: rgba(14,24,39,.94); --panel-strong: rgba(25,39,59,.9); --line: rgba(135,167,210,.24); --ink: #f1f6ff; --muted: #9fb2cb; --accent: #69a4ff; --accent-soft: rgba(105,164,255,.18); }
+body[data-theme="paper"] { --panel: rgba(255,252,244,.97); --panel-strong: rgba(255,255,255,.92); --line: rgba(166,145,111,.25); --ink: #33291e; --muted: #887763; --accent: #b56b2b; --accent-soft: rgba(181,107,43,.13); }
+button, input { font: inherit; }
+.widget-shell { width: 100%; padding: 12px; overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); box-shadow: 0 20px 60px rgba(10,28,52,.22); backdrop-filter: blur(22px); }
+.widget-header { -webkit-app-region: drag; display: flex; height: 28px; align-items: center; justify-content: space-between; margin-bottom: 9px; }
+.widget-brand { display: flex; min-width: 0; align-items: center; gap: 8px; color: var(--muted); font: 750 9px/1 "Cascadia Code", monospace; letter-spacing: .16em; }
+.widget-brand i { width: 10px; height: 10px; border-radius: 4px; background: linear-gradient(135deg,var(--accent),#38bf91); box-shadow: 0 0 0 5px var(--accent-soft); }
+.widget-actions { -webkit-app-region: no-drag; display: flex; flex: none; gap: 5px; }
+.widget-actions button { display: grid; width: 25px; height: 25px; padding: 0; place-items: center; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: var(--panel-strong); cursor: pointer; }
+.widget-actions button:hover { color: var(--accent); border-color: color-mix(in srgb,var(--accent) 45%,var(--line)); }
+.widget-actions button.active { color: #fff; border-color: var(--accent); background: var(--accent); box-shadow: 0 5px 12px var(--accent-soft); }
+.widget-actions svg { width: 13px; height: 13px; fill: currentColor; }
+.account-panel, .task-panel, .settings-panel { padding: 13px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel-strong); }
+.task-panel, .settings-panel { margin-top: 9px; }
+.account-line, .quota-line, .section-label, .task-progress-copy { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.account-line > div { display: grid; min-width: 0; gap: 3px; }
+.account-line small, .quota-line span, .section-label span, .task-progress-copy span { color: var(--muted); font-size: 9px; font-weight: 650; }
+.account-line strong { overflow: hidden; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.account-line em, .section-label em { padding: 4px 7px; border-radius: 999px; color: var(--accent); background: var(--accent-soft); font-size: 8px; font-style: normal; font-weight: 750; }
+.quota-line { margin-top: 11px; }
+.quota-line strong { color: var(--accent); font: 800 11px/1 "Cascadia Code", monospace; }
+.quota-line > div { display: flex; align-items: center; gap: 6px; }
+.quota-line button { display: grid; width: 20px; height: 20px; padding: 0; place-items: center; border: 0; border-radius: 6px; color: var(--accent); background: var(--accent-soft); cursor: pointer; }
+.quota-line button svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.quota-line button.loading svg { animation: quota-refreshing .8s linear infinite; }
+@keyframes quota-refreshing { to { transform: rotate(360deg); } }
+.quota-track, .task-progress { height: 5px; margin-top: 7px; overflow: hidden; border-radius: 999px; background: var(--accent-soft); }
+.quota-track i { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg,var(--accent),#35bd8b); transition: width .35s ease; }
+.metric-row { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 7px; margin-top: 11px; }
+.account-metrics { grid-template-columns: repeat(4,minmax(0,1fr)); gap: 5px; }
+.account-metrics div { padding-inline: 6px; }
+.account-metrics strong { font-size: 10px; }
+.metric-row div { min-width: 0; overflow: hidden; padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: color-mix(in srgb,var(--panel-strong) 82%,var(--accent-soft)); }
+.metric-row span { display: block; color: var(--muted); font-size: 8px; }
+.metric-row strong { display: block; overflow: hidden; margin-top: 4px; font: 750 11px/1 "Cascadia Code", monospace; text-overflow: ellipsis; }
+.task-title { display: block; overflow: hidden; margin-top: 9px; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.task-project { display: block; overflow: hidden; margin-top: 4px; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.task-progress-copy { margin-top: 11px; }
+.task-progress-copy strong { overflow: hidden; max-width: 210px; color: var(--accent); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.task-progress i { display: block; width: 32%; height: 100%; border-radius: inherit; background: linear-gradient(90deg,transparent,var(--accent),transparent); animation: task-running 1.6s ease-in-out infinite; }
+.task-progress.idle i { width: 0; animation: none; }
+.task-progress.waiting i { width: 58%; background: #d89a31; animation: none; }
+@keyframes task-running { from { transform: translateX(-100%); } to { transform: translateX(312%); } }
+.settings-panel[hidden] { display: none; }
+.setting-row { display: grid; gap: 9px; color: var(--muted); font-size: 9px; font-weight: 650; }
+.theme-options { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; }
+.theme-options button { height: 28px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: transparent; font-size: 9px; cursor: pointer; }
+.theme-options button.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.opacity-row { display: grid; gap: 8px; margin-top: 12px; color: var(--muted); font-size: 9px; font-weight: 650; }
+.opacity-row span { display: flex; justify-content: space-between; }
+.opacity-row output { color: var(--accent); font-family: "Cascadia Code", monospace; }
+.opacity-row input { width: 100%; accent-color: var(--accent); }
+footer { display: flex; align-items: center; justify-content: center; gap: 7px; padding-top: 9px; color: var(--muted); font-size: 8px; }
+footer i { width: 3px; height: 3px; border-radius: 50%; background: var(--accent); }

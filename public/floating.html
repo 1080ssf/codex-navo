@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex Navo Floating</title>
+  <link rel="stylesheet" href="/floating.css">
+</head>
+<body data-theme="glass">
+  <main class="widget-shell">
+    <header class="widget-header">
+      <div class="widget-brand"><i></i><span>CODEX NAVO</span></div>
+      <div class="widget-actions">
+        <button id="pin-toggle" type="button" title="Keep on top" aria-label="Keep on top">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.4 3.5h7.2l-.9 5.1 3.1 3.1v1.8h-4.7v6.2L12 21l-1.1-1.3v-6.2H6.2v-1.8l3.1-3.1-.9-5.1Z"/></svg>
+        </button>
+        <button id="settings-toggle" type="button" title="Floating window settings" aria-label="Floating window settings">&#9881;</button>
+        <button id="widget-hide" type="button" title="Hide floating window" aria-label="Hide floating window">&times;</button>
+      </div>
+    </header>
+
+    <section class="account-panel">
+      <div class="account-line"><div><small data-i18n="currentAccount">Current account</small><strong id="account-name" data-i18n="loading">Loading...</strong></div><em id="account-type">&mdash;</em></div>
+      <div class="quota-line"><span data-i18n="availableQuota">Available quota</span><div><strong id="quota-value">&mdash;</strong><button id="quota-refresh" type="button" title="Refresh quota" aria-label="Refresh quota"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8a7 7 0 0 0-12-2L5 8m0-4v4h4M5 16a7 7 0 0 0 12 2l2-2m0 4v-4h-4"/></svg></button></div></div>
+      <div class="quota-track"><i id="quota-bar"></i></div>
+      <div class="metric-row account-metrics">
+        <div><span data-i18n="input">Input</span><strong id="usage-input">&mdash;</strong></div>
+        <div><span data-i18n="cache">Cache</span><strong id="usage-cache">&mdash;</strong></div>
+        <div><span data-i18n="cacheRate">Cache rate</span><strong id="usage-cache-rate">&mdash;</strong></div>
+        <div><span data-i18n="output">Output</span><strong id="usage-output">&mdash;</strong></div>
+      </div>
+    </section>
+
+    <section class="task-panel">
+      <div class="section-label"><span data-i18n="currentTask">Current task</span><em id="task-state" data-i18n="waitingTask">Waiting</em></div>
+      <strong class="task-title" id="task-title" data-i18n="noActiveTask">No active task</strong>
+      <small class="task-project" id="task-project" data-i18n="monitoringSessions">Codex Navo is monitoring local sessions</small>
+      <div class="task-progress-copy"><span data-i18n="taskProgress">Task progress</span><strong id="task-activity" data-i18n="idle">Idle</strong></div>
+      <div class="task-progress" id="task-progress"><i></i></div>
+      <div class="metric-row task-metrics">
+        <div><span data-i18n="taskInput">Task input</span><strong id="task-input">&mdash;</strong></div>
+        <div><span data-i18n="taskCache">Task cache</span><strong id="task-cache">&mdash;</strong></div>
+        <div><span data-i18n="taskOutput">Task output</span><strong id="task-output">&mdash;</strong></div>
+      </div>
+    </section>
+
+    <section class="settings-panel" id="settings-panel" hidden>
+      <div class="setting-row"><span data-i18n="windowStyle">Window style</span><div class="theme-options"><button type="button" data-theme-value="glass" data-i18n="glass">Glass</button><button type="button" data-theme-value="midnight" data-i18n="midnight">Midnight</button><button type="button" data-theme-value="paper" data-i18n="paper">Paper</button></div></div>
+      <label class="opacity-row"><span><span data-i18n="opacity">Opacity</span> <output id="opacity-value">92%</output></span><input id="opacity-input" type="range" min="35" max="100" step="1" value="92"></label>
+    </section>
+
+    <footer><span id="updated-at" data-i18n="waitingData">Waiting for local data</span><i></i><span data-i18n="shortcutHint">Ctrl+Alt+N to bring forward</span></footer>
+  </main>
+  <script src="/floating.js" defer></script>
+</body>
+</html>

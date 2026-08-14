@@ -25,25 +25,52 @@
         </button>
       </header>
 
+      <div class="app-workspace" id="app-workspace">
+        <aside class="app-sidebar" id="app-sidebar" aria-label="功能导航">
+          <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="折叠侧边栏" aria-expanded="true">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12.5 5-5 5 5 5"></path></svg><span>收起</span>
+          </button>
+          <nav class="sidebar-nav">
+            <button class="sidebar-item active" id="sidebar-account-button" type="button" data-sidebar-section="accounts" aria-current="page" title="账号管理">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="3"></rect><circle cx="9" cy="11" r="2"></circle><path d="M6.8 16c.5-1.5 1.3-2.2 2.2-2.2s1.7.7 2.2 2.2M14 10h3.5M14 14h3.5"></path></svg><span>账号管理</span>
+            </button>
+            <button class="sidebar-item" id="network-settings-button" type="button" data-sidebar-section="network" title="网络代理">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M3.8 12h16.4M12 3.5c2.2 2.3 3.4 5.2 3.4 8.5S14.2 18.2 12 20.5M12 3.5C9.8 5.8 8.6 8.7 8.6 12s1.2 6.2 3.4 8.5"></path></svg><span>网络代理</span>
+            </button>
+            <button class="sidebar-item" id="account-tools-button" type="button" data-sidebar-section="authorization" title="授权迁移">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6z"></path><path d="m9.3 12 1.8 1.8 3.8-4"></path></svg><span>授权迁移</span>
+            </button>
+            <button class="sidebar-item" type="button" data-sidebar-section="sessions" title="会话管理">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-4.5 3v-3H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"></path><path d="M7 9h10M7 13h7"></path></svg><span>会话管理</span>
+            </button>
+            <button class="sidebar-item" type="button" data-sidebar-section="notifications" title="通知提醒">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 9a5.5 5.5 0 0 1 11 0c0 6 2.5 6 2.5 8H4c0-2 2.5-2 2.5-8z"></path><path d="M9.5 20h5"></path></svg><span>通知提醒</span>
+            </button>
+            <button class="sidebar-item" type="button" data-sidebar-section="reverse-proxy" title="API 服务">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h13M14 5l3 3-3 3M20 16H7M10 13l-3 3 3 3"></path></svg><span>API 服务</span>
+            </button>
+            <button class="sidebar-item" id="wake-settings-button" type="button" data-sidebar-section="wake" title="唤醒设置">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.2 2.8 5.8 13h5l-1 8.2L18.2 10h-5z"></path></svg><span>唤醒设置</span>
+            </button>
+            <button class="sidebar-item" type="button" data-sidebar-section="language" title="应用设置">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1z"></path></svg><span>应用设置</span>
+            </button>
+          </nav>
+        </aside>
+
       <main>
-        <section class="accounts-section" aria-labelledby="accounts-title">
+        <section class="accounts-section app-page active" data-app-page="accounts" aria-labelledby="accounts-title">
           <div class="section-heading">
             <div class="section-title">
               <h1 id="accounts-title">账号池</h1>
               <p id="account-summary">正在读取本地状态…</p>
             </div>
             <div class="heading-actions">
-              <button class="refresh-all-button wake-all-button" id="wake-all" type="button" data-tooltip="一键唤醒全部账号" aria-label="一键唤醒全部账号">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.2 2.8 5.8 13h5l-1 8.2L18.2 10h-5z"></path></svg>
-              </button>
-              <button class="refresh-all-button wake-settings-button" id="wake-settings-button" type="button" data-tooltip="唤醒设置" aria-label="唤醒设置">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1z"></path></svg>
+              <button class="refresh-all-button floating-window-button" id="floating-window-button" type="button" data-tooltip="显示悬浮窗" aria-label="显示悬浮窗">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="3"></rect><path d="M8 9h8M8 13h5"></path><circle cx="17" cy="15" r="1.5"></circle></svg>
               </button>
               <button class="refresh-all-button" id="refresh-all-quotas" type="button" data-tooltip="刷新全部账号额度" aria-label="刷新全部账号额度">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.1 8A7.5 7.5 0 0 0 6.4 5.4L4.5 7.2"></path><path d="M4.5 3.8v3.4h3.4"></path><path d="M4.9 16A7.5 7.5 0 0 0 17.6 18.6l1.9-1.8"></path><path d="M19.5 20.2v-3.4h-3.4"></path></svg>
-              </button>
-              <button class="account-tools-button" id="account-tools-button" type="button" data-tooltip="授权健康与账号迁移" aria-label="打开授权工具">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6z"></path><path d="m9.3 12 1.8 1.8 3.8-4"></path></svg>
               </button>
               <div class="view-switcher" id="view-switcher" role="group" aria-label="账号显示方式">
                 <button type="button" data-view="list" aria-label="列表视图" title="列表视图">
@@ -87,19 +114,148 @@
             </div>
             <div class="usage-ledger" id="usage-ledger">
               <div class="usage-primary">
-                <div><span>总 Token</span><strong>—</strong><small>输入与输出合计</small></div>
+              <div><span>总 Token</span><strong>—</strong><small>输入与输出合计</small></div>
                 <div class="usage-cost"><span>Token 估值</span><strong>—</strong><small>按 API Token 公价估算</small></div>
               </div>
               <div class="usage-breakdown">
                 <div class="usage-metric"><span>模型调用</span><strong>—</strong><small>近实时记录</small></div>
-                <div class="usage-metric"><span>输入</span><strong>—</strong><small>缓存 — · 命中 —</small></div>
+                <div class="usage-metric"><span>输入</span><strong>—</strong><small>缓存率 —</small></div>
                 <div class="usage-metric"><span>输出</span><strong>—</strong><small>其中推理 —</small></div>
               </div>
             </div>
           </section>
           <div id="accounts" class="account-list" aria-live="polite"></div>
         </section>
+
+        <section class="app-page feature-page" data-app-page="network" hidden>
+          <div class="feature-page-head"><p class="eyebrow">NETWORK ROUTING</p><h1>网络代理</h1><p>集中管理代理订阅与节点，并为每个账号分配独立线路。</p></div>
+          <form id="network-source-form" class="feature-surface network-page-form">
+            <section class="network-import-panel">
+              <label class="network-source-name" data-network-input-label><span class="network-field-title">线路名称 <small>可选</small></span><input name="name" maxlength="60" autocomplete="off"></label>
+              <label class="network-source-input" data-network-input-label><span class="network-field-title">节点或订阅</span><textarea name="input" required rows="1" spellcheck="false" wrap="off" autocomplete="off" title="支持订阅链接及 SS / SSR / VMess / VLESS / Trojan / Hysteria2 / TUIC / WireGuard / HTTP / SOCKS5"></textarea></label>
+              <button class="network-add-button" id="add-network-source" type="submit"><span>＋</span>添加线路</button>
+            </section>
+            <div class="network-core-state" id="network-core-state"><i></i><span>代理核心将在首次添加节点时自动准备</span></div>
+            <div class="network-source-list" id="network-source-list"><div class="network-empty">还没有节点或订阅</div></div>
+            <div class="network-result" id="network-result" role="status" aria-live="polite" hidden></div>
+          </form>
+        </section>
+        <section class="app-page feature-page" data-app-page="authorization" hidden>
+          <div class="feature-page-head"><p class="eyebrow">AUTH VAULT</p><h1>授权迁移</h1><p>检查账号授权状态，或通过授权包迁移 Codex 与可用的网页会话。</p></div>
+          <form class="feature-surface authorization-page-form">
+            <div class="tools-status" id="tools-status" role="status" aria-live="polite" hidden></div>
+            <section class="health-center" aria-labelledby="health-center-title">
+              <div class="tools-section-head"><div><span>AUTH HEALTH</span><h3 id="health-center-title">账号健康</h3></div><button class="secondary-button compact-button" id="check-all-health" type="button">检查全部</button></div>
+              <div class="health-list" id="health-list"></div>
+            </section>
+            <section class="package-center" aria-labelledby="package-center-title">
+              <div class="tools-section-head"><div><span>ACCOUNT PACKAGE</span><h3 id="package-center-title">账号授权包</h3></div></div>
+              <div class="package-grid">
+                <div class="package-panel"><div class="package-panel-title"><i class="package-arrow">↑</i><div><strong>导出授权</strong><small>生成单个 .codexnavo 账号授权包</small></div></div><label>选择账号<select id="export-account"></select></label><button class="primary-button package-action" id="export-auth-package" type="button">生成授权包</button></div>
+                <div class="package-panel"><div class="package-panel-title"><i class="package-arrow">↓</i><div><strong>导入授权</strong><small>验证通过后创建新的 Codex 账号环境</small></div></div><label class="file-picker">授权包<input id="import-package-file" type="file" accept=".codexnavo,application/json"><span id="import-file-name">选择 .codexnavo 文件</span></label><p class="package-note">新版授权包可同时恢复 Codex 授权与网页会话；旧版单端包继续兼容。项目、任务和网页历史不会导入。</p><button class="primary-button package-action" id="import-auth-package" type="button">验证并导入</button></div>
+              </div>
+            </section>
+          </form>
+        </section>
+
+        <section class="app-page feature-page" data-app-page="sessions" hidden>
+          <div class="feature-page-head session-page-heading"><div class="session-heading-copy"><p class="eyebrow">CODEX SESSIONS</p><h1>会话管理</h1><p>实时读取本机 Codex 会话，查看运行、等待处理和最近完成的任务。</p></div><button class="secondary-button compact-button" id="session-refresh" type="button">立即刷新</button></div>
+          <div class="session-overview" id="session-overview">
+            <article><span>运行中</span><strong id="session-running-count">0</strong><i class="running"></i></article>
+            <article><span>等待处理</span><strong id="session-waiting-count">0</strong><i class="waiting"></i></article>
+            <article><span>今日完成</span><strong id="session-completed-count">0</strong><i class="completed"></i></article>
+            <article><span>失败或中断</span><strong id="session-failed-count">0</strong><i class="failed"></i></article>
+            <article><span>历史会话</span><strong id="session-total-count">0</strong><i class="history"></i></article>
+          </div>
+          <section class="feature-surface session-list-panel">
+            <div class="session-list-head"><div><span>CODEX CONVERSATIONS</span><h2>项目与会话</h2></div><div class="session-list-actions"><button class="session-clear-failed" id="session-clear-failed" type="button" hidden>清空失败项</button><div class="session-filters" id="session-filters"><button type="button" data-session-filter="active">进行中</button><button type="button" data-session-filter="failed">失败</button><button class="active" type="button" data-session-filter="all">全部</button></div></div></div>
+            <div class="session-list" id="session-list"><div class="session-empty">正在读取本机会话…</div></div>
+          </section>
+        </section>
+        <section class="app-page feature-page" data-app-page="notifications" hidden>
+          <div class="feature-page-head"><p class="eyebrow">NOTIFICATIONS</p><h1>通知提醒</h1><p>设置任务完成、失败或等待操作时的系统通知、提示音和消息机器人。</p></div>
+          <form id="notification-form" class="notification-page-grid">
+            <section class="feature-surface notification-settings-card">
+              <div class="notification-section-head"><div><span>LOCAL ALERTS</span><h2>本机提醒</h2></div><label class="compact-switch"><input name="enabled" type="checkbox"><i></i><span>启用提醒</span></label></div>
+              <label class="notification-field notification-message-field"><span>通知文案</span><textarea name="notificationText" maxlength="500" rows="4" required placeholder="有任务已处理完毕。"></textarea><small>保存什么内容，飞书、钉钉或 Telegram 就原样发送什么内容</small></label>
+              <div class="notification-two-column"><div class="notification-field notification-control-card"><span class="notification-field-head">提示音</span><div class="notification-sound-controls"><select name="sound"><option value="soft-chime">柔和确认</option><option value="bright-chime">明亮确认</option><option value="glass">玻璃轻响</option><option value="notice">低音提醒</option><option value="question">等待提醒</option><option value="error">错误提醒</option><option value="pluck">弹拨提示</option><option value="click">轻敲提示</option><option value="none">静音</option></select><button class="sound-import-button" id="notification-sound-import" type="button">导入本地音频</button></div><small id="notification-sound-name">内置音效来自 Kenney Interface Sounds（CC0）；支持导入最大 5 MB 音频</small></div><label class="notification-field notification-control-card"><span class="notification-field-head"><span>音量</span><output id="notification-volume-value">55%</output></span><div class="notification-volume-control"><input name="volume" type="range" min="0" max="1" step="0.05"></div><small>调整系统通知和提示音的播放音量</small></label></div>
+              <div class="notification-checks"><label><input name="notifyCompleted" type="checkbox">任务完成</label><label><input name="notifyFailed" type="checkbox">任务失败或中断</label><label><input name="notifyWaiting" type="checkbox">等待输入或授权</label><label><input name="systemNotification" type="checkbox">显示 Windows 通知</label></div>
+              <div class="notification-actions"><button class="secondary-button" id="notification-test-local" type="button">试听并测试</button><button class="primary-button" type="submit">保存设置</button></div>
+            </section>
+            <section class="feature-surface notification-channel-card">
+              <div class="notification-section-head"><div><span>MESSAGE CHANNELS</span><h2>消息平台</h2></div></div>
+              <article class="notification-channel"><div class="notification-channel-title"><strong>飞书</strong><label class="compact-switch"><input name="feishuEnabled" type="checkbox"><i></i></label></div><input name="feishuWebhook" type="password" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."><button type="button" data-test-channel="feishu">测试连接</button><span data-channel-result="feishu"></span></article>
+              <article class="notification-channel"><div class="notification-channel-title"><strong>钉钉</strong><label class="compact-switch"><input name="dingtalkEnabled" type="checkbox"><i></i></label></div><input name="dingtalkWebhook" type="password" placeholder="https://oapi.dingtalk.com/robot/send?access_token=..."><button type="button" data-test-channel="dingtalk">测试连接</button><span data-channel-result="dingtalk"></span></article>
+              <article class="notification-channel telegram-channel"><div class="notification-channel-title"><strong>Telegram</strong><label class="compact-switch"><input name="telegramEnabled" type="checkbox"><i></i></label></div><input name="telegramToken" type="password" placeholder="Bot Token"><input name="telegramChatId" placeholder="Chat ID"><button type="button" data-test-channel="telegram">测试连接</button><span data-channel-result="telegram"></span></article>
+            </section>
+          </form>
+        </section>
+        <section class="app-page feature-page" data-app-page="reverse-proxy" hidden>
+          <div class="feature-page-head"><p class="eyebrow">API SERVICE</p><h1>API 服务</h1><p>把已授权的 Codex 账号池转换为 OpenAI 兼容 API，并使用 Navo API Key 管理访问权限。</p></div>
+          <div class="api-service-grid">
+            <section class="feature-surface api-docs-panel">
+              <div class="api-docs-head"><div><span>API REFERENCE</span><h2>API 文档</h2><p>兼容 OpenAI 调用格式，使用创建的 Navo API Key 访问。</p></div><span class="api-docs-badge">OpenAI Compatible</span></div>
+              <div class="api-docs-connect">
+                <div><small>Base URL</small><code id="api-doc-base-url">http://127.0.0.1:18300/v1</code><button type="button" data-api-copy="base-url">复制</button></div>
+                <div><small>Authorization</small><code>Bearer sk-navo-...</code><button type="button" data-api-copy="authorization">复制格式</button></div>
+              </div>
+              <div class="api-endpoint-grid">
+                <article><span>GET</span><code>/v1/models</code><p>读取当前 Key 可访问的模型</p></article>
+                <article><span>POST</span><code>/v1/responses</code><p>Codex 与 Responses 客户端调用</p></article>
+                <article><span>POST</span><code>/v1/chat/completions</code><p>兼容 OpenAI Chat Completions</p></article>
+              </div>
+              <div class="api-docs-example"><div><small>请求示例</small><button type="button" data-api-copy="example">复制示例</button></div><pre id="api-doc-example">curl http://127.0.0.1:18300/v1/responses \
+  -H "Authorization: Bearer sk-navo-REPLACE_ME" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-5.6-codex","input":"Hello"}'</pre></div>
+            </section>
+            <div class="api-management-grid">
+              <section class="feature-surface api-service-panel">
+                <div class="api-service-head"><div><span>ACCESS KEYS</span><h2>Navo API Key</h2><p>创建供客户端使用的 Bearer Key，并配置权限与额度。</p></div><button class="primary-button compact-button" id="api-key-add" type="button">创建 Key</button></div>
+                <div class="api-key-list" id="api-key-list"></div>
+              </section>
+            </div>
+          </div>
+        </section>
+        <section class="app-page feature-page" data-app-page="wake" hidden>
+          <div class="feature-page-head"><p class="eyebrow">ACCOUNT WAKE</p><h1>唤醒设置</h1><p>设置自动唤醒策略、模型、推理强度与发送内容。</p></div>
+          <form id="wake-form" class="feature-surface wake-page-form">
+            <label class="wake-toggle"><span><strong>自动唤醒</strong><small>默认关闭；开启后按下方策略执行</small></span><input name="enabled" type="checkbox"></label>
+            <div class="wake-settings-grid"><label>执行策略<select name="mode"><option value="manual">仅手动唤醒</option><option value="daily">每天唤醒一次</option><option value="after-reset">额度重置后唤醒一次</option></select></label><label data-daily-time>每日执行时间<input name="dailyTime" type="time" value="09:00"></label></div>
+            <div class="wake-settings-grid wake-model-grid"><label>模型<select name="model" aria-label="唤醒模型"><option value="">正在读取 Codex 模型…</option></select></label><label>推理强度<select name="reasoningEffort" aria-label="推理强度"><option value="">模型默认</option></select></label></div>
+            <p class="wake-model-help" id="wake-model-help"></p>
+            <label>发送内容<textarea name="prompt" maxlength="1000" rows="3"></textarea></label>
+            <p class="wake-note">“额度重置后”会同时检测预计时间、重置时间变化和额度突然恢复，通常在 5 分钟内识别不定时重置。</p>
+            <div class="dialog-actions"><button class="secondary-button wake-all-dialog-button" id="wake-all" type="button">立即唤醒全部</button><button class="primary-button" type="submit">保存设置</button></div>
+          </form>
+        </section>
+        <section class="app-page feature-page app-settings-page" data-app-page="language" hidden>
+          <div class="feature-page-head"><p class="eyebrow">APPLICATION SETTINGS</p><h1>应用设置</h1><p>管理界面语言、Codex 启动语言以及 Codex Navo 与 Codex 桌面端更新。</p></div>
+          <form id="language-form" class="feature-surface language-settings-layout">
+            <div class="language-settings-main"><span class="language-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"></path></svg></span><div class="language-settings-copy"><span class="language-card-kicker">DISPLAY LANGUAGE</span><h2>应用与 Codex 默认语言</h2><p>首次打开跟随 Windows，保存后同时作为 Navo 界面和 Codex 启动语言。</p></div><div class="language-picker-panel"><label for="app-language-select">选择语言</label><div class="language-select-wrap"><span aria-hidden="true">文</span><select name="locale" id="app-language-select"></select></div></div></div>
+            <div class="language-settings-footer"><div class="language-status" id="language-status"></div><button class="primary-button language-save-button" type="submit">保存语言</button></div>
+          </form>
+          <section class="update-page-grid" aria-label="应用更新">
+            <article class="update-product-card">
+              <div class="update-product-title"><span class="brand-mark"><img src="/icon.png" alt=""></span><div><strong>Codex Navo</strong><small>Navo 桌面应用</small></div><span class="product-version" id="navo-settings-version">—</span></div>
+              <div class="update-product-body"><p id="navo-settings-update-copy">正在读取版本和更新状态。</p><div class="update-progress" id="navo-settings-progress" hidden><span><i id="navo-settings-progress-bar"></i></span><b id="navo-settings-progress-label">0%</b></div><div class="update-card-actions"><button class="primary-button" id="navo-settings-update-action" type="button">检查更新</button></div></div>
+            </article>
+            <article class="update-product-card">
+              <div class="update-product-title"><span class="codex-product-mark">C</span><div><strong>Codex</strong><small>Windows 桌面应用</small></div><span class="product-version" id="codex-current-version">—</span></div>
+              <div class="codex-update-state"><p id="codex-update-copy">正在读取本机安装版本。</p><div class="update-card-actions"><button class="primary-button" id="codex-update-action" type="button">检查并更新</button></div></div>
+            </article>
+          </section>
+          <section class="feature-surface community-panel" aria-labelledby="community-panel-title">
+            <div class="community-panel-copy"><span class="language-card-kicker">COMMUNITY &amp; SOURCE</span><h2 id="community-panel-title">社区与项目</h2><p>加入社区交流使用经验、反馈问题，或前往 GitHub 查看项目源码与版本动态。</p></div>
+            <div class="community-links">
+              <a class="community-link telegram" href="https://t.me/+4VH9hBsRu7phNjg1" target="_blank" rel="noreferrer"><span class="community-link-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 4-3.1 16.2c-.2 1.1-.9 1.4-1.8.9l-4.8-3.5-2.3 2.2c-.3.3-.5.5-1 .5l.4-4.9 8.9-8c.4-.4-.1-.6-.6-.3L5.6 14 1 12.5c-1-.3-1-1 .2-1.5L19.3 4c.8-.3 1.6.2 1.7 0z"></path></svg></span><span><strong>Telegram 群组</strong><small>加入 TG 社区</small></span><i>↗</i></a>
+              <a class="community-link qq" href="https://qm.qq.com/q/f92ySNuLss" target="_blank" rel="noreferrer"><span class="community-link-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.5 10.4c0-4-2.4-7.2-5.5-7.2s-5.5 3.2-5.5 7.2c0 1.1.2 2.1.5 3-.8 1.1-1.3 2.4-1 3.1.3.6 1.1.5 1.9 0 .5.9 1.2 1.7 2 2.2-.6.3-1 .8-1 1.3 0 .9 1.4 1.6 3.1 1.6s3.1-.7 3.1-1.6c0-.5-.4-1-1-1.3.8-.5 1.5-1.3 2-2.2.8.5 1.6.6 1.9 0 .3-.7-.2-2-1-3.1.3-.9.5-1.9.5-3z"></path><path d="M8.2 13.1c1 .5 2.3.8 3.8.8s2.8-.3 3.8-.8M9.6 9.3h.1M14.3 9.3h.1"></path></svg></span><span><strong>QQ 群</strong><small>加入中文交流群</small></span><i>↗</i></a>
+              <a class="community-link github" href="https://github.com/1080ssf/codex-navo" target="_blank" rel="noreferrer"><span class="community-link-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.7a9.5 9.5 0 0 0-3 18.5c.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.2-3.4-1.2-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 0 1.6 1.1 1.6 1.1.9 1.6 2.4 1.1 3 .8.1-.7.4-1.1.7-1.3-2.3-.3-4.7-1.1-4.7-4.8 0-1.1.4-1.9 1-2.6-.1-.3-.4-1.3.1-2.6 0 0 .8-.3 2.7 1a9.1 9.1 0 0 1 4.9 0c1.9-1.3 2.7-1 2.7-1 .5 1.3.2 2.3.1 2.6.6.7 1 1.5 1 2.6 0 3.7-2.4 4.5-4.7 4.8.4.3.7 1 .7 1.9v2.6c0 .3.2.6.7.5A9.5 9.5 0 0 0 12 2.7z"></path></svg></span><span><strong>GitHub 项目</strong><small>源码、Issue 与版本</small></span><i>↗</i></a>
+            </div>
+          </section>
+        </section>
       </main>
+      </div>
 
     </div>
 
@@ -112,33 +268,36 @@
           </div>
           <button class="icon-button" value="cancel" aria-label="关闭" type="submit" formnovalidate>×</button>
         </div>
-        <p class="dialog-copy">创建后会在该账号的独立 Chrome 环境中打开官方登录授权页。完成登录后将自动入池，无需返回应用执行第二步。</p>
+        <p class="dialog-copy" id="account-dialog-copy">选择添加方式后继续。登录账号会使用独立 Chrome 环境，API Key 与第三方数据包只参与本机 API 服务。</p>
         <div class="account-dialog-status" id="account-dialog-status" role="alert" aria-live="assertive" hidden></div>
-        <label class="account-manual-field">账号名称<input name="label" required maxlength="60" placeholder="例如：设计组 01"></label>
-        <label class="account-manual-field">邮箱提示<input name="emailHint" maxlength="100" placeholder="例如：de***@company.com"></label>
         <fieldset class="login-method-picker">
-          <legend>登录方式</legend>
+          <legend>添加方式</legend>
           <label class="login-method-primary"><input type="radio" name="loginMethod" value="official" checked><span><strong>登录并授权</strong><small>推荐方式，在账号独立 Chrome 中完成官方登录与 Codex OAuth</small></span><em>推荐</em></label>
-          <details class="login-method-more">
-            <summary><span><strong>更多登录方式</strong><small>后台交互登录或导入已有授权包</small></span></summary>
-            <div class="login-method-secondary">
-              <label><input type="radio" name="loginMethod" value="protocol"><span><strong>后台交互登录</strong><small>后台完成网页登录与官方 Codex OAuth；验证码、手机号或 2FA 会在应用内提示</small></span></label>
-              <label class="login-method-import"><input type="radio" name="loginMethod" value="import"><span><strong>导入授权包</strong><small>选择 .codexnavo 文件，恢复 Codex 授权与可用网页会话</small></span></label>
-            </div>
-          </details>
+          <label class="login-method-import"><input type="radio" name="loginMethod" value="import"><span><strong>导入已有账号</strong><small>选择 .codexnavo 授权包，恢复 Codex 授权与可用网页会话</small></span></label>
+          <label class="login-method-api"><input type="radio" name="loginMethod" value="create-api"><span><strong>创建 API</strong><small>创建与 API 服务页面相同的 Navo API Key，并一次性显示完整 Key</small></span></label>
+          <label class="login-method-relay"><input type="radio" name="loginMethod" value="relay-import"><span><strong>导入第三方数据包</strong><small>支持 Sub2API、CLIProxyAPI、Cockpit、9router、AxonHub 等 JSON 数据包</small></span></label>
         </fieldset>
+        <div class="account-manual-fields" id="account-manual-fields">
+          <label class="account-manual-field">账号名称<input name="label" required maxlength="60" placeholder="例如：设计组 01"></label>
+          <label class="account-manual-field">邮箱提示<input name="emailHint" maxlength="100" placeholder="例如：de***@company.com"></label>
+        </div>
         <div class="account-import-panel" id="account-import-panel" hidden>
           <label class="file-picker">账号授权包<input id="account-import-package-file" type="file" accept=".codexnavo,application/json"><span id="account-import-file-name">选择 .codexnavo 文件</span></label>
           <p>导入会新建独立账号环境；旧版 Codex 单端授权包仍然兼容。</p>
         </div>
-        <div class="fixed-browser" aria-label="浏览器">
+        <div class="account-create-network">
+          <label for="account-create-route">网络线路</label>
+          <select name="route" id="account-create-route"><option value="direct">直连</option></select>
+          <small>首次网页登录、Codex OAuth、Codex 桌面端及其 GitHub 访问都使用这条线路。</small>
+        </div>
+        <div class="fixed-browser" id="account-fixed-browser" aria-label="浏览器">
           <span class="fixed-browser-label">浏览器</span>
           <div class="fixed-browser-value">
             <strong>Google Chrome</strong>
             <small>每个账号使用独立的 Chrome 环境</small>
           </div>
         </div>
-        <div class="dialog-actions">
+        <div class="dialog-actions account-dialog-actions">
           <button class="secondary-button" value="cancel" type="submit" formnovalidate>取消</button>
           <button class="primary-button" id="account-submit" value="default" type="submit">登录并授权</button>
         </div>
@@ -157,99 +316,77 @@
       </form>
     </dialog>
 
-    <dialog id="wake-dialog" class="wake-dialog">
-      <form method="dialog" id="wake-form">
+    <dialog id="account-network-dialog" class="account-network-dialog">
+      <form method="dialog" id="account-network-form">
         <div class="dialog-head">
-          <div>
-            <p class="eyebrow">ACCOUNT WAKE</p>
-            <h2>账号唤醒</h2>
-          </div>
+          <div><p class="eyebrow">ACCOUNT ROUTE</p><h2>账号网络</h2></div>
           <button class="icon-button" value="cancel" aria-label="关闭" type="submit" formnovalidate>×</button>
         </div>
-        <p class="dialog-copy">通过账号独立授权发送一次真实 Codex 请求。每次唤醒都会消耗少量额度。</p>
-        <label class="wake-toggle"><span><strong>自动唤醒</strong><small>默认关闭；开启后按下方策略执行</small></span><input name="enabled" type="checkbox"></label>
-        <div class="wake-settings-grid">
-          <label>执行策略
-            <select name="mode">
-              <option value="manual">仅手动唤醒</option>
-              <option value="daily">每天唤醒一次</option>
-              <option value="after-reset">额度重置后唤醒一次</option>
-            </select>
-          </label>
-          <label data-daily-time>每日执行时间<input name="dailyTime" type="time" value="09:00"></label>
-        </div>
-        <div class="wake-settings-grid wake-model-grid">
-          <label>模型<select name="model" aria-label="唤醒模型"><option value="">正在读取 Codex 模型…</option></select></label>
-          <label>推理强度<select name="reasoningEffort" aria-label="推理强度"><option value="">模型默认</option></select></label>
-        </div>
-        <p class="wake-model-help" id="wake-model-help"></p>
-        <label>发送内容<textarea name="prompt" maxlength="1000" rows="3" placeholder="hi">hi</textarea></label>
-        <p class="wake-note">“额度重置后”会同时检测预计时间、重置时间变化和额度突然恢复，通常在 5 分钟内识别不定时重置。请求在独立空目录中以只读模式运行，不会读取你的项目文件。</p>
-        <div class="dialog-actions">
+        <p class="dialog-copy" id="account-network-copy">为该账号选择独立线路。</p>
+        <label>连接方式
+          <select name="route" id="account-network-route"><option value="direct">直连</option></select>
+        </label>
+        <div class="account-network-preview" id="account-network-preview"><i></i><div><strong>直连</strong><small>网页端和 Codex 均不使用代理</small></div></div>
+        <div class="account-network-empty" id="account-network-empty" hidden><div><strong>还没有可用节点</strong><small>先添加节点或订阅，刷新成功后即可为这个账号选择线路。</small></div><button type="button" id="manage-account-network">管理节点</button></div>
+        <p class="proxy-note">保存后，该账号的网页端、登录授权、Codex 桌面端及其 GitHub 访问都会使用同一节点；后台额度刷新和唤醒按全局择优线路执行。</p>
+        <div class="account-network-result" id="account-network-result" role="status" aria-live="polite" hidden></div>
+        <div class="dialog-actions account-network-actions">
+          <button class="secondary-button" id="test-account-network" type="button">检测当前线路</button>
           <button class="secondary-button" value="cancel" type="submit" formnovalidate>取消</button>
-          <button class="primary-button" value="default" type="submit">保存设置</button>
+          <button class="primary-button" id="save-account-network" type="submit" value="default">保存线路</button>
         </div>
-      </form>
-    </dialog>
-
-    <dialog id="account-tools-dialog" class="account-tools-dialog">
-      <form method="dialog">
-        <div class="dialog-head">
-          <div>
-            <p class="eyebrow">AUTH VAULT</p>
-            <h2>授权健康与迁移</h2>
-          </div>
-          <button class="icon-button" value="cancel" aria-label="关闭" type="submit" formnovalidate>×</button>
-        </div>
-        <p class="dialog-copy">检查每个账号的 Codex 授权状态，或通过单个授权包迁移到另一台电脑。新版授权包可同时携带 Codex 授权与 ChatGPT 网页会话，不包含项目、历史记录或其他网站数据。</p>
-        <div class="tools-status" id="tools-status" role="status" aria-live="polite" hidden></div>
-        <section class="health-center" aria-labelledby="health-center-title">
-          <div class="tools-section-head">
-            <div><span>AUTH HEALTH</span><h3 id="health-center-title">账号健康</h3></div>
-            <button class="secondary-button compact-button" id="check-all-health" type="button">检查全部</button>
-          </div>
-          <div class="health-list" id="health-list"></div>
-        </section>
-        <section class="package-center" aria-labelledby="package-center-title">
-          <div class="tools-section-head"><div><span>ACCOUNT PACKAGE</span><h3 id="package-center-title">账号授权包</h3></div></div>
-          <div class="package-grid">
-            <div class="package-panel">
-              <div class="package-panel-title"><i class="package-arrow">↑</i><div><strong>导出授权</strong><small>生成单个 .codexnavo 账号授权包</small></div></div>
-              <label>选择账号<select id="export-account"></select></label>
-              <button class="primary-button package-action" id="export-auth-package" type="button">生成授权包</button>
-            </div>
-            <div class="package-panel">
-              <div class="package-panel-title"><i class="package-arrow">↓</i><div><strong>导入授权</strong><small>验证通过后创建新的 Codex 账号环境</small></div></div>
-              <label class="file-picker">授权包<input id="import-package-file" type="file" accept=".codexnavo,application/json"><span id="import-file-name">选择 .codexnavo 文件</span></label>
-              <p class="package-note">新版授权包可同时恢复 Codex 授权与网页会话；旧版单端包继续兼容。项目、任务和网页历史不会导入。</p>
-              <button class="primary-button package-action" id="import-auth-package" type="button">验证并导入</button>
-            </div>
-          </div>
-        </section>
       </form>
     </dialog>
 
     <dialog id="update-dialog" class="update-dialog">
       <form method="dialog">
         <div class="dialog-head">
-          <div>
-            <p class="eyebrow">APP UPDATE</p>
-            <h2 id="update-dialog-title">应用更新</h2>
-          </div>
-          <button class="icon-button" value="cancel" aria-label="关闭" type="submit" formnovalidate>×</button>
+          <div><p class="eyebrow">APP UPDATE</p><h2>应用更新</h2></div>
+          <button class="icon-button" value="cancel" aria-label="关闭" type="submit">×</button>
+        </div>
+        <div class="update-dialog-title">
+          <span class="brand-mark"><img src="/icon.png" alt=""></span>
+          <div><strong>Codex Navo</strong><small>当前安装版本</small></div>
+          <span class="product-version" id="navo-current-version">—</span>
         </div>
         <p class="dialog-copy" id="update-dialog-copy">正在读取版本信息。</p>
-        <div class="update-progress" id="update-progress" hidden>
-          <span><i id="update-progress-bar"></i></span><b id="update-progress-label">0%</b>
-        </div>
+        <div class="update-progress" id="update-progress" hidden><span><i id="update-progress-bar"></i></span><b id="update-progress-label">0%</b></div>
         <pre class="update-notes" id="update-notes" hidden></pre>
-        <div class="dialog-actions">
-          <button class="secondary-button" value="cancel" type="submit" formnovalidate>稍后</button>
-          <button class="primary-button" id="update-primary-action" type="button">检查更新</button>
-        </div>
+        <div class="dialog-actions"><button class="primary-button" id="update-primary-action" type="button">检查更新</button></div>
       </form>
     </dialog>
 
+    <dialog id="relay-import-dialog" class="api-editor-dialog relay-import-dialog">
+      <form id="relay-import-form" method="dialog">
+        <div class="dialog-head"><div><p class="eyebrow">TEMPORARY ACCOUNT IMPORT</p><h2>导入第三方数据包</h2></div><button class="icon-button" id="relay-import-close" type="button" aria-label="关闭">×</button></div>
+        <p class="dialog-copy">导入的账号只参与本机 API 反代与轮转，不会创建网页环境，也不会打开 Codex 桌面端。</p>
+        <div class="relay-format-list" aria-label="支持格式"><span>Sub2API / toSub2</span><span>CPA / CLIProxyAPI</span><span>Cockpit</span><span>9router</span><span>AxonHub</span><span>Codex auth.json</span><span>Codex-Manager</span></div>
+        <label class="relay-file-picker"><span>第三方数据包</span><button class="secondary-button" id="relay-import-choose" type="button">选择 JSON 文件</button><small id="relay-import-file-name">尚未选择文件</small><input id="relay-import-file" type="file" accept=".json,.txt,application/json,text/plain" hidden></label>
+        <p class="api-result" id="relay-import-result" hidden></p>
+        <div class="dialog-actions"><button class="secondary-button" id="relay-import-cancel" type="button">取消</button><button class="primary-button" id="relay-import-submit" type="submit" disabled>导入临时账号</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="placeholder-dialog" class="placeholder-dialog">
+      <form method="dialog">
+        <div class="dialog-head">
+          <div><p class="eyebrow">COMING NEXT</p><h2 id="placeholder-dialog-title">功能预留</h2></div>
+          <button class="icon-button" value="cancel" aria-label="关闭" type="submit">×</button>
+        </div>
+        <div class="placeholder-panel" aria-hidden="true"></div>
+      </form>
+    </dialog>
+
+    <aside class="codex-launch-status" id="codex-launch-status" role="status" aria-live="polite" hidden>
+      <div class="codex-launch-status-head">
+        <span class="codex-launch-spinner" aria-hidden="true"></span>
+        <div><small>CODEX LAUNCH</small><strong id="codex-launch-status-title">正在启动 Codex</strong></div>
+        <button id="codex-launch-status-close" type="button" aria-label="关闭启动进度">×</button>
+      </div>
+      <p id="codex-launch-status-message">正在准备启动环境…</p>
+      <div class="codex-launch-status-track"><i id="codex-launch-status-bar"></i></div>
+      <div class="codex-launch-status-foot"><span id="codex-launch-status-account">Codex</span><b id="codex-launch-status-percent">6%</b></div>
+    </aside>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="/app.js" defer></script>
   </body>
