@@ -1,145 +1,152 @@
-# Codex Navo — Codex 多账号管理与切换工具
+# Codex Navo
 
-**面向 Windows 的开源 Codex 多账号工作台。一个应用完成账号隔离与切换、额度和 Token 监控、API 账号池、代理线路、项目会话管理、任务通知与悬浮窗。**
+> 面向 Windows 的开源 Codex 多账号工作台：在一个桌面应用里完成账号隔离与切换、额度和 Token 统计、API 账号池、网络代理、项目会话管理、通知与悬浮窗。
 
-Codex Navo 不只是账号切换器。它把多个 ChatGPT / Codex 账号分别放在独立环境中，同时保留本机项目和会话，并提供可供 Codex Desktop 或其他客户端使用的 OpenAI 兼容 API。
+[![Release](https://img.shields.io/github/v/release/1080ssf/codex-navo?display_name=tag&style=flat-square)](https://github.com/1080ssf/codex-navo/releases/latest)
+[![License](https://img.shields.io/github/license/1080ssf/codex-navo?style=flat-square)](LICENSE)
+[![Windows](https://img.shields.io/badge/Windows-11%20x64-1672F3?logo=windows11&logoColor=white&style=flat-square)](#安装与快速开始)
+[![Telegram](https://img.shields.io/badge/Telegram-加入群组-26A5E4?logo=telegram&logoColor=white&style=flat-square)](https://t.me/+4VH9hBsRu7phNjg1)
+[![QQ](https://img.shields.io/badge/QQ-加入群组-12B7F5?logo=tencentqq&logoColor=white&style=flat-square)](https://qm.qq.com/q/f92ySNuLss)
 
-## 核心优势
+![Codex Navo 账号池总览](docs/images/codex-navo-account-overview.jpg)
 
-- **账号真正隔离**：每个普通账号拥有独立 Chrome 环境、Cookie、网页登录状态和 Codex OAuth，账号之间互不串号。
-- **切换不丢工作**：切换的是账号授权，不替换项目目录；启动时可以选择要加载的项目、会话和 Codex 界面语言。
-- **额度一眼可见**：集中查看套餐、Weekly 额度、Credits、余额、重置时间，以及输入、缓存、输出、缓存命中率和 Token 估值。
-- **内置 API 账号池**：把选中的普通账号或临时凭证组合成 OpenAI 兼容 API，支持 `/v1/models`、`/v1/responses` 和 `/v1/chat/completions`。
-- **故障自动切换**：账号额度耗尽、限流、授权失败或上游临时异常时，自动冷却当前账号并尝试下一个可用账号。
-- **代理能力完整**：支持订阅、单节点、多节点和常见代理协议，逐节点检测并按延迟排序；普通账号、临时账号和 API Key 可以分别选择线路。
-- **会话与任务可管理**：按项目归类查看进行中、失败、全部和已归档会话，支持折叠、归档、删除和失败记录清理。
-- **桌面状态随时掌握**：悬浮窗展示账号、额度、当前任务进度和 Token 消耗，并支持多种样式、透明度、置顶和快捷召回。
-- **通知渠道可扩展**：支持 Windows 通知、飞书、钉钉和 Telegram，可导入本地提示音；通知渠道原样发送用户配置的文案。
-- **本地优先**：账号配置、节点、用量和会话索引保存在本机；Navo API Key 只保存加盐哈希，完整 Key 仅在创建时显示一次。
+## 为什么使用 Codex Navo
 
-如果你经常在多个 Codex 账号之间切换、需要统一查看额度，或者希望把多个账号组成一个具备故障切换能力的本机 API 服务，Codex Navo 可以把这些流程集中到一个中文桌面应用里。
+当账号、项目、代理线路和 Codex 会话逐渐增多，手工切换授权很容易打断工作。Codex Navo 把这些流程集中到一个本地优先的桌面应用中：每个普通账号拥有独立环境，项目与会话继续保留；多个账号还可以组成 OpenAI 兼容 API 账号池，在额度耗尽、限流或临时错误时尝试下一个可用账号。
 
-![Codex Navo 账号池](docs/images/codex-navo-overview.png)
+### 核心优势
 
-## 简单来说，它可以做什么？
+- **账号真正隔离**：每个普通账号使用独立 Chrome 用户目录、Cookie、网页登录状态和 Codex OAuth，账号之间互不串号。
+- **切换不丢工作**：切换的是账号授权，不是工作目录；启动 Codex 时可选择语言、项目和要加载的会话。
+- **三类账号统一管理**：普通账号、临时账号和 API Codex 分组展示，支持独立折叠、卡片/列表视图和排序。
+- **额度与用量一眼可见**：集中查看 5h、Weekly、Credits、余额、重置时间，以及输入、缓存、输出、缓存率和 Token 估值。
+- **内置 API 账号池**：将已授权账号组合为 OpenAI 兼容 API，支持账号顺序、可用模型、按 Key 授权和自动故障切换。
+- **代理能力覆盖完整链路**：登录、OAuth、额度刷新、唤醒、Codex 启动和 API 请求都可走指定线路；支持账号级和 API Key 级分配。
+- **项目和会话可管理**：按项目归类进行中、失败、全部与已归档会话，并提供折叠、归档、删除和失败记录清理。
+- **任务状态随时可见**：通知渠道、提示音和悬浮窗共同展示账号、额度、任务进度与本次 Token 消耗。
+- **本地优先**：账号配置、节点、用量和会话索引保存在本机；Navo API Key 只保存加盐哈希，完整 Key 仅创建时显示一次。
 
-### 1. 把多个账号放进一个账号池
+## 功能总览
 
-不用再记哪个浏览器登录了哪个账号。每个账号都有自己的 Chrome 环境、登录状态和 Codex 授权，互不干扰。
+| 模块 | 主要能力 |
+| --- | --- |
+| 账号管理 | 独立 Chrome、OAuth 授权、普通/临时/API 分类、额度刷新、卡片/列表视图 |
+| 启动 Codex | 代理预检、项目与会话按需加载、语言选择、启动进度提示 |
+| 用量统计 | 今日/昨日/7 天/30 天/全部，输入、缓存、输出、缓存率、模型调用与估值 |
+| API 服务 | `/v1/models`、`/v1/responses`、`/v1/chat/completions`、账号池故障切换 |
+| 网络代理 | 订阅与单节点、逐节点检测、随检随显示、延迟排序、账号/Key 独立路由 |
+| 会话管理 | 项目分组、进行中/失败/全部/已归档、归档、删除与失败列表清理 |
+| 通知提醒 | Windows 通知、飞书、钉钉、Telegram、自定义文案、本地提示音导入 |
+| 悬浮窗 | 当前账号、额度、全局与任务 Token、任务进度、样式、透明度、置顶和快捷召回 |
+| 应用设置 | Navo 与 Codex 默认语言、Navo 更新、Codex 应用内更新、社区入口 |
 
-### 2. 看哪个账号还有额度
+## 账号池与用量
 
-直接查看每个账号的：
+卡片模式适合查看单个账号的完整信息；列表模式在账号较多时更紧凑。API Codex 的进度条按绑定账号的可用额度汇总计算，普通账号和临时账号则分别展示自己的额度与状态。
 
-- 套餐；
-- Weekly 周额度；
-- Credits；
-- 美元余额；
-- 下次额度重置时间。
+![账号卡片模式](docs/images/codex-navo-account-overview.jpg)
 
-正在使用的账号每分钟刷新一次，其他账号每五分钟刷新一次，也可以手动一键刷新全部账号。
+![账号列表模式](docs/images/codex-navo-account-list.jpg)
 
-### 3. 一键打开网页端
+本机用量支持今日、昨日、近 7 天、近 30 天和全部时间范围。缓存率按缓存输入占总输入计算；Token 估值仅按公开 API Token 价格提供参考，不代表 Plus、Pro 等套餐的实际扣款。
 
-点击账号后面的 **网页端**，会打开这个账号自己的独立 Chrome 窗口。不同账号的 Cookie、标签页和浏览记录不会混在一起。
+## 添加账号与临时凭证
 
-### 4. 一键切换 Codex 桌面端账号
+“添加账号”统一提供四种入口：
 
-选择账号后点击 **登录 Codex / 切换账号**，Codex Navo 会使用对应账号的授权启动 Codex 桌面端。
+1. **登录并授权**：在账号专属 Chrome 环境中完成官方登录与 Codex OAuth。
+2. **导入已有账号**：导入 `.codexnavo` 授权包。
+3. **创建 API**：创建与 API 服务页面相同的 Navo API Key，完整 Key 只显示一次。
+4. **导入第三方数据包**：读取 Sub2API、CLIProxyAPI、Cockpit、9router、AxonHub 等 JSON 数据包，建立仅供反代使用的临时账号。
 
-切换的是登录账号，不是项目目录。原来的本机项目、任务和工作区仍然保留。
+临时账号与普通账号拥有相同的额度、代理、唤醒和 API 池能力，但不会创建网页环境，也不会独立启动 Codex。
 
-### 5. 查看 Codex 本机用量
+![添加账号与导入入口](docs/images/codex-navo-add-account.jpg)
 
-可以查看今天、昨天、近 7 天、近 30 天或全部时间的：
+## OpenAI 兼容 API
 
-- Token 总量；
-- 模型调用次数；
-- 输入、缓存和输出 Token；
-- 缓存命中率；
-- 按公开 API 价格计算的 Token 估值。
+API 服务把选中的普通账号和临时账号组合成一个本机账号池。每个 Navo API Key 可以单独配置：
 
-### 6. 唤醒账号
+- 可访问账号与调用顺序；
+- 可用模型与权限；
+- 独立网络代理；
+- 启用、停用和删除状态。
 
-可以给单个账号或全部账号发送一次真实的 Codex 请求，也可以设置：
+账号额度耗尽、遇到限流、授权失败或可重试的上游异常时，路由器会冷却当前账号并尝试下一个可用账号。默认 Base URL 为：
 
-- 每天自动唤醒一次；
-- 额度重置后自动唤醒一次；
-- 使用哪个模型；
-- 推理强度；
-- 发送什么内容。
+```text
+http://127.0.0.1:18300/v1
+```
 
-### 7. 检查和迁移账号授权
+支持的兼容端点：
 
-可以检查账号的 Codex 授权是否仍然有效，也可以导出一个 `.codexnavo` 文件，再在另一台电脑上导入。
+```text
+GET  /v1/models
+POST /v1/responses
+POST /v1/chat/completions
+```
 
-授权包可以迁移 Codex 授权和导出时仍有效的网页会话，不包含密码、项目、任务、网页历史或其他网站的数据。
+![API 服务与 Navo API Key](docs/images/codex-navo-api-service.jpg)
 
-### 8. 给不同账号配置不同线路
+> 截图来自隔离演示实例，因此使用 `18390`；正式版本默认端口为 `18300`，并预留 `18301-18399` 供可复用的本地代理入口使用。
 
-可以粘贴机场订阅、单个节点、多个节点或 Clash 配置，自动读取和刷新节点列表，再给每个账号分别选择直连或指定节点。
+详细配置和调用示例见 [API 服务说明](docs/api-service.md)。
 
-支持 HTTP、HTTPS、SOCKS5、SS、SSR、VMess、VLESS、Trojan、Hysteria、Hysteria2、TUIC 和 WireGuard 等常用格式。节点检测会真实访问 ChatGPT，区分正常可用、地区不支持、站点拒绝、访问限流和连接失败。账号选定线路后，独立 Chrome、网页登录、Codex 授权、额度刷新、账号唤醒和从 Codex Navo 启动的 Codex 都会使用该线路。
+## 网络代理
 
-### 9. 把账号池变成 OpenAI 格式 API
+Codex Navo 内置 Mihomo 网络核心，可添加订阅、多节点配置或单独节点。节点检测结果会逐个显示，检测全部完成后按延迟排序，因此可以先使用最早出现的可用节点。
 
-“API 服务”可以把已经完成官方 Codex 授权的账号池转换为 OpenAI 兼容 API。创建 `sk-navo-...` Key 后，可通过本机的 `/v1/models`、`/v1/responses` 或 `/v1/chat/completions` 调用账号池模型。
+支持常见格式与协议：
 
-账号池路由会优先选择剩余额度较高且近期较少使用的账号，并在限流或临时错误时尝试下一个可用账号。Navo Key 只保存加盐哈希，完整 Key 只在创建时显示一次。详细配置见 [API 服务说明](docs/api-service.md)。
+- HTTP / HTTPS / SOCKS5；
+- SS / SSR；
+- VMess / VLESS；
+- Trojan；
+- Hysteria / Hysteria2；
+- TUIC / WireGuard；
+- 常见 Clash/Mihomo 订阅及单节点链接。
 
-## 功能截图
+线路可分配给普通账号、临时账号和 Navo API Key。账号专属代理会覆盖其登录、OAuth、额度刷新、唤醒和从 Navo 启动的 Codex；API Key 代理则作用于该 Key 的账号池请求。
 
-以下截图中的邮箱均已替换成演示地址。
+![代理订阅、单节点与检测结果](docs/images/codex-navo-network.jpg)
 
-### 卡片模式
+## 项目与会话管理
 
-适合账号不多时使用，可以同时看到额度、状态、余额和今日用量。
+会话页读取 Codex 本机会话并按项目分组，区分进行中、等待处理、已完成、失败或中断以及已归档状态。项目默认可折叠，便于在大量会话中定位目标；异常会话可单独归档或删除，失败列表可只清除界面记录，也可同时清理对应本地数据。
 
-![卡片模式](docs/images/codex-navo-overview.png)
+![按项目分组的会话管理](docs/images/codex-navo-sessions.jpg)
 
-### 列表模式
+## 通知提醒
 
-账号较多时可以切换到列表模式，方便快速比较额度和使用情况。
+任务完成、失败或需要处理时，可以使用 Windows 本地通知，也可以把用户填写的通知文案原样发送到已配置渠道。当前支持飞书、钉钉、Telegram 等渠道；提示音支持内置音效和本地音频导入，导入后以文件名加入提示音列表。
 
-![列表模式](docs/images/codex-navo-list-view.png)
+![通知渠道、文案与提示音](docs/images/codex-navo-notifications.jpg)
 
-### 排序与视图切换
+## 悬浮窗
 
-可以在卡片和列表模式之间切换，并按当前账号、剩余额度、账号名称或添加时间排序。
+悬浮窗显示当前账号、额度进度、输入/缓存/缓存率/输出、当前任务、任务进度和本次任务 Token。它支持多种样式、透明度调节和置顶；隐藏后可以从 Navo、系统托盘或 `Ctrl+Alt+N` 快速召回。
 
-![排序与视图切换](docs/images/codex-navo-sort-menu.png)
+<p align="center">
+  <img src="docs/images/codex-navo-floating-window.jpg" alt="Codex Navo 悬浮窗" width="400">
+</p>
 
-### 历史 Token 用量
+## 账号唤醒
 
-顶部可以切换今天、昨天、近 7 天、近 30 天和全部时间；总量与每个账号的明细会同步变化。
+可手动唤醒单个或全部账号，也可设置每日唤醒和额度重置后唤醒。唤醒使用真实 Codex 请求，并支持选择模型、推理强度和发送内容。
 
-![近 7 天 Token 用量](docs/images/codex-navo-usage-history.png)
+![账号唤醒策略](docs/images/codex-navo-wake.jpg)
 
-### 添加账号
+## 语言、更新与社区
 
-填写一个方便识别的名称，然后点击 **登录并授权**。软件会打开这个账号专属的 Chrome 环境。
+应用首次启动会跟随 Windows 语言，并将同一语言作为 Codex 的默认启动语言。之后可以在应用设置中独立选择界面语言。更新区域分别管理 Codex Navo 和 Codex：Navo 检查 GitHub Release，Codex 则在 Navo 内完成官方版本检查与更新。
 
-![添加账号](docs/images/codex-navo-add-account.png)
+应用设置内置 Telegram 群组、QQ 群和 GitHub 项目入口。
 
-### 导入已有账号
+![语言、更新与社区入口](docs/images/codex-navo-app-settings.jpg)
 
-除了推荐的官方浏览器登录，也可以直接导入已有的 `.codexnavo` 授权包。添加账号时可选择直连或已有代理节点；代理会在打开登录页前检查 ChatGPT 登录接口和 OpenAI OAuth 是否正常，避免进入被 Cloudflare 拦截的错误页面。
+## 安装与快速开始
 
-### 账号唤醒
-
-每个账号可以单独设置唤醒策略、模型、推理强度和发送内容。
-
-![账号唤醒](docs/images/codex-navo-wake-settings.png)
-
-### 授权检查与迁移
-
-可以检查单个或全部账号，也可以生成和导入账号授权包。
-
-![授权检查与迁移](docs/images/codex-navo-account-tools.png)
-
-## 怎么开始？
-
-### 第一步：下载安装
+### 1. 下载安装
 
 前往 [Releases](https://github.com/1080ssf/codex-navo/releases/latest)，下载：
 
@@ -147,89 +154,75 @@ Codex Navo 不只是账号切换器。它把多个 ChatGPT / Codex 账号分别�
 Codex-Navo-Setup-<版本>-windows-x64.exe
 ```
 
-安装前需要准备：
+建议环境：
 
 - Windows 11 x64；
 - Google Chrome；
 - Codex 桌面应用；
 - Codex CLI。
 
-### 第二步：添加账号
+### 2. 添加账号
 
-打开 Codex Navo，点击右上角的 **添加账号**，然后选择推荐的 **登录并授权**。
+打开 Codex Navo，点击右上角 **添加账号**，选择 **登录并授权**。应用会打开账号专属 Chrome，请在其中完成 OpenAI 官方登录与 Codex OAuth。
 
-软件会打开一个独立 Chrome 窗口。请在这个窗口里完成 OpenAI 官方登录和 Codex 授权。
+### 3. 启动 Codex
 
-### 第三步：开始使用
+授权完成后，在账号卡片点击 **登录 Codex**。启动交互会依次显示代理检测、项目与会话加载以及 Codex 打开进度。启动选择器支持全选或只加载指定项目和会话，减少大量历史数据带来的等待。
 
-授权完成后，账号会自动进入账号池。以后可以直接：
+## 授权迁移与数据位置
 
-- 点击 **网页端** 打开对应 ChatGPT 账号；
-- 点击 **登录 Codex / 切换账号** 使用对应账号启动 Codex；
-- 查看额度、余额和本机 Token 用量；
-- 手动刷新、唤醒或导出账号授权。
-- 按账号选择直连或独立代理节点。
+授权迁移页可以检查账号授权状态，并导出或导入 `.codexnavo` 文件。授权包可能包含仍然有效的 Codex 授权和网页会话，应按账号凭证保管；它不包含密码、项目、任务、浏览历史或其他网站 Cookie。
 
-## 常见问题
-
-### 每个账号会互相影响吗？
-
-不会。每个账号使用独立 Chrome 用户目录，不会共用登录 Cookie。
-
-### 节点订阅和密码保存在哪里？
-
-节点与订阅只保存在本机应用数据目录。界面和接口不会回显订阅鉴权参数或节点密钥。官方 Mihomo 核心随安装包提供，运行前会校验完整性，并跟随 Codex Navo 的应用更新一起升级。
-
-### 切换 Codex 账号后，项目会消失吗？
-
-不会。Codex Navo 只切换 Codex 的登录授权，不会替换本机的项目、任务和工作目录。
-
-### 登录一次后能一直使用吗？
-
-只要 OpenAI 没有让会话失效，独立 Chrome 和 Codex 授权都会继续保留。如果会话过期、账号修改安全设置或服务端要求重新验证，重新登录一次即可。
-
-### 能同时打开多个 Codex 桌面端吗？
-
-不能。Codex 桌面端是单实例应用。同一时间只能有一个账号使用 Codex，但多个账号的网页端可以分别打开。
-
-### 关闭 Codex Navo 后为什么还在运行？
-
-点击右上角关闭按钮后，软件会进入 Windows 系统托盘。右键托盘图标并选择 **退出应用** 才会完全退出。
-
-### Token 估值是实际扣款吗？
-
-不是。它只是按照公开 API Token 价格计算的参考值，不代表 Plus / Pro 套餐真实扣款。
-
-### `.codexnavo` 文件包含什么？
-
-它可能包含仍然有效的 Codex 登录授权和网页会话，因此应当像账号凭证一样保管。它不包含密码、项目、任务、网页历史或其他网站 Cookie。
-
-## 关于设备代码授权
-
-推荐的浏览器 OAuth 登录通常不需要开启设备代码授权。
-
-如果浏览器回调失败，并且你选择使用设备代码备用流程，请先在 ChatGPT 中打开：
-
-**设置 → 账户安全与登录 → 为 Codex 启用设备代码授权**
-
-![为 Codex 启用设备代码授权](docs/images/enable-codex-device-auth.png)
-
-## 数据保存在哪里？
-
-账号配置、独立 Chrome 环境和 Codex 授权默认保存在：
+运行数据默认保存在：
 
 ```text
 %LOCALAPPDATA%\Codex Switchboard
 ```
 
-这个目录名称来自早期版本。为了保证升级后仍能读取原有账号，目前继续保留这个名称。
+目录名称来自早期版本，为保证升级兼容性继续保留。该目录不会提交到 GitHub，也不应公开上传未打码截图、授权包或完整日志。
 
-这些运行数据不会提交到 GitHub。请不要把该目录、未打码截图或 `.codexnavo` 文件公开上传。
+## 常见问题
+
+### 切换账号后，项目和会话会消失吗？
+
+Codex Navo 只切换 Codex 授权，不替换本机项目目录。启动时还可以选择要同步和加载的项目、会话。
+
+### 多个账号会共享 Cookie 吗？
+
+普通账号使用各自独立的 Chrome 用户目录，不共享网页 Cookie。临时账号只用于反代，不创建网页环境。
+
+### 可以同时打开多个 Codex 桌面端吗？
+
+Codex 桌面端是单实例应用，同一时间由一个账号或一个 API Codex 使用；多个账号的独立网页端可以分别打开。
+
+### 关闭主窗口后为什么应用仍在运行？
+
+关闭主窗口后，Navo 会进入 Windows 系统托盘，以继续执行通知、唤醒、API 和悬浮窗功能。需要彻底退出时，请右键托盘图标选择 **退出应用**。
+
+### 缓存率和 Token 估值代表什么？
+
+缓存率是缓存输入占总输入的比例。Token 估值按公开 API Token 价格计算，仅用于用量参考，不代表套餐账号的实际账单。
+
+## 社区与支持
+
+<p>
+  <a href="https://t.me/+4VH9hBsRu7phNjg1"><img src="https://img.shields.io/badge/Telegram-加入群组-26A5E4?logo=telegram&logoColor=white&style=for-the-badge" alt="Telegram 群组"></a>
+  <a href="https://qm.qq.com/q/f92ySNuLss"><img src="https://img.shields.io/badge/QQ-加入群组-12B7F5?logo=tencentqq&logoColor=white&style=for-the-badge" alt="QQ 群"></a>
+  <a href="https://github.com/1080ssf/codex-navo"><img src="https://img.shields.io/badge/GitHub-项目主页-181717?logo=github&logoColor=white&style=for-the-badge" alt="GitHub 项目"></a>
+</p>
+
+- [Telegram 群组](https://t.me/+4VH9hBsRu7phNjg1)
+- [QQ 群](https://qm.qq.com/q/f92ySNuLss)
+- [GitHub 项目](https://github.com/1080ssf/codex-navo)
+- 功能问题和建议可提交 [GitHub Issue](https://github.com/1080ssf/codex-navo/issues)。
+- 安全问题请使用 GitHub Private Vulnerability Reporting，详情见 [SECURITY.md](SECURITY.md)。
+
+请勿在公开反馈中附带真实账号、完整日志、认证文件、代理订阅或未打码截图。
 
 ## 从源码运行
 
 <details>
-<summary>点击展开开发者说明</summary>
+<summary>展开开发与构建说明</summary>
 
 需要 Node.js 20 或更高版本：
 
@@ -241,7 +234,7 @@ Copy-Item config/settings.example.json config/settings.json
 npm run dev
 ```
 
-测试和构建：
+检查与构建：
 
 ```powershell
 npm test
@@ -250,24 +243,17 @@ npm audit --audit-level=high
 npm run build:desktop
 ```
 
-安装包会生成到 `release/auto-update/`。
+安装包生成到 `release/auto-update/`。
 
 </details>
 
 ## 使用说明
 
-- Codex Navo 目前主要在 Windows 11 x64 上测试。
-- 安装包暂未使用商业代码签名，Windows SmartScreen 可能显示未知发布者提示。
-- 软件通过 OpenAI 官方登录和授权流程工作；登录状态最终以 OpenAI 服务端校验为准。
-- 切换或退出 Codex 账号前，请先让正在运行的任务正常结束。
-
-Codex Navo 不是 OpenAI 官方产品，与 OpenAI 没有隶属或背书关系。
-
-## 反馈
-
-- 普通问题可以提交 GitHub Issue。
-- Issue 中不要附带真实账号、认证文件、完整日志或未打码截图。
-- 安全问题请使用 GitHub Private Vulnerability Reporting，详见 [SECURITY.md](SECURITY.md)。
+- Codex Navo 当前主要在 Windows 11 x64 上测试。
+- 安装包尚未使用商业代码签名，Windows SmartScreen 可能显示未知发布者提示。
+- 软件通过 OpenAI 官方登录与授权流程工作，最终登录状态以 OpenAI 服务端校验为准。
+- 切换或退出账号前，建议先让正在执行的任务正常结束。
+- Codex Navo 不是 OpenAI 官方产品，与 OpenAI 没有隶属或背书关系。
 
 ## License
 
