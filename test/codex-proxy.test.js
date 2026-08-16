@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const net = require('node:net');
 const {
   applyProxyEnvironment,
   normalizeProxySettings,
@@ -59,4 +60,27 @@ test('代理地址、端口与认证信息会严格校验', () => {
   assert.throws(() => normalizeProxySettings({ enabled: true, protocol: 'http', host: '', port: 7890 }), /主机地址/);
   assert.throws(() => normalizeProxySettings({ enabled: true, protocol: 'http', host: '127.0.0.1', port: 70_000 }), /端口/);
   assert.throws(() => normalizeProxySettings({ enabled: true, protocol: 'http', host: '127.0.0.1', port: 7890, username: 'user' }), /同时填写/);
+});
+
+test('SOCKS5 检测保留同一数据包中 CONNECT 响应的剩余字节', async (t) => {
+  const server = net.createServer((socket) => {
+    let stage = 0;
+    socket.on('data', () => {
+      if (stage === 0) socket.write(Buffer.from([0x05, 0x02]));
+      else if (stage === 1) socket.write(Buffer.from([0x01, 0x00]));
+      else if (stage === 2) socket.write(Buffer.from([0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 0x01, 0xbb]));
+      stage += 1;
+    });
+  });
+  await new Promise((resolve, reject) => server.once('error', reject).listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const result = await testProxyConnection({
+    enabled: true,
+    protocol: 'socks5',
+    host: '127.0.0.1',
+    port: server.address().port,
+    username: 'fixture',
+    password: 'fixture',
+  }, 2_000);
+  assert.equal(result.ok, true);
 });

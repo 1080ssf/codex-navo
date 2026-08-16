@@ -1,5 +1,166 @@
 # Changelog
 
+## 1.2.113
+
+- Temporarily removed System and Dark appearance modes and fixed Codex Navo to the stable Light appearance.
+- Replaced the single-choice appearance dropdown and save action with a clear read-only Light mode status.
+- Existing saved Dark or System preferences are migrated to Light when the application starts.
+
+## 1.2.112
+
+- Fixed the appearance menu being clipped by the settings card, which hid the Dark option below the card boundary.
+- Raised the active settings picker above adjacent cards and footers so every theme and language option remains fully visible and clickable.
+
+## 1.2.111
+
+- Fixed expand/collapse controls being stretched by generic descendant `span` rules; chevrons now remain compact and centered.
+- Reworked the account-network dialog with a wider layout, an always-visible grouped route browser, independent node scrolling, and an action row that stays visible.
+- Replaced native language and appearance dropdowns with themed in-app menus that keep selected states and arrow spacing consistent in both themes.
+- Fixed the Codex update logo by embedding the local Codex icon directly in the page instead of relying on a separately packaged SVG file.
+- Improved dark-mode contrast for the top bar, local usage ledger, estimate panel, route selector, dialogs, and settings menus.
+
+## 1.2.110
+
+- Limited both the Navo interface and Codex launch language selectors to English and Simplified Chinese, with all other system locales falling back to English and Chinese-family locales resolving to Simplified Chinese.
+- Covered server-provided account health messages and compound account-order/request summaries in the English interface.
+- Replaced font-dependent expand/collapse symbols across account groups, sessions, launch selection, and route pickers with one centered CSS chevron system.
+- Added persistent System, Light, and Dark appearance modes to Application Settings. System mode follows Windows theme changes while Navo is running.
+- Replaced the letter placeholder on the Codex update card with the official locally sourced Codex application icon.
+
+## 1.2.109
+
+- Completed a full non-Chinese UI audit and added English coverage for deep account flows, authorization recovery, API key dialogs, network states, session actions, wake operations, update progress, confirmations, placeholders, titles, and ARIA labels.
+- Extended the runtime language observer to translate dynamically changed `title`, `aria-label`, and `placeholder` attributes, not only newly inserted text.
+- Added a release-blocking locale audit covering 651 Chinese UI strings plus all 41 synchronized floating-window message keys. All non-Simplified-Chinese Navo locales continue to use the complete English fallback UI while Codex receives the exact selected locale.
+
+## 1.2.108
+
+- Fixed the network source sidebar at a stable 352-pixel desktop height with its own scrolling area, preventing a one-row node pane from collapsing the source list into a narrow scrollbar.
+- Corrected misleading 1 ms route results. Connection latency is now measured only after the real TLS handshake with `chatgpt.com` completes, rather than when the local Mihomo port acknowledges the CONNECT request.
+- Kept the full HTTP request as a separate ChatGPT availability classification while using the verified handshake latency for display, sorting, and automatic route selection.
+
+## 1.2.107
+
+- Removed JavaScript-calculated network workspace heights entirely. The node pane now determines the natural panel height, while the source sidebar is positioned inside that boundary and scrolls independently, preventing stale asset or zoom mismatches from creating blank space.
+- Removed the network source container's historical 360/280-pixel minimum heights and verified the final geometry in an isolated rendered page: the node row and pane share the same bottom edge with zero blank pixels.
+- Split route diagnostics into `Connection latency` and `ChatGPT check`. The displayed latency and route ordering now use only proxy-tunnel establishment time to `chatgpt.com:443`; the full TLS/HTTP request is retained only as a usability status for region, Cloudflare, and connection failures.
+
+## 1.2.106
+
+- Replaced the long native account-route select with a compact grouped picker. Airport subscription groups start collapsed and expand independently, keeping large subscriptions manageable.
+- Standalone one-node routes now use the user-defined source name on account and API Key badges and in the route picker; subscriptions and multi-node sources keep their individual node names.
+- Reduced the network source header, column header, node row, and action heights and recalculated the shared workspace height, removing the remaining vertical whitespace around a single node.
+- Reset the calculated two-column height in the narrow single-column layout so responsive rendering cannot clip or stretch the source and node panes.
+
+## 1.2.105
+
+- Routed all remote websites opened during both regular-account and API Codex tasks through the selected per-account or per-Key proxy. Chromium, app-server, native/realtime traffic, and proxy-aware child tools now share the same route while Navo IPC and loopback services remain direct; no Windows system proxy is changed.
+- Applied the compact network-workspace sizing to both standalone nodes and airport subscription sources, removing the tall blank pane regardless of source type.
+- Replaced the misleading `Verification needed` route state with `Reachable (CF protected)`. A raw probe's Cloudflare challenge cookie cannot be shared with an API Key or Codex process, so Navo no longer asks users to perform an impossible separate verification.
+- Cloudflare-protected routes remain usable and selectable with a green connection state. If an actual account browser later receives a challenge, it is handled inside that account's own isolated Chrome session.
+- Kept compatibility with route results saved by v1.2.104 while migrating new checks to the corrected state.
+- Fixed the actual single-node whitespace source by sizing the complete network workspace from its header, column header, and visible node rows; the source sidebar now scrolls within that shared compact height instead of stretching the node pane.
+
+## 1.2.104
+
+- Distinguished Cloudflare browser challenges from genuine ChatGPT access rejection. Challenge responses now show `Verification needed` as an amber usable route instead of `Site rejected`.
+- Preserved genuine unsupported-region and generic 403 blocking results while allowing account browsers to open and complete Cloudflare verification when required.
+- Made node table rows a compact fixed height so single-node sources no longer leave a large blank block, while multi-node lists keep aligned columns and scrolling.
+
+## 1.2.103
+
+- Redesigned the API Codex, temporary-account, and regular-account section headers with clearer hierarchy, category accents, count badges, compact fold controls, and hover feedback.
+- Fixed the SOCKS5 diagnostic reader losing or recursively re-reading bytes when a proxy returned a complete CONNECT response in one TCP packet.
+- Replaced the misleading internal `/backend-api/models` node probe and identifiable Navo user agent with a lightweight request to the public ChatGPT homepage using a normal Chrome browser signature.
+- Added one retry for transient TLS resets and a distinct `TLS interrupted` result, separating valid SOCKS authentication/tunneling from unstable proxy exits.
+
+## 1.2.102
+
+- Increased account Chrome startup readiness time from 10 to 30 seconds so a slow first launch is not reported as an unbound account profile while the browser is still initializing.
+- Retrying authorization now reuses an already-running account-local Chrome instead of requiring the user to close it.
+- Once the existing ChatGPT session is detected, Navo navigates that browser to a newly generated official Codex OAuth URL; expired or previously generated OAuth URLs are never reused.
+- Login transition detection now checks only Chrome's local page address several times per second. It calls ChatGPT's real session endpoint once after the browser leaves the login route, then immediately opens OAuth; retries are throttled to avoid creating unnecessary authentication traffic.
+
+## 1.2.101
+
+- Fixed successful ChatGPT sign-in being mistaken for a closed login window when Chrome temporarily replaces its DevTools endpoint during navigation.
+- Login monitoring now re-resolves the account profile's active DevTools port and continues web-session detection on the rebound endpoint.
+- Added a 30-second browser process transition grace period, while a still-running account Chrome process keeps the authorization task alive instead of cancelling it.
+- Existing-account web-session linking uses the same reconnect behavior, preventing transient Chrome endpoint loss from silently stopping account binding.
+
+## 1.2.100
+
+- Reordered new-account setup into a real single-sign-in flow: ChatGPT Web is authenticated first, then the same account-local Chrome tab automatically continues to official Codex OAuth.
+- Users enter account credentials only once; the Codex step may still show the official authorization confirmation but does not start a second account sign-in.
+- Added an authenticated-session watcher and restricted Chrome navigation helper so the OAuth transition happens only after a real ChatGPT user session is present and only to official ChatGPT/OpenAI hosts.
+- Updated the account card and setup dialog to show the two automatic phases accurately instead of claiming Codex OAuth had already completed before web sign-in.
+
+## 1.2.99
+
+- Fixed official Codex OAuth being marked complete when the account-local Chrome profile still had no authenticated ChatGPT web session.
+- Web-session verification failures and DevTools timeouts now remain in the web-login stage and retry instead of silently completing with `webLoginComplete=false`.
+- Tightened ChatGPT session validation so HTTP 200, `user: null`, empty access-token fields, and HTML containing session field names are not accepted as a logged-in account.
+- Existing accounts with an unbound web profile are now monitored after opening Web; completing ChatGPT login automatically persists the corrected binding without recreating the account.
+
+## 1.2.98
+
+- Fixed Codex update checks and installations opening a visible PowerShell or Windows Terminal window.
+- The Store update helper now starts through a GUI-subsystem wrapper and runs PowerShell fully hidden, while all progress and results remain inside Codex Navo.
+- Passed update parameters explicitly across the packaged-app boundary so silent Store checks remain reliable without inherited custom environment variables.
+- Fixed historical completed turns being replayed as new notifications when Codex session files or the thread catalog were rescanned.
+- Added terminal-event freshness validation and a single-flight notification poll so stale or concurrently fetched events cannot create repeated Windows alerts.
+
+## 1.2.97
+
+- Fixed Codex updates being shown as still propagating when Windows Store already had the update but OpenAI's fallback MSIX CDN returned 404.
+- Added in-app access to the official Windows Store silent update API by running the update helper with the installed Codex package identity; the Microsoft Store interface is never opened.
+- Codex update checks now prefer the silent Store channel, fall back to the official OpenAI MSIX, and only report propagation when neither official channel can supply the update.
+- Added an indeterminate official-service progress state while Windows downloads and installs the Store package, followed by installed-version verification.
+
+## 1.2.96
+
+- Replaced the Store/`winget` Codex update path with Codex's official OpenAI production manifest and direct MSIX release channel, so Navo can check and install updates without Codex having been opened.
+- Added package rollout detection, download progress, HTTPS redirect checks, SHA-256 diagnostics, and validation of the MSIX identity, OpenAI publisher, target version, CPU architecture, and Windows deployment signature.
+- Added a localized confirmation dialog when Codex is running; Navo closes only the installed Codex process family after confirmation, then downloads, verifies, installs, and verifies the resulting version.
+- Added the official OpenAI Codex/ChatGPT changelog to the update card with English source text and matching Simplified Chinese translations that switch with the Navo interface language.
+- Distinguished an announced update whose official MSIX is still propagating from both an available update and an up-to-date installation.
+
+## 1.2.95
+
+- Fixed Codex Desktop update detection by reading the official updater's manifest version from the packaged Codex logs instead of treating a lagging `winget` result as proof that the app is current.
+- The update card now distinguishes the installed package version, the version detected by Codex itself, and whether the Windows package source can install it yet.
+- Replaced the four-endpoint proxy health check and maximum latency with one lightweight ChatGPT reachability request, so the displayed delay represents a single usable request path.
+- Added conservative name and flag detection for common regions absent from OpenAI's official supported-country list; recognized nodes are immediately labeled `ChatGPT 不支持`, while unknown and supported regions are still tested normally.
+
+## 1.2.94
+
+- Restored Codex prompt-cache continuity through the Navo API gateway by forwarding an allowlist of native session, thread, request, window, beta-feature, and Responses-lite headers to the ChatGPT Codex backend.
+- Preserved the native `prompt_cache_key` and avoided reintroducing nested cache-breakpoint fields that previously caused HTTP 400 responses.
+- Added credential-safe header filtering so local gateway authorization, host, length, and other client-controlled headers are never forwarded upstream.
+- Verified the regression with a real three-turn A/B test: the unpatched API path returned 0% cache reads on all three turns, while the same account through the native path increased from 83.67% to 97.24%.
+
+## 1.2.93
+
+- Fixed current-task Token metrics in the floating window by calculating the delta from the session total at task start instead of replacing the display with each model call's `last_token_usage`.
+- Kept current-task input, cached input, and output cumulative across multi-call agent turns, eliminating cache values that appeared to jump between unrelated per-call snapshots.
+- Verified the overall cache-hit calculation against raw Codex `token_count` events: cached input and total input are accumulated once per model call, then displayed as cached input divided by input.
+
+## 1.2.92
+
+- Unified the floating window with the main application's local-day API usage ledger so it no longer displays lifetime API Key totals as today's usage.
+- Made floating-window API usage roll over automatically at local midnight and show zero when the current day has no recorded requests.
+
+## 1.2.91
+
+- Corrected API Key daily usage migration so historical lifetime totals remain available for limits and All records without being assigned to the current day.
+- Removed the daily-card fallback to lifetime usage when no daily bucket exists, ensuring Today starts at zero and includes only requests recorded after the daily ledger upgrade.
+
+## 1.2.90
+
+- Added local-day usage buckets for Navo API Keys so Today, Yesterday, 7-day, and 30-day cards roll over together with the local usage ledger while lifetime request and Token limits remain cumulative.
+- Migrated existing cumulative API usage to its last-used day, preventing yesterday's totals from being labeled as today's usage after midnight.
+- Kept new-account setup active until both Codex OAuth and the isolated Chrome ChatGPT session are verified, and routed incomplete web sessions directly to the ChatGPT sign-in page.
+
 ## 1.2.89
 
 - Renamed the imported-account health label from Relay Credential Ready to Temporary Credential Ready.

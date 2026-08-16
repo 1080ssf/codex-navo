@@ -117,18 +117,34 @@ test('任务进展与消息提醒模块已从应用中移除', () => {
   assert.match(server, /codex-navo-hook\.ps1/);
 });
 
-test('应用设置在 Navo 内通过 Windows 官方软件源更新 Codex 桌面版', () => {
+test('应用设置在 Navo 内通过 OpenAI 官方清单直接更新 Codex 桌面版', () => {
   const root = path.join(__dirname, '..');
   const main = fs.readFileSync(path.join(root, 'desktop-src', 'main.js'), 'utf8');
   const preload = fs.readFileSync(path.join(root, 'desktop-src', 'preload.js'), 'utf8');
   assert.match(main, /codex-updates:get-state/);
   assert.match(main, /Get-AppxPackage -Name OpenAI\.Codex/);
-  assert.match(main, /winget\.exe/);
-  assert.match(main, /9PLM9XGG6VKS/);
+  assert.match(main, /CODEX_UPDATE_MANIFEST_URL/);
+  assert.match(main, /buildCodexPackageUrl/);
+  assert.match(main, /Add-AppxPackage/);
+  assert.match(main, /Invoke-CommandInDesktopPackage/);
+  assert.match(main, /codex-store-update\.ps1/);
+  assert.match(main, /codex-store-update\.vbs/);
+  assert.match(main, /wscript\.exe/);
+  assert.doesNotMatch(main, /Invoke-CommandInDesktopPackage[^\n]+WindowsPowerShell/);
+  assert.match(fs.readFileSync(path.join(root, 'desktop-src', 'codex-store-update.ps1'), 'utf8'), /RequestDownloadAndInstallStorePackageUpdatesAsync/);
+  assert.match(fs.readFileSync(path.join(root, 'desktop-src', 'codex-store-update.vbs'), 'utf8'), /shell\.Run\(commandLine, 0, True\)/);
+  assert.match(fs.readFileSync(path.join(root, 'package.json'), 'utf8'), /asarUnpack[\s\S]*codex-store-update\.ps1[\s\S]*codex-store-update\.vbs/);
+  assert.match(main, /ForceApplicationShutdown/);
+  assert.match(main, /showMessageBox/);
+  assert.match(main, /关闭 Codex 并更新/);
+  assert.match(main, /updateAvailable/);
   assert.match(main, /codex-updates:install/);
+  assert.match(main, /codex-updates:state/);
+  assert.doesNotMatch(main, /winget\.exe/);
   assert.doesNotMatch(main, /ms-windows-store:/);
   assert.match(preload, /getCodexState/);
   assert.match(preload, /installCodexUpdate/);
+  assert.match(preload, /onCodexState/);
 });
 
 test('desktop forwards application locale changes to the floating window', () => {

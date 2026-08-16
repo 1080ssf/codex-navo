@@ -22,6 +22,24 @@ test('session state follows a Codex task from start to completion', () => {
   assert.equal(terminal.type, 'completed');
 });
 
+test('current task usage accumulates total-token deltas instead of jumping between model calls', () => {
+  const state = new SessionState(path.join('sessions', '00000000-0000-4000-8000-000000000099.jsonl'));
+  state.apply({ type: 'event_msg', timestamp: '2026-08-12T01:00:00Z', payload: { type: 'token_count', info: {
+    last_token_usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 10, total_tokens: 110 },
+    total_token_usage: { input_tokens: 1000, cached_input_tokens: 800, output_tokens: 100, total_tokens: 1100 },
+  } } });
+  state.apply({ type: 'event_msg', timestamp: '2026-08-12T01:01:00Z', payload: { type: 'task_started', turn_id: 'turn-current' } });
+  state.apply({ type: 'event_msg', timestamp: '2026-08-12T01:01:10Z', payload: { type: 'token_count', info: {
+    last_token_usage: { input_tokens: 120, cached_input_tokens: 8, output_tokens: 20, total_tokens: 140 },
+    total_token_usage: { input_tokens: 1120, cached_input_tokens: 808, output_tokens: 120, total_tokens: 1240 },
+  } } });
+  state.apply({ type: 'event_msg', timestamp: '2026-08-12T01:01:20Z', payload: { type: 'token_count', info: {
+    last_token_usage: { input_tokens: 130, cached_input_tokens: 120, output_tokens: 30, total_tokens: 160 },
+    total_token_usage: { input_tokens: 1250, cached_input_tokens: 928, output_tokens: 150, total_tokens: 1400 },
+  } } });
+  assert.deepEqual(state.snapshot().usage, { input: 250, cachedInput: 128, output: 50, reasoning: 0, total: 300 });
+});
+
 test('session monitor incrementally reads a local session and resolves its index title', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-navo-sessions-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -150,13 +168,37 @@ test('notification service queues a local event and deduplicates terminal events
     fetch: async () => ({ ok: true, json: async () => ({ code: 0 }) }),
   });
   service.save({ notificationText: 'My exact notification', sound: 'none' });
-  const event = { type: 'completed', task: { id: 'thread-1', turnId: 'turn-1', project: 'Navo', threadName: 'Build' } };
+  const event = { type: 'completed', task: { id: 'thread-1', turnId: 'turn-1', project: 'Navo', threadName: 'Build', completedAt: new Date().toISOString() } };
   const first = await service.notify(event);
   const second = await service.notify(event);
   assert.equal(first.skipped, false);
   assert.equal(second.skipped, true);
   assert.equal(service.listEvents(0).length, 1);
   assert.equal(service.listEvents(0)[0].message, 'My exact notification');
+});
+
+test('notification service ignores historical terminal events replayed by a session rescan', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-navo-notify-stale-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const now = Date.parse('2026-08-16T00:20:00.000Z');
+  const service = new NotificationService({
+    file: path.join(root, 'notifications.json'),
+    readJson: () => ({}),
+    writeJsonAtomic: (target, value) => fs.writeFileSync(target, JSON.stringify(value)),
+    now: () => now,
+  });
+  const historical = await service.notify({
+    type: 'completed',
+    task: { id: 'old-thread', turnId: 'old-turn', completedAt: '2026-08-15T20:00:00.000Z' },
+  });
+  const missingTimestamp = await service.notify({
+    type: 'completed',
+    task: { id: 'unknown-thread', turnId: 'unknown-turn' },
+  });
+  assert.equal(historical.skipped, true);
+  assert.equal(historical.reason, 'stale-terminal-event');
+  assert.equal(missingTimestamp.skipped, true);
+  assert.equal(service.listEvents(0).length, 0);
 });
 
 test('notification channels send the user-authored message without an added preset', async (t) => {
@@ -177,7 +219,7 @@ test('notification channels send the user-authored message without an added pres
     feishuEnabled: true,
     feishuWebhook: 'https://open.feishu.cn/open-apis/bot/v2/hook/test',
   });
-  await service.notify({ type: 'completed', task: { id: 'thread-2', turnId: 'turn-2', project: 'Navo', threadName: 'Build' } });
+  await service.notify({ type: 'completed', task: { id: 'thread-2', turnId: 'turn-2', project: 'Navo', threadName: 'Build', completedAt: new Date().toISOString() } });
   assert.equal(requests.length, 1);
   assert.equal(requests[0].body.content.text, 'Custom message: {project}\n{title}');
 });

@@ -1,4 +1,4 @@
-const state = { accounts: [], csrfToken: '', timer: null, sessionTimer: null, notificationTimer: null, launchProgressTimer: null, launchProgress: null, launchProgressDismissed: false, launchProgressStartedAt: '', launchProgressCompleteKey: '', quotaRefreshing: false, wakeSettings: {}, wakeModelOptions: [], networkSettings: { core: {}, sources: [], assignments: {} }, apiService: { config: {}, providers: [], keys: [], baseUrl: '' }, sessions: { connected: false, tasks: [], counts: {} }, sessionFilter: 'all', sessionCollapsed: new Set(), sessionAllSeenGroups: new Set(), notificationSettings: {}, notificationEventId: 0, networkSourceId: '', accountNetworkId: '', usage: null, importPackageText: '', accountImportPackageText: '', relayImportPackageText: '', protocolDialogAccountId: '', protocolDialogPromptKind: '', localeCatalog: null };
+const state = { accounts: [], csrfToken: '', timer: null, sessionTimer: null, notificationTimer: null, notificationPolling: false, launchProgressTimer: null, launchProgress: null, launchProgressDismissed: false, launchProgressStartedAt: '', launchProgressCompleteKey: '', quotaRefreshing: false, wakeSettings: {}, wakeModelOptions: [], networkSettings: { core: {}, sources: [], assignments: {} }, apiService: { config: {}, providers: [], keys: [], baseUrl: '' }, sessions: { connected: false, tasks: [], counts: {} }, sessionFilter: 'all', sessionCollapsed: new Set(), sessionAllSeenGroups: new Set(), notificationSettings: {}, notificationEventId: 0, networkSourceId: '', accountNetworkId: '', usage: null, importPackageText: '', accountImportPackageText: '', relayImportPackageText: '', protocolDialogAccountId: '', protocolDialogPromptKind: '', localeCatalog: null };
 let toolsStatusTimer = null;
 const elements = {
   accounts: document.querySelector('#accounts'),
@@ -69,6 +69,9 @@ const elements = {
   accountNetworkForm: document.querySelector('#account-network-form'),
   accountNetworkCopy: document.querySelector('#account-network-copy'),
   accountNetworkRoute: document.querySelector('#account-network-route'),
+  accountNetworkRouteField: document.querySelector('#account-network-route-field'),
+  accountNetworkRouteTrigger: document.querySelector('#account-network-route-trigger'),
+  accountNetworkRouteMenu: document.querySelector('#account-network-route-menu'),
   accountNetworkPreview: document.querySelector('#account-network-preview'),
   accountNetworkEmpty: document.querySelector('#account-network-empty'),
   accountNetworkResult: document.querySelector('#account-network-result'),
@@ -101,6 +104,12 @@ const elements = {
   codexUpdateCopy: document.querySelector('#codex-update-copy'),
   codexCurrentVersion: document.querySelector('#codex-current-version'),
   codexUpdateAction: document.querySelector('#codex-update-action'),
+  codexUpdateProgress: document.querySelector('#codex-update-progress'),
+  codexUpdateProgressBar: document.querySelector('#codex-update-progress-bar'),
+  codexUpdateProgressLabel: document.querySelector('#codex-update-progress-label'),
+  codexReleaseNotes: document.querySelector('#codex-release-notes'),
+  codexReleaseList: document.querySelector('#codex-release-list'),
+  codexChangelogLink: document.querySelector('#codex-changelog-link'),
   usageOverview: document.querySelector('#usage-overview'),
   usageLedger: document.querySelector('#usage-ledger'),
   usageUpdated: document.querySelector('#usage-updated'),
@@ -126,18 +135,33 @@ const elements = {
   notificationVolumeValue: document.querySelector('#notification-volume-value'),
   languageForm: document.querySelector('#language-form'),
   appLanguageSelect: document.querySelector('#app-language-select'),
+  appLanguageMenu: document.querySelector('#app-language-menu'),
   languageStatus: document.querySelector('#language-status'),
+  themeForm: document.querySelector('#theme-form'),
+  appThemeSelect: document.querySelector('#app-theme-select'),
+  appThemeMenu: document.querySelector('#app-theme-menu'),
+  themeStatus: document.querySelector('#theme-status'),
 };
 
 const localeStorageKey = 'codex-navo-app-locale';
+const themeStorageKey = 'codex-navo-app-theme';
 function systemLocale() {
   const value = navigator.languages?.[0] || navigator.language || 'en-US';
-  if (/^zh(?:-|$)/i.test(value)) return /(?:TW|HK)/i.test(value) ? (/HK/i.test(value) ? 'zh-HK' : 'zh-TW') : 'zh-CN';
-  return value;
+  return /^zh(?:-|$)/i.test(value) ? 'zh-CN' : 'en-US';
 }
-state.appLocale = localStorage.getItem(localeStorageKey) || systemLocale();
+state.appLocale = ['en-US', 'zh-CN'].includes(localStorage.getItem(localeStorageKey))
+  ? localStorage.getItem(localeStorageKey)
+  : systemLocale();
+state.appTheme = 'light';
+localStorage.setItem(themeStorageKey, state.appTheme);
 function navoUsesChinese() { return state.appLocale === 'zh-CN'; }
 document.documentElement.lang = state.appLocale;
+function applyTheme() {
+  document.documentElement.dataset.themePreference = 'light';
+  document.documentElement.dataset.theme = 'light';
+  if (elements.themeStatus) elements.themeStatus.textContent = navoUsesChinese() ? '当前固定使用浅色模式。' : 'Codex Navo is fixed to light mode.';
+}
+applyTheme();
 const englishUi = new Map([
   ['账号管理', 'Accounts'], ['网络代理', 'Network'], ['授权迁移', 'Authorization'], ['会话管理', 'Sessions'],
   ['通知提醒', 'Notifications'], ['API 服务', 'API Service'], ['唤醒设置', 'Wake Settings'], ['语言设置', 'Language'], ['应用设置', 'Application Settings'],
@@ -147,7 +171,10 @@ const englishUi = new Map([
   ['显示 Windows 通知', 'Show Windows notifications'], ['试听并测试', 'Preview & test'], ['保存设置', 'Save'], ['消息平台', 'Message channels'],
   ['测试连接', 'Test'], ['创建 Key', 'Create Key'], ['自动唤醒', 'Automatic wake'], ['执行策略', 'Schedule'], ['模型', 'Model'],
   ['推理强度', 'Reasoning effort'], ['发送内容', 'Prompt'], ['立即唤醒全部', 'Wake All Now'], ['应用与 Codex 默认语言', 'App and Codex default language'],
-  ['保存语言', 'Save Language'], ['界面语言', 'Interface language'], ['取消', 'Cancel'], ['按所选内容启动', 'Launch Selected'],
+  ['应用外观', 'Application appearance'], ['当前外观', 'Current appearance'], ['浅色模式', 'Light mode'],
+  ['浅色', 'light'], ['深色', 'dark'], ['简体中文', 'Simplified Chinese'],
+  ['Codex Navo 当前固定使用浅色模式。', 'Codex Navo is currently fixed to light mode.'], ['当前固定使用浅色模式。', 'Codex Navo is fixed to light mode.'],
+  ['保存语言', 'Save Language'], ['界面语言', 'Interface language'], ['外观设置已保存', 'Appearance saved'], ['取消', 'Cancel'], ['按所选内容启动', 'Launch Selected'],
   ['全选项目和会话', 'Select all projects and sessions'], ['全部展开', 'Expand all'], ['全部折叠', 'Collapse all'],
   ['启动前优化超大历史会话', 'Optimize oversized conversation history before launch'], ['账号与顺序', 'Accounts & Order'],
   ['登录 Codex', 'Launch Codex'], ['退出 Codex', 'Quit Codex'], ['网页端', 'Web'], ['柔和提示音', 'Soft chime'],
@@ -163,8 +190,14 @@ const englishUi = new Map([
   ['优先选择额度充足账号', 'Prioritize accounts with more quota'], ['快速找到额度较低账号', 'Find low-quota accounts'],
   ['按名称顺序排列', 'Sort by name'], ['新账号排在前面', 'Newest accounts first'], ['账号池可用额度', 'Combined account quota'],
   ['刷新额度', 'Refresh quota'], ['唤醒账号', 'Wake account'], ['配置账号网络', 'Configure account network'],
-  ['直连', 'Direct'], ['代理', 'Proxy'], ['额度刷新失败', 'Quota refresh failed'], ['正在读取额度', 'Loading quota'],
+  ['直连', 'Direct'], ['代理', 'Proxy'], ['不使用代理', 'No proxy'], ['单独线路', 'Standalone routes'], ['节点组', 'Node groups'], ['机场订阅', 'Subscriptions'], ['额度刷新失败', 'Quota refresh failed'], ['正在读取额度', 'Loading quota'],
   ['等待登录授权', 'Waiting for sign-in'], ['登录已失效', 'Sign-in expired'], ['重新登录授权', 'Sign in again'],
+  ['Codex 授权已完成，请在当前 Chrome 中完成 ChatGPT 网页登录', 'Codex authorization is complete. Finish signing in to ChatGPT in the current Chrome window'],
+  ['Codex 授权已完成，请在当前 Chrome 中完成 ChatGPT 网页登录。', 'Codex authorization is complete. Finish signing in to ChatGPT in the current Chrome window.'],
+  ['Codex 授权已完成，请继续登录 ChatGPT 网页端', 'Codex authorization is complete. Continue signing in to ChatGPT Web'],
+  ['完成当前 Chrome 中的 ChatGPT 登录后，账号会自动入池并保留网页会话。', 'After signing in to ChatGPT in the current Chrome window, the account is added automatically and its web session is preserved.'],
+  ['请先登录 ChatGPT 网页端，登录成功后将自动继续 Codex 授权', 'Sign in to ChatGPT Web first. Codex authorization will continue automatically after sign-in'],
+  ['ChatGPT 网页登录已完成，正在继续 Codex 授权', 'ChatGPT Web sign-in is complete. Continuing Codex authorization'],
   ['任务已完成', 'Task completed'], ['任务执行失败', 'Task failed'], ['任务已中断', 'Task interrupted'], ['等待输入', 'Waiting for input'],
   ['等待授权', 'Waiting for approval'], ['通知测试成功', 'Notification test successful'], ['监控已连接', 'Monitor connected'],
   ['运行中', 'Running'], ['等待处理', 'Waiting'], ['今日完成', 'Completed today'], ['失败或中断', 'Failed or interrupted'], ['历史会话', 'History'],
@@ -203,7 +236,7 @@ const englishUi = new Map([
   ['管理节点', 'Manage nodes'], ['保存线路', 'Save route'], ['应用更新', 'Application update'], ['当前安装版本', 'Installed version'], ['正在读取版本信息。', 'Loading version information.'],
   ['一个选项同时控制 Navo 界面和每次启动 Codex 时预选的语言。', 'One setting controls the Navo interface and the language preselected whenever Codex is launched.'],
   ['选择语言', 'Choose language'], ['跟随 Windows', 'Follow Windows'], ['首次打开时自动识别系统语言。保存个人选择后，将优先使用你的设置。', 'The system language is detected on first launch. Your saved preference takes priority afterward.'],
-  ['自动识别', 'Auto detected'], ['同步 Codex', 'Sync Codex'], ['打开普通账号或 API Codex 时，启动窗口会自动预选相同语言。', 'The same language is preselected when launching a regular account or API Codex.'],
+  ['自动识别', 'Auto detected'], ['同步 Codex', 'Sync Codex'], ['可连接（CF 保护）', 'Reachable (CF protected)'], ['TLS 中断', 'TLS interrupted'], ['连接失败', 'Connection failed'], ['未检测', 'Not tested'], ['打开普通账号或 API Codex 时，启动窗口会自动预选相同语言。', 'The same language is preselected when launching a regular account or API Codex.'],
   ['已同步', 'Synced'], ['简体中文提供完整中文界面；其他语言当前使用英文 Navo 界面，Codex 使用所选语言。', 'Simplified Chinese has a complete Chinese interface. Other locales currently use the English Navo interface while Codex uses the selected language.'],
   ['有任务已处理完毕。', 'A task has been processed.'],
   ['首次打开跟随 Windows，保存后同时作为 Navo 界面和 Codex 启动语言。', 'Follows Windows on first launch, then uses your saved choice for both Navo and Codex.'],
@@ -251,15 +284,131 @@ const englishUi = new Map([
   ['其他会话', 'Other sessions'], ['未归类项目', 'Unassigned project'], ['当前没有正在运行或等待处理的会话', 'No active or waiting sessions'], ['当前没有失败或中断的会话', 'No failed or interrupted conversations'],
   ['通知设置已保存', 'Notification settings saved'], ['通知测试已发送', 'Test notification sent'], ['语言设置已保存', 'Language settings saved'],
   ['管理界面语言、Codex 启动语言以及 Codex Navo 与 Codex 桌面端更新。', 'Manage interface language, the Codex launch language, and updates for Codex Navo and Codex Desktop.'],
-  ['应用更新', 'Application updates'], ['Navo 桌面应用', 'Navo desktop app'], ['Microsoft Store 桌面应用', 'Microsoft Store desktop app'],
-  ['正在读取版本和更新状态。', 'Loading version and update status.'], ['正在读取本机安装版本。', 'Loading the installed version.'], ['检查并更新', 'Check and update'], ['打开 Microsoft Store', 'Open Microsoft Store'],
+  ['应用更新', 'Application updates'], ['Navo 桌面应用', 'Navo desktop app'], ['Windows 桌面应用', 'Windows desktop app'],
+  ['正在读取版本和更新状态。', 'Loading version and update status.'], ['正在读取本机安装版本。', 'Loading the installed version.'], ['检查并更新', 'Check and update'],
+  ['官方更新日志', 'Official changelog'], ['查看完整日志 ↗', 'View full changelog ↗'],
   ['社区与项目', 'Community and project'], ['加入社区交流使用经验、反馈问题，或前往 GitHub 查看项目源码与版本动态。', 'Join the community to share feedback, or visit GitHub for source code and releases.'],
   ['Telegram 群组', 'Telegram group'], ['加入 TG 社区', 'Join the Telegram community'], ['QQ 群', 'QQ group'], ['加入中文交流群', 'Join the Chinese community'], ['GitHub 项目', 'GitHub project'], ['源码、Issue 与版本', 'Source, issues, and releases'],
-  ['正在通过 Windows 包管理器检查并安装 Codex 更新，请不要关闭 Navo。', 'Checking and installing the Codex update through Windows Package Manager. Keep Navo open.'],
-  ['请先退出 Codex，再点击“检查并更新”。关闭 Codex 可避免 Microsoft Store 安装包被占用。', 'Quit Codex, then select Check and update. This prevents the Microsoft Store package from being locked.'],
-  ['Codex 已是 Microsoft Store 当前提供的最新版。', 'Codex is up to date with the latest Microsoft Store version.'], ['Codex 更新失败，请尝试从 Microsoft Store 更新。', 'Codex update failed. Try updating from Microsoft Store.'],
+  ['ChatGPT 不支持', 'ChatGPT unsupported'],
+  ['“额度重置后”会同时检测预计时间、重置时间变化和额度突然恢复，通常在 5 分钟内识别不定时重置。', 'After quota reset checks the estimated time, reset-time changes, and sudden quota recovery, usually detecting unscheduled resets within 5 minutes.'],
+  ['0 表示不限。', '0 means unlimited.'], ['按 Codex 官方美国定价 US$0.04/Credit 换算', 'Converted at the official US Codex price of US$0.04/Credit'],
+  ['保存后，该账号的网页端、登录授权、Codex 桌面端及其 GitHub 访问都会使用同一节点；后台额度刷新和唤醒按全局择优线路执行。', 'After saving, Web, authorization, Codex Desktop, and GitHub for this account use the same route. Background quota refresh and wake tasks use the best available global route.'],
+  ['保存权限', 'Save permissions'], ['备用流程需要先在 ChatGPT 设置中开启设备代码授权。', 'Enable device-code authorization in ChatGPT settings before using this fallback flow.'],
+  ['编辑 Key 权限', 'Edit key permissions'], ['测试提醒已发送', 'Test notification sent'], ['创建 Navo API Key', 'Create Navo API key'],
+  ['从启用统计后开始记录', 'Recorded since usage tracking was enabled'], ['待检查', 'Pending check'], ['导入临时账号', 'Import temporary accounts'],
+  ['导入会新建独立账号环境；旧版 Codex 单端授权包仍然兼容。', 'Import creates a new isolated account environment; legacy Codex-only authorization packages remain compatible.'],
+  ['导入完成：Codex 授权与网页会话均已验证。', 'Import complete: Codex authorization and the web session were verified.'], ['到期时间', 'Expiration'],
+  ['登录授权尚未完成', 'Sign-in authorization is not complete'], ['登录授权未完成', 'Sign-in authorization incomplete'],
+  ['登录与 Codex 授权正在后台运行', 'Sign-in and Codex authorization are running in the background'],
+  ['登录与授权已完成。ChatGPT 网页已打开，确认后可自行关闭浏览器窗口。', 'Sign-in and authorization are complete. ChatGPT Web is open; close the browser window when finished.'],
+  ['第三方数据包不能超过 2 MB', 'Third-party packages cannot exceed 2 MB'],
+  ['点击“登录并授权”，在该账号的独立 Chrome 环境中一次完成官方流程。', 'Select Sign in and authorize to complete the official flow in this account’s isolated Chrome environment.'],
+  ['点击卡片查看用量', 'Select the card to show usage'], ['点击卡片收起用量', 'Select the card to hide usage'],
+  ['点击右上角刷新，读取这个来源的节点列表。', 'Select Refresh in the upper-right to load nodes from this source.'],
+  ['订阅', 'Subscription'], ['独立节点', 'Standalone node'], ['额度：低到高', 'Quota: low to high'], ['额度：高到低', 'Quota: high to low'], ['额度已刷新', 'Quota refreshed'],
+  ['反代账号不会创建网页环境', 'Relay accounts do not create web profiles'], ['反代账号不会打开 Codex 桌面端', 'Relay accounts cannot open Codex Desktop'],
+  ['访问限流', 'Rate limited'], ['该 API Key 绑定的全部账号统一使用此节点', 'All accounts linked to this API key use this route'],
+  ['该 API Key 的账号池请求全部直连', 'All account-pool requests for this API key use a direct connection'],
+  ['该项目目前没有本地会话', 'This project has no local conversations'],
+  ['该账号的独立 Chrome 会话已经验证；点击右侧按钮继续完成 Codex 授权。', 'This account’s isolated Chrome session is verified. Use the button on the right to finish Codex authorization.'],
+  ['该账号已切换为直连', 'This account now uses a direct connection'],
+  ['更新已经下载完成。重启应用即可安装，正在运行的 Codex 不会被强制关闭。', 'The update is downloaded. Restart the app to install it; a running Codex instance will not be forced to close.'],
+  ['功能导航', 'Navigation'], ['功能预留', 'Reserved'], ['关闭', 'Close'], ['关闭启动进度', 'Close launch progress'], ['关闭外部 Codex', 'Close external Codex'],
+  ['关闭外部 Codex？正在进行的任务会被中断。', 'Close external Codex? Active tasks will be interrupted.'], ['归档会话？', 'Archive conversation?'],
+  ['还没有读取节点', 'No nodes loaded'], ['唤醒底层账号', 'Wake backing accounts'], ['唤醒模型', 'Wake model'], ['唤醒设置已保存', 'Wake settings saved'],
+  ['唤醒账号（发送一次真实 Codex 请求）', 'Wake account (sends one real Codex request)'], ['回到账号列表', 'Back to accounts'],
+  ['会话已归档', 'Conversation archived'], ['会话已删除', 'Conversation deleted'], ['会话已失效', 'Conversation expired'], ['极限（自动协作）', 'Extreme (automatic collaboration)'],
+  ['继续 Codex 授权', 'Continue Codex authorization'], ['检测账号池模型', 'Detect account-pool models'], ['检测中…', 'Testing…'], ['检查中…', 'Checking…'],
+  ['检查完成：全部账号授权正常。', 'Check complete: all accounts are authorized.'], ['将这个会话移入“已归档”？', 'Move this conversation to Archived?'],
+  ['节点', 'Node'], ['节点来源已删除', 'Node source deleted'],
+  ['仅清理重复压缩快照，并在 .codex/navo-rollout-backups 中保留原文件备份。', 'Only duplicate compacted snapshots are removed; original files are backed up in .codex/navo-rollout-backups.'],
+  ['仅选此项目', 'Only this project'], ['卡片视图', 'Card view'], ['卡片视图固定显示今日用量', 'Card view always shows today’s usage'], ['可用', 'Available'],
+  ['立即安装', 'Install now'], ['立即更新', 'Update now'], ['例如：设计组 01', 'Example: Design Team 01'], ['例如：de***@company.com', 'Example: de***@company.com'],
+  ['连接成功，测试消息已发送', 'Connected; test message sent'], ['连接延迟', 'Connection latency'], ['列表视图', 'List view'],
+  ['留空表示永不过期。', 'Leave blank to never expire.'], ['留空表示允许全部账号池模型', 'Leave blank to allow all account-pool models'],
+  ['每个账号使用独立的 Chrome 环境', 'Each account uses an isolated Chrome environment'], ['模型列表暂不可用', 'Model list is temporarily unavailable'],
+  ['配置 API 账号池代理', 'Configure API account-pool proxy'],
+  ['普通账号和 API 模式共用这组选项。未勾选的项目与会话不会在本次启动中加载，原始数据仍会保留。', 'Regular-account and API modes share these options. Unselected projects and conversations are not loaded for this launch; their original data is preserved.'],
+  ['请检查网络后重试。', 'Check the network and try again.'], ['请求上限', 'Request limit'], ['请输入当前验证步骤需要的内容', 'Enter the information required for the current verification step'],
+  ['请先登录 ChatGPT 网页端', 'Sign in to ChatGPT Web first'], ['请先选择 .codexnavo 授权包', 'Choose a .codexnavo authorization package first'],
+  ['请在独立浏览器中完成登录与授权', 'Complete sign-in and authorization in the isolated browser'], ['请在独立浏览器中完成设备代码授权', 'Complete device-code authorization in the isolated browser'],
+  ['请至少选择一个普通账号或临时账号', 'Select at least one regular or temporary account'], ['删除 API Key？', 'Delete API key?'],
+  ['删除该节点来源？使用它的账号会自动恢复为直连。', 'Delete this node source? Accounts using it will return to a direct connection.'],
+  ['删除后，正在使用该 Key 的客户端会立即失效。', 'Clients using this key will stop working immediately after deletion.'], ['删除会话？', 'Delete conversation?'],
+  ['上移', 'Move up'], ['尚未找到可加载的本地项目或会话', 'No local projects or conversations are available to load'],
+  ['设备代码是备用流程。请先在 ChatGPT 设置 → 账户安全与登录中开启“为 Codex 启用设备代码授权”。继续吗？', 'Device code is a fallback flow. First enable “Device code authorization for Codex” under ChatGPT Settings → Account security and sign-in. Continue?'],
+  ['设备代码授权', 'Device-code authorization'], ['设备验证码', 'Device verification code'], ['使用中', 'In use'],
+  ['首次网页登录、Codex OAuth、Codex 桌面端及其 GitHub 访问都使用这条线路。', 'Initial web sign-in, Codex OAuth, Codex Desktop, and GitHub all use this route.'],
+  ['授权包已生成，但该账号没有可导出的有效网页会话，因此仅包含 Codex 授权。', 'The package was created, but this account has no valid web session to export, so it contains Codex authorization only.'],
+  ['授权流程已中断', 'Authorization interrupted'], ['刷新订阅', 'Refresh subscription'], ['刷新全部账号额度', 'Refresh all account quotas'], ['刷新中…', 'Refreshing…'],
+  ['双端授权包已生成：包含 Codex 授权和网页会话。', 'The complete authorization package was created with Codex authorization and the web session.'],
+  ['所选时段', 'Selected period'], ['所选文件不是有效 JSON', 'The selected file is not valid JSON'], ['填写连接信息后检测', 'Enter connection details to test'],
+  ['推荐方式，在账号独立 Chrome 中完成官方登录与 Codex OAuth', 'Recommended: complete official sign-in and Codex OAuth in the account’s isolated Chrome'],
+  ['退出当前 Codex？正在进行的任务会被中断。', 'Quit the current Codex? Active tasks will be interrupted.'], ['外部 Codex 已关闭', 'External Codex closed'], ['外部 Codex 正在运行', 'External Codex is running'],
+  ['完整 Key 只会在创建成功后显示一次，请及时复制保存。', 'The complete key is shown once after creation. Copy and save it now.'],
+  ['完整 Key 只在这里显示一次。请立即复制并保存，关闭后不会再次显示。', 'The complete key is shown here once. Copy and save it now; it cannot be shown again after closing.'],
+  ['网络与节点', 'Network and nodes'], ['网页端、授权、额度与 Codex 使用此节点', 'Web, authorization, quota, and Codex use this route'],
+  ['网页端已登录并入池', 'Web signed in and account added'], ['网页使用中', 'Web in use'], ['为该账号选择独立线路。', 'Choose an independent route for this account.'],
+  ['未安装', 'Not installed'], ['未知错误', 'Unknown error'], ['文件已读取，导入时会自动识别格式并检查重复账号。', 'File loaded. Import automatically detects its format and checks for duplicate accounts.'],
+  ['无法读取本地状态', 'Unable to read local state'], ['无推理', 'No reasoning'], ['下移', 'Move down'], ['先添加节点或订阅，刷新成功后即可为这个账号选择线路。', 'Add a node or subscription first. After a successful refresh, you can choose a route for this account.'],
+  ['线路加载失败', 'Route loading failed'], ['线路来源', 'Route sources'], ['协议', 'Protocol'],
+  ['新版授权包可同时恢复 Codex 授权与网页会话；旧版单端包继续兼容。项目、任务和网页历史不会导入。', 'New packages restore both Codex authorization and web sessions; legacy Codex-only packages remain compatible. Projects, tasks, and web history are not imported.'],
+  ['修改模型范围、请求额度、Token 额度和有效期。', 'Change model scope, request quota, token quota, and expiration.'],
+  ['需要邮箱验证码、密码、两步验证、手机号或短信验证码时，会在这里显示输入框。', 'When an email code, password, two-step verification, phone number, or SMS code is required, an input appears here.'],
+  ['选择 .codexnavo 授权包，恢复 Codex 授权与可用网页会话', 'Choose a .codexnavo package to restore Codex authorization and available web sessions'],
+  ['选择本次加载内容', 'Choose content for this launch'],
+  ['选择添加方式后继续。登录账号会使用独立 Chrome 环境，API Key 与第三方数据包只参与本机 API 服务。', 'Choose an add method to continue. Signed-in accounts use isolated Chrome environments; API keys and third-party packages participate only in the local API service.'],
+  ['已保存。Navo 与 Codex 默认使用简体中文。', 'Saved. Navo and Codex now default to Simplified Chinese.'], ['已从列表移除，登录目录仍然保留', 'Removed from the list; sign-in data is preserved'],
+  ['已打开独立环境；使用结束后关闭窗口，账号会自动释放', 'Isolated environment opened. Close the window when finished to release the account automatically'],
+  ['已打开该账号的独立授权页面', 'Opened this account’s isolated authorization page'], ['已打开官方登录授权页，完成后账号会自动入池', 'Official sign-in page opened; the account is added automatically when complete'],
+  ['已打开设备代码授权页，完成后账号会自动入池', 'Device-code authorization page opened; the account is added automatically when complete'],
+  ['已唤醒该 API Key 的底层账号', 'Woke the backing accounts for this API key'], ['已继续官方登录授权流程，请在账号独立浏览器中完成操作。', 'Official sign-in authorization continued. Complete it in the account’s isolated browser.'],
+  ['已检测', 'Tested'], ['已启用', 'Enabled'], ['已切换账号并启动 Codex；关闭应用后账号会自动释放', 'Account switched and Codex launched; the account is released automatically when the app closes'],
+  ['已取消未完成的授权流程', 'Canceled the incomplete authorization flow'], ['已提交，正在继续登录授权', 'Submitted; continuing sign-in authorization'], ['已提交，正在继续登录授权。', 'Submitted; continuing sign-in authorization.'],
+  ['已停用', 'Disabled'], ['已移除账号', 'Account removed'],
+  ['永久删除这个会话？该操作会同时移除 Codex 会话文件和索引记录。', 'Permanently delete this conversation? This also removes the Codex conversation file and index record.'],
+  ['用量', 'Usage'], ['用量统计范围', 'Usage range'], ['允许的模型', 'Allowed models'], ['暂无已完成授权的账号可唤醒', 'No authorized accounts are available to wake'],
+  ['暂无已完成授权的账号可刷新', 'No authorized accounts are available to refresh'], ['展开项目会话', 'Expand project conversations'], ['站点拒绝', 'Site rejected'],
+  ['账号池 API 尚未就绪', 'Account-pool API is not ready'], ['账号池为空，暂无可检查的授权。', 'The account pool is empty; there is no authorization to check.'],
+  ['账号代理已保存', 'Account proxy saved'], ['账号排序方式', 'Account sort order'], ['账号入池进度', 'Account onboarding progress'],
+  ['账号授权状态已检查，结果已更新。', 'Account authorization checked and updated.'], ['账号显示方式', 'Account display mode'],
+  ['账号已创建，请在独立浏览器中完成登录与授权', 'Account created. Complete sign-in and authorization in the isolated browser'],
+  ['账号已导入：授权包仅包含 Codex 授权', 'Account imported: the package contains Codex authorization only'], ['账号已导入：Codex 授权与网页会话均已验证', 'Account imported: Codex authorization and web session verified'],
+  ['账号已唤醒，额度状态已同步', 'Account woken and quota synchronized'], ['账号已释放', 'Account released'], ['账号用量', 'Account usage'],
+  ['这是一个连续的官方流程，完成后会自动入池，无需开启设备代码授权。', 'This is one continuous official flow. The account is added automatically when complete; device-code authorization is not required.'],
+  ['正在处理…', 'Processing…'], ['正在导入…', 'Importing…'], ['正在读取官方版本信息。', 'Loading official version information.'], ['正在关闭 Codex，请稍候…', 'Closing Codex…'],
+  ['正在后台下载更新，账号数据和登录环境不会被覆盖。', 'Downloading the update in the background. Account data and sign-in environments are preserved.'],
+  ['正在唤醒账号', 'Waking account'], ['正在获取…', 'Loading…'], ['正在检查 OpenAI 官方版本与安装包状态…', 'Checking the official OpenAI version and installer status…'],
+  ['正在连接…', 'Connecting…'], ['正在启动 Codex', 'Launching Codex'], ['正在启动该账号的独立登录流程。', 'Starting this account’s isolated sign-in flow.'],
+  ['正在识别…', 'Identifying…'], ['正在识别并导入临时账号…', 'Identifying and importing temporary accounts…'],
+  ['正在通过 Windows 官方更新服务下载并安装 Codex，请保持 Navo 运行…', 'Downloading and installing Codex through the official Windows update service. Keep Navo running…'],
+  ['正在通过 Windows 应用部署服务安装 Codex…', 'Installing Codex through Windows App Deployment…'], ['正在通过所选线路连接 ChatGPT…', 'Connecting to ChatGPT through the selected route…'],
+  ['正在完成登录与授权', 'Completing sign-in and authorization'], ['正在校验包身份、发布者、版本与架构…', 'Verifying package identity, publisher, version, and architecture…'],
+  ['正在写入独立 Chrome 网页会话和 Codex OAuth 凭证，请稍候。', 'Saving the isolated Chrome web session and Codex OAuth credentials…'],
+  ['正在准备内置 Mihomo 代理核心', 'Preparing the built-in Mihomo proxy core'], ['正在准备启动环境…', 'Preparing the launch environment…'],
+  ['支持订阅链接及 SS / SSR / VMess / VLESS / Trojan / Hysteria2 / TUIC / WireGuard / HTTP / SOCKS5', 'Supports subscription URLs and SS / SSR / VMess / VLESS / Trojan / Hysteria2 / TUIC / WireGuard / HTTP / SOCKS5'],
+  ['支持格式', 'Supported formats'], ['只从列表移除这个账号。浏览器和 Codex 目录会保留，确定继续吗？', 'Remove this account from the list only? Browser and Codex directories will be preserved.'],
+  ['只需登录一次；检测到网页会话后会自动继续官方 Codex 授权。', 'Sign in once; official Codex authorization continues automatically after the web session is detected.'],
+  ['重新识别', 'Identify again'], ['自动唤醒设置已启用', 'Automatic wake enabled'], ['最少', 'Minimal'],
+  ['API 账号池代理已保存', 'API account-pool proxy saved'], ['API 账号池已切换为直连', 'API account pool now uses a direct connection'], ['API Key 不存在', 'API key does not exist'],
+  ['ChatGPT 检测', 'ChatGPT check'], ['ChatGPT 未完成', 'ChatGPT check incomplete'], ['Codex 返回的原始 Credits', 'Raw credits returned by Codex'],
+  ['Codex 默认模型', 'Codex default model'], ['Codex 授权已导入，网页会话需要重新登录', 'Codex authorization imported; the web session requires sign-in'],
+  ['Codex 授权已导入；该授权包不包含网页会话。', 'Codex authorization imported; this package does not contain a web session.'],
+  ['Codex 授权已完成。网页端仍需登录时，可在该账号的独立 Chrome 中继续。', 'Codex authorization is complete. If Web still requires sign-in, continue in this account’s isolated Chrome.'],
+  ['Codex 已退出，账号认证已安全保存', 'Codex exited; account authorization was saved safely'], ['Key 名称', 'Key name'], ['OpenAI 官方更新日志', 'Official OpenAI changelog'],
+  ['Token 上限', 'Token limit'], ['需要检查', 'Needs attention'], ['凭证存在，但最近一次在线检查失败', 'Credentials exist, but the latest online check failed'],
+  ['正在授权', 'Authorizing'], ['协议登录正在后台运行，请在应用内完成验证', 'Protocol sign-in is running in the background; complete verification in the app'],
+  ['请在账号独立浏览器中完成官方流程', 'Complete the official flow in the account’s isolated browser'], ['授权已中断', 'Authorization interrupted'],
+  ['可以从当前账号继续发起官方授权', 'Official authorization can be resumed from this account'], ['需要授权', 'Authorization required'],
+  ['尚未保存 Codex 登录凭证', 'No Codex sign-in credentials have been saved'], ['Codex 授权未完成', 'Codex authorization incomplete'], ['凭证异常', 'Credential error'],
+  ['网页端登录正常，但仍需完成官方 Codex OAuth', 'Web sign-in is valid, but official Codex OAuth is still required'], ['授权文件无法识别，请重新授权', 'The authorization file is invalid; authorize again'],
+  ['临时反代', 'Temporary relay'], ['临时凭证已过期', 'Temporary credential expired'], ['仅用于 API 反代，访问 Token 失效后需要重新导入', 'Used only for API relay; import it again after the access token expires'],
+  ['OAuth 凭证完整，可自动续期并参与 API 账号池', 'OAuth credentials are complete and can renew automatically in the API account pool'],
+  ['授权已失效', 'Authorization expired'], ['官方服务拒绝了当前凭证，请重新授权', 'The official service rejected the current credentials; authorize again'],
+  ['需要官方授权', 'Official authorization required'], ['旧版临时凭证不可刷新，请完成官方 Codex OAuth', 'Legacy temporary credentials cannot refresh; complete official Codex OAuth'],
 ]);
 const englishUiPatterns = [
+  [/^当前跟随 Windows，正在使用(.+)模式。$/, 'Following Windows; $1 mode is active.'], [/^当前使用(.+)模式。$/, '$1 mode is active.'],
   [/^当前 Codex · /, 'Current Codex · '],
   [/^(\d+) 个账号/, '$1 accounts'], [/ · (\d+) 个 Navo API/g, ' · $1 Navo API'], [/^(\d+) 使用中$/, '$1 active'],
   [/^更新于 /, 'Updated '], [/ 次待定价$/, ' unpriced calls'], [/^缓存率 /, 'Cache rate '], [/其中推理 /, 'Reasoning '],
@@ -273,7 +422,36 @@ const englishUiPatterns = [
   [/^已刷新全部 (\d+) 个账号额度$/, 'Refreshed quota for all $1 accounts'], [/^已刷新 (\d+) 个账号，(\d+) 个刷新失败$/, 'Refreshed $1 accounts; $2 failed'],
   [/^已唤醒 (\d+) 个账号，(\d+) 个失败$/, 'Woke $1 accounts; $2 failed'], [/^已成功唤醒全部 (\d+) 个账号$/, 'Successfully woke all $1 accounts'],
   [/^(\d+) 个账号使用代理$/, '$1 accounts use a proxy'], [/^已读取 (\d+) 个节点$/, '$1 nodes loaded'], [/^已识别 (\d+) 个节点$/, '$1 nodes recognized'],
+  [/^(\d+) 个节点$/, '$1 nodes'],
+  [/^检测完成：可用 (\d+)，ChatGPT 不支持 (\d+)，失败 (\d+)$/, 'Complete: $1 available, $2 ChatGPT unsupported, $3 failed'],
   [/^按 (\d+) 个绑定账号的总额度平均计算$/, 'Average across the total quota of $1 linked accounts'],
+  [/^· 到期 (.+)$/, '· expires $1'], [/^· 连接 (\d+) ms$/, '· connection $1 ms'], [/^连接 (\d+) ms · (.+)$/, 'Connection $1 ms · $2'],
+  [/^(\d+) 个可用账号$/, '$1 available accounts'], [/^(\d+)可用额度$/, '$1 available quota'],
+  [/^(.+) · (\d+)\/(\d+) 个账号支持$/, '$1 · $2/$3 accounts supported'],
+  [/^(\d+) 个节点 · 订阅$/, '$1 nodes · subscription'], [/^(\d+) 个节点 · 独立节点$/, '$1 nodes · standalone'], [/^(\d+) 个节点 · (.+)$/, '$1 nodes · $2'],
+  [/^(.+)，可点击右侧刷新按钮重试$/, '$1; use the refresh button on the right to try again'],
+  [/^(.+)；默认推理强度：(.+)$/, '$1; default reasoning effort: $2'],
+  [/^(.+)。请确认启动窗口仍在运行，然后刷新页面。$/, '$1. Make sure the launch window is still running, then refresh the page.'],
+  [/^(.+)。Codex Navo 正在尝试恢复后台服务；关闭弹窗后可重新发起授权。$/, '$1. Codex Navo is trying to restore the background service. Close this dialog to restart authorization.'],
+  [/^当前 Codex v(.+) 已是官方最新版。$/, 'Codex v$1 is the latest official version.'], [/^当前 v(.+) 已是最新版。$/, 'v$1 is up to date.'],
+  [/^当前版本 v(.+)。下载完成后由你决定何时重启安装。$/, 'Current version: v$1. Choose when to restart after the download completes.'],
+  [/^发现 Codex v(.+)，可直接在 Navo 中更新。$/, 'Codex v$1 is available and can be updated directly in Navo.'],
+  [/^后台服务连接中断：(.+)$/, 'Background service disconnected: $1'], [/^检测 (\d+) \/ (\d+)$/, 'Testing $1 / $2'],
+  [/^检查完成：(\d+) 个账号需要处理。$/, 'Check complete: $1 accounts need attention.'],
+  [/^将为 (\d+) 个账号各发送一次真实 Codex 请求，会消耗额度。继续吗？$/, 'Send one real Codex request for each of $1 accounts? This consumes quota.'],
+  [/^模型默认（(.+)）$/, 'Model default ($1)'], [/^内置 Mihomo (.+) · 随应用更新$/, 'Built-in Mihomo $1 · updated with the app'],
+  [/^请求失败（(.+)）$/, 'Request failed ($1)'], [/^上次唤醒失败：(.+)$/, 'Last wake failed: $1'],
+  [/^输入 (.+) · 缓存率 (.+) · 输出 (.+)$/, 'Input $1 · cache rate $2 · output $3'],
+  [/^为 (.+) 选择独立线路。$/, 'Choose an independent route for $1.'],
+  [/^为 (.+) 选择账号池统一线路。绑定到该 Key 的账号发起 API 请求时都会使用这条线路。$/, 'Choose one account-pool route for $1. Accounts linked to this key use it for API requests.'],
+  [/^已导入 (\d+) 个临时账号（可续期 (\d+)，限时 (\d+)）$/, 'Imported $1 temporary accounts ($2 renewable, $3 time-limited)'],
+  [/^下载 (\d+)%$/, 'Download $1%'], [/^正在下载 OpenAI 官方 Codex 安装包… (\d+)%$/, 'Downloading the official OpenAI Codex installer… $1%'],
+  [/^余额 (.+)$/, 'Balance $1'], [/^Codex 更新失败：(.+)$/, 'Codex update failed: $1'], [/^Codex 默认（当前 (.+)）$/, 'Codex default (current: $1)'],
+  [/^Codex 授权已导入；网页会话验证失败，需要重新登录网页端：(.+)$/, 'Codex authorization imported; web-session verification failed and requires sign-in: $1'],
+  [/^Codex 已更新到 v(.+)。$/, 'Codex updated to v$1.'], [/^OpenAI 已公布 Codex v(.+)，官方安装包仍在分发中，请稍后重新检查。$/, 'OpenAI announced Codex v$1, but the official installer is still rolling out. Check again later.'],
+  [/^v(.+) 可更新$/, 'v$1 available'],
+  [/^账号顺序：(.+)$/, 'Account order: $1'], [/^请求 (.+) · Token (.+)$/, 'Requests $1 · Tokens $2'],
+  [/^仅用于 API 反代，将于 (.+) 到期$/, 'Used only for API relay; expires at $1'],
 ];
 function translateText(value) {
   const trimmed = String(value || '').trim();
@@ -322,10 +500,17 @@ const translationObserver = new MutationObserver((records) => {
   if (navoUsesChinese()) return;
   for (const record of records) {
     if (record.type === 'characterData') translateUi(record.target);
+    else if (record.type === 'attributes') translateUi(record.target);
     else for (const node of record.addedNodes) translateUi(node);
   }
 });
-translationObserver.observe(document.documentElement, { childList: true, characterData: true, subtree: true });
+translationObserver.observe(document.documentElement, {
+  childList: true,
+  characterData: true,
+  attributes: true,
+  attributeFilter: ['title', 'aria-label', 'placeholder'],
+  subtree: true,
+});
 queueMicrotask(() => translateUi());
 
 const sidebarStorageKey = 'codex-navo-sidebar-collapsed';
@@ -369,6 +554,10 @@ let applicationUpdate = {
   percent: 0,
   releaseNotes: '',
   error: '',
+};
+let codexDesktopUpdate = {
+  status: 'idle', installed: false, version: '', latestVersion: '', updateAvailable: false,
+  packageReady: false, percent: 0, phase: '', changelog: [], changelogUrl: '', error: '',
 };
 
 function renderApplicationUpdate() {
@@ -457,6 +646,10 @@ async function initializeApplicationUpdater() {
     window.codexUpdater.onState((nextState) => {
       applicationUpdate = nextState;
       renderApplicationUpdate();
+    });
+    window.codexUpdater.onCodexState?.((nextState) => {
+      codexDesktopUpdate = nextState;
+      renderCodexDesktopUpdate();
     });
   } catch {
     elements.updateChip.hidden = true;
@@ -622,11 +815,42 @@ function apiUsageInSelectedRange(usage = {}) {
   return true;
 }
 
+function mergeUsageRecords(records = []) {
+  const merged = {};
+  for (const usage of records) {
+    for (const field of ['requests', 'inputTokens', 'cachedInputTokens', 'cacheWriteInputTokens', 'outputTokens', 'reasoningOutputTokens', 'estimatedCostUsd', 'pricedRequests', 'unpricedRequests']) {
+      merged[field] = Number(merged[field] || 0) + Number(usage?.[field] || 0);
+    }
+    merged.estimatedCostApproximate = merged.estimatedCostApproximate === true || usage?.estimatedCostApproximate === true;
+    if (!merged.lastUsedAt || Date.parse(usage?.lastUsedAt || '') > Date.parse(merged.lastUsedAt)) merged.lastUsedAt = usage?.lastUsedAt || merged.lastUsedAt;
+  }
+  merged.totalTokens = Number(merged.inputTokens || 0) + Number(merged.outputTokens || 0);
+  return merged;
+}
+
+function apiUsageInSelectedRangeForKey(key = {}) {
+  if (state.usageRange === 'all') return key.usage || {};
+  const daily = Array.isArray(key.dailyUsage) ? key.dailyUsage : [];
+  if (!daily.length) return {};
+  const now = new Date();
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const start = state.usageRange === 'today' ? startToday
+    : state.usageRange === 'yesterday' ? startToday - 86_400_000
+      : state.usageRange === '7d' ? startToday - 6 * 86_400_000
+        : startToday - 29 * 86_400_000;
+  const end = state.usageRange === 'yesterday' ? startToday : Number.POSITIVE_INFINITY;
+  return mergeUsageRecords(daily
+    .filter((item) => {
+      const timestamp = Date.parse(`${item?.date || ''}T00:00:00`);
+      return Number.isFinite(timestamp) && timestamp >= start && timestamp < end;
+    })
+    .map((item) => item.usage || {}));
+}
+
 function mergedLocalUsageTotals(localTotals = {}) {
   const merged = { ...localTotals };
   for (const key of state.apiService?.keys || []) {
-    const usage = key.usage || {};
-    if (!apiUsageInSelectedRange(usage)) continue;
+    const usage = apiUsageInSelectedRangeForKey(key);
     merged.requests = Number(merged.requests || 0) + Number(usage.requests || 0);
     merged.inputTokens = Number(merged.inputTokens || 0) + Number(usage.inputTokens || 0);
     merged.cachedInputTokens = Number(merged.cachedInputTokens || 0) + Number(usage.cachedInputTokens || 0);
@@ -912,7 +1136,7 @@ async function openCodexLaunchDialog() {
     form.method = 'dialog';
     const projectMarkup = catalog.projects.map((project) => `
       <section class="launch-project collapsed" data-launch-project-section="${escapeHtml(project.id)}">
-        <div class="launch-project-head"><label><input type="checkbox" data-launch-project value="${escapeHtml(project.id)}" checked><span><strong>${escapeHtml(project.label)}</strong><small>${project.threads.length} 个会话${project.roots?.[0] ? ` · ${escapeHtml(project.roots[0])}` : ''}</small></span></label><div class="launch-project-actions"><button type="button" data-launch-only="${escapeHtml(project.id)}">仅选此项目</button><button type="button" data-launch-toggle="${escapeHtml(project.id)}" aria-expanded="false" aria-label="展开项目会话"><span>›</span></button></div></div>
+        <div class="launch-project-head"><label><input type="checkbox" data-launch-project value="${escapeHtml(project.id)}" checked><span><strong>${escapeHtml(project.label)}</strong><small>${project.threads.length} 个会话${project.roots?.[0] ? ` · ${escapeHtml(project.roots[0])}` : ''}</small></span></label><div class="launch-project-actions"><button type="button" data-launch-only="${escapeHtml(project.id)}">仅选此项目</button><button type="button" data-launch-toggle="${escapeHtml(project.id)}" aria-expanded="false" aria-label="展开项目会话"><span class="fold-icon" aria-hidden="true"><span class="ui-chevron"></span></span></button></div></div>
         <div class="launch-thread-list">${project.threads.map((thread) => `
           <label class="launch-thread"><input type="checkbox" data-launch-thread data-project-id="${escapeHtml(project.id)}" value="${escapeHtml(thread.id)}" checked><span><strong>${escapeHtml(thread.title)}</strong><small>${escapeHtml(thread.cwd || '本地会话')}</small></span><em class="${thread.oversized ? 'oversized' : ''}">${formatLaunchSize(thread.sizeBytes)}</em></label>
         `).join('') || '<p class="launch-empty">该项目目前没有本地会话</p>'}</div>
@@ -1089,7 +1313,7 @@ function mountAccountPoolPicker({ form, fieldName = 'accountIds', accounts = [],
     const section = document.createElement('section');
     section.className = 'api-account-group';
     section.dataset.accountPickerGroup = group.kind;
-    section.innerHTML = `<button class="api-account-group-head" type="button" aria-expanded="true"><span><strong>${group.label}</strong><small>${group.accounts.length} 个可用账号</small></span><i>−</i></button><div class="api-account-options"></div>`;
+    section.innerHTML = `<button class="api-account-group-head" type="button" aria-expanded="true"><span><strong>${group.label}</strong><small>${group.accounts.length} 个可用账号</small></span><span class="fold-icon" aria-hidden="true"><span class="ui-chevron"></span></span></button><div class="api-account-options"></div>`;
     const options = section.querySelector('.api-account-options');
     for (const account of group.accounts) {
       const row = document.createElement('div');
@@ -1106,7 +1330,6 @@ function mountAccountPoolPicker({ form, fieldName = 'accountIds', accounts = [],
     section.querySelector('.api-account-group-head').addEventListener('click', (event) => {
       const collapsed = section.classList.toggle('collapsed');
       event.currentTarget.setAttribute('aria-expanded', String(!collapsed));
-      event.currentTarget.querySelector('i').textContent = collapsed ? '＋' : '−';
     });
     groupsRoot.appendChild(section);
   }
@@ -1214,7 +1437,9 @@ function renderProtocolDialogProgress() {
     ? '网页登录凭证与 Codex 授权已经写入独立账号环境。'
     : failed
       ? (login?.error || '登录进程已经结束，可以重新发起。')
-      : login?.status === 'finalizing'
+      : login?.status === 'web-login'
+        ? (login.promptHint || '请先登录 ChatGPT 网页端，登录成功后将自动继续 Codex 授权')
+        : login?.status === 'finalizing'
         ? (login.promptHint || '正在校验并写入 Codex 登录凭证。')
         : login?.promptKind
           ? '请在下方完成当前验证步骤，内容只传给本次登录进程。'
@@ -1356,7 +1581,7 @@ function renderSessions() {
       }
       const collapsed = state.sessionCollapsed.has(group.key);
       return `<section class="session-project-group${collapsed ? ' collapsed' : ''}" data-session-group="${escapeHtml(group.key)}">
-    <button class="session-project-head" type="button" data-session-project-toggle aria-expanded="${!collapsed}"><span class="session-project-icon" aria-hidden="true">⌂</span><span class="session-project-copy"><strong>${escapeHtml(group.label)}</strong><small>${escapeHtml(group.cwd || '未归类项目')}</small></span><em>${group.tasks.length} 个会话</em><i>⌃</i></button>
+    <button class="session-project-head" type="button" data-session-project-toggle aria-expanded="${!collapsed}"><span class="session-project-icon" aria-hidden="true">⌂</span><span class="session-project-copy"><strong>${escapeHtml(group.label)}</strong><small>${escapeHtml(group.cwd || '未归类项目')}</small></span><em>${group.tasks.length} 个会话</em><span class="fold-icon" aria-hidden="true"><span class="ui-chevron"></span></span></button>
     <div class="session-project-rows">${group.tasks.map((task) => `
     <article class="session-row" data-session-id="${escapeHtml(task.id)}">
       <span class="session-thread-line" aria-hidden="true"><i></i></span><div class="session-title"><strong title="${escapeHtml(task.threadName || '未命名会话')}">${escapeHtml(task.threadName || '未命名会话')}</strong><small>${escapeHtml(task.originator || 'Codex')} · ${sessionRelativeTime(task.lastUpdatedAt)}</small></div>
@@ -1460,13 +1685,17 @@ async function presentNotification(item) {
 }
 
 async function pollNotificationEvents() {
+  if (state.notificationPolling) return;
+  state.notificationPolling = true;
   try {
     const events = await api(`/api/notification-events?after=${state.notificationEventId}`);
     for (const item of events) {
+      if (Number(item.id || 0) <= state.notificationEventId) continue;
       state.notificationEventId = Math.max(state.notificationEventId, Number(item.id || 0));
       await presentNotification(item);
     }
   } catch {}
+  finally { state.notificationPolling = false; }
 }
 
 function renderHealthCenter() {
@@ -1590,10 +1819,10 @@ function renderApiAccountCards() {
     const backing = key.backingAccounts || [];
     const apiProxyEnabled = key.network?.mode === 'proxy';
     return `<article class="account-card api-virtual-card${active ? ' current' : ''}${usageExpanded ? ' usage-expanded' : ''}" data-id="api-key:${key.id}" aria-expanded="${usageExpanded}">
-      <div class="account-overview"><div class="account-identity"><div class="identity-title"><h3>${escapeHtml(key.name || 'Codex Navo API')}</h3></div><div class="identity-badges"><span class="plan-badge">API</span><span class="balance-badge">${backing.length} 个底层账号</span>${apiProxyEnabled ? `<span class="network-badge">代理 · ${escapeHtml(key.network.nodeName || '')}</span>` : ''}</div><p class="account-secondary">${escapeHtml(key.prefix || '')}</p></div></div>
+      <div class="account-overview"><div class="account-identity"><div class="identity-title"><h3>${escapeHtml(key.name || 'Codex Navo API')}</h3></div><div class="identity-badges"><span class="plan-badge">API</span><span class="balance-badge">${backing.length} 个底层账号</span>${apiProxyEnabled ? `<span class="network-badge">代理 · ${escapeHtml(key.network.displayName || key.network.nodeName || '')}</span>` : ''}</div><p class="account-secondary">${escapeHtml(key.prefix || '')}</p></div></div>
       <div class="quota-panel"><div class="quota-window ${remaining >= 70 ? 'healthy' : remaining >= 30 ? 'warning' : 'critical'}"><div class="quota-line"><span>账号池可用额度</span><strong>${remaining}%</strong></div><progress class="quota-track" value="${remaining}" max="100">${remaining}%</progress><div class="quota-reset">按 ${backing.length} 个绑定账号的总额度平均计算</div></div></div>
       <div class="account-actions"><button class="action-primary ${active ? 'action-exit' : 'action-codex'}" data-action="api-codex-${active ? 'stop' : 'launch'}">${active ? '退出 Codex' : '登录 Codex'}</button><button class="action-primary" data-action="api-route">账号与顺序</button><button class="icon-action network-action" data-action="api-network" data-active="${apiProxyEnabled}" title="配置 API 账号池代理" aria-label="配置 API 账号池代理"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M3.8 12h16.4M12 3.5c2.2 2.3 3.4 5.2 3.4 8.5S14.2 18.2 12 20.5M12 3.5C9.8 5.8 8.6 8.7 8.6 12s1.2 6.2 3.4 8.5"></path></svg></button><button class="icon-action wake-action" data-action="api-wake" title="唤醒底层账号" aria-label="唤醒底层账号"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.2 2.8 5.8 13h5l-1 8.2L18.2 10h-5z"></path></svg></button><button class="icon-action" data-action="api-refresh" title="刷新额度">↻</button></div>
-      ${usageExpanded ? renderUsageStrip(key.usage || {}) : ''}
+      ${usageExpanded ? renderUsageStrip(apiUsageInSelectedRangeForKey(key)) : ''}
     </article>`;
   }).join('');
 }
@@ -1637,7 +1866,7 @@ function render() {
   const renderAccountCards = (source) => sortedAccounts(activeAccount, source).map((account) => {
     const relayOnly = account.accountKind === 'relay';
     const status = account.enabled === false ? 'disabled' : account.lease || account.codexActive ? 'occupied' : 'free';
-    const codexLoginPending = account.codexLogin && ['starting', 'waiting', 'finalizing'].includes(account.codexLogin.status);
+    const codexLoginPending = account.codexLogin && ['starting', 'waiting', 'finalizing', 'web-login'].includes(account.codexLogin.status);
     const setupSteps = !relayOnly && !account.codexInitialized ? `<div class="setup-steps one-step" aria-label="账号入池进度">
       <span class="active"><i>1</i>${account.setupStage === 'device-auth' ? '设备代码授权' : '登录并授权'}</span>
     </div>` : '';
@@ -1653,7 +1882,9 @@ function render() {
               : '<strong>登录与 Codex 授权正在后台运行</strong><small>需要邮箱验证码、密码、两步验证、手机号或短信验证码时，会在这里显示输入框。</small>'
         : account.codexLogin.flow === 'device'
           ? `<strong>请在独立浏览器中完成设备代码授权</strong><span>设备验证码</span><code>${escapeHtml(account.codexLogin.userCode || '正在获取…')}</code><small>备用流程需要先在 ChatGPT 设置中开启设备代码授权。</small>`
-          : `<strong>请在独立浏览器中完成登录与授权</strong><small>这是一个连续的官方流程，完成后会自动入池，无需开启设备代码授权。</small>`}
+          : account.codexLogin.status === 'web-login'
+            ? `<strong>${escapeHtml(account.codexLogin.promptHint || '请先登录 ChatGPT 网页端')}</strong><small>只需登录一次；检测到网页会话后会自动继续官方 Codex 授权。</small>`
+            : `<strong>请在独立浏览器中完成登录与授权</strong><small>这是一个连续的官方流程，完成后会自动入池，无需开启设备代码授权。</small>`}
     </div>` : account.webLoginComplete && !account.codexInitialized ? `<div class="codex-login-panel setup-ready">
       ${setupSteps}
       <strong>网页端已登录并入池</strong>
@@ -1687,7 +1918,7 @@ function render() {
       ? `<span class="health-badge health-${escapeHtml(health.status)}" title="${escapeHtml(health.detail || health.label)}">${escapeHtml(health.label || '待检查')}</span>`
       : '';
     const networkBadge = account.network?.mode === 'proxy'
-      ? `<span class="network-badge" title="${escapeHtml(account.network.label)}">代理 · ${escapeHtml(account.network.nodeName)}</span>`
+      ? `<span class="network-badge" title="${escapeHtml(account.network.label)}">代理 · ${escapeHtml(account.network.displayName || account.network.nodeName)}</span>`
       : '';
     let codexAction;
     if (relayOnly) {
@@ -1738,7 +1969,7 @@ function render() {
   const regularCards = renderAccountCards(regularAccounts);
   const relayCards = renderAccountCards(relayAccounts);
   const apiCards = renderApiAccountCards();
-  const groupHead = (kind, label, count) => `<button class="account-group-head" type="button" data-account-group="${kind}" aria-expanded="${!state.accountGroups[kind]}"><span>${escapeHtml(label)}</span><small>${count}</small><i>${state.accountGroups[kind] ? '＋' : '−'}</i></button>`;
+  const groupHead = (kind, label, count) => `<button class="account-group-head" type="button" data-account-group="${kind}" aria-expanded="${!state.accountGroups[kind]}"><span>${escapeHtml(label)}</span><small>${count}</small><span class="fold-icon" aria-hidden="true"><span class="ui-chevron"></span></span></button>`;
   elements.accounts.innerHTML = `${apiAccountCount ? groupHead('api', 'API Codex', apiAccountCount) : ''}${state.accountGroups.api ? '' : apiCards}${relayAccounts.length ? groupHead('relay', '临时账号', relayAccounts.length) : ''}${state.accountGroups.relay ? '' : relayCards}${regularAccounts.length ? groupHead('regular', '普通账号', regularAccounts.length) : ''}${state.accountGroups.regular ? '' : regularCards}`;
   setLaunchControlsDisabled(state.launchProgress?.active === true);
 }
@@ -2375,26 +2606,34 @@ function showNetworkResult(message, error = false) {
 }
 
 function nodeTestText(node) {
-  if (!node.status || node.delay == null) return node.status === 'connection-failed' ? '连接失败' : '未检测';
   const labels = {
     available: '可用',
-    'unsupported-region': '地区不支持',
+    'unsupported-region': 'ChatGPT 不支持',
+    'challenge-required': '可连接（CF 保护）',
+    'cloudflare-protected': '可连接（CF 保护）',
     blocked: '站点拒绝',
     'rate-limited': '访问限流',
+    'connection-failed': '连接失败',
+    'tls-failed': 'TLS 中断',
+    checking: '检测中…',
   };
-  return `${node.delay} ms · ${labels[node.status] || '已检测'}`;
+  return labels[node.status] || (node.status ? '已检测' : '未检测');
 }
 
 function nodeRouteText(node) {
   const states = {
     available: '可用',
-    'unsupported-region': '地区不支持',
+    'unsupported-region': 'ChatGPT 不支持',
+    'challenge-required': '可连接（CF 保护）',
+    'cloudflare-protected': '可连接（CF 保护）',
     blocked: '站点拒绝',
     'rate-limited': '访问限流',
     'connection-failed': '连接失败',
+    'tls-failed': 'TLS 中断',
     checking: '检测中…',
   };
-  if (node.delay != null) return `${node.delay} ms · ${states[node.status] || '已检测'}`;
+  if (node.connectDelay != null) return `连接 ${node.connectDelay} ms · ${states[node.status] || 'ChatGPT 未完成'}`;
+  if (node.delay != null) return `连接 ${node.delay} ms · ${states[node.status] || '已检测'}`;
   return states[node.status] || '未检测';
 }
 
@@ -2420,9 +2659,9 @@ function renderNetworkSources() {
           <div><strong>${escapeHtml(selected.name)}</strong><small title="${escapeHtml(selected.location)}">${escapeHtml(selected.location)}${selected.error ? ` · ${escapeHtml(selected.error)}` : ''}</small></div>
           <div class="network-source-actions"><button class="test-all-source" type="button" data-network-action="test-all"${selected.testing ? ' disabled aria-busy="true"' : ''}>${selected.testing ? `检测 ${selected.testing.completed} / ${selected.testing.total}` : '检测全部'}</button><button type="button" data-network-action="refresh">${selected.kind === 'subscription' ? '刷新订阅' : '重新识别'}</button><button class="remove-source" type="button" data-network-action="remove">删除</button></div>
         </header>
-        <div class="network-node-columns"><span>节点</span><span>协议</span><span>ChatGPT 检测</span><span></span></div>
+        <div class="network-node-columns"><span>节点</span><span>协议</span><span>连接延迟</span><span>ChatGPT 检测</span><span></span></div>
         <div class="network-node-list">${selected.nodes.length ? selected.nodes.map((node) => `<div class="network-node" data-node-name="${escapeHtml(node.name)}">
-          <strong title="${escapeHtml(node.name)}">${escapeHtml(node.name)}</strong><span class="node-protocol">${escapeHtml(node.protocol)}</span><span class="node-delay ${escapeHtml(node.status || '')}">${escapeHtml(nodeTestText(node))}</span><button type="button" data-network-action="test">检测</button>
+          <strong title="${escapeHtml(node.name)}">${escapeHtml(node.name)}</strong><span class="node-protocol">${escapeHtml(node.protocol)}</span><span class="node-connect">${node.connectDelay == null ? (node.status === 'checking' ? '检测中…' : '—') : `${node.connectDelay} ms`}</span><span class="node-delay ${escapeHtml(node.status || '')}">${escapeHtml(nodeTestText(node))}</span><button type="button" data-network-action="test">检测</button>
         </div>`).join('') : `<div class="network-empty"><strong>${selected.error ? '线路加载失败' : '还没有读取节点'}</strong><span>${selected.error ? escapeHtml(selected.error) : '点击右上角刷新，读取这个来源的节点列表。'}</span></div>`}</div>
       </section>
     </div>`
@@ -2500,7 +2739,7 @@ elements.networkSourceList.addEventListener('click', async (event) => {
       const nodeName = button.closest('[data-node-name]').dataset.nodeName;
       const result = await api(`/api/network/sources/${sourceId}/test`, { method: 'POST', body: JSON.stringify({ operator: operator(), nodeName }) });
       state.networkSettings = result.networkSettings;
-      showNetworkResult(`${result.message}${result.latencyMs == null ? '' : ` · ${result.latencyMs} ms`}`, !result.ok);
+      showNetworkResult(`${result.message}${result.connectLatencyMs == null ? '' : ` · 连接 ${result.connectLatencyMs} ms`}`, !result.ok);
     } else if (action === 'test-all') {
       button.textContent = '检测中…';
       let polling = false;
@@ -2515,7 +2754,7 @@ elements.networkSourceList.addEventListener('click', async (event) => {
       try {
         const result = await api(`/api/network/sources/${sourceId}/test-all`, { method: 'POST', body: JSON.stringify({ operator: operator() }) });
         state.networkSettings = result.networkSettings;
-        showNetworkResult(`检测完成：可用 ${result.available}，地区不支持 ${result.unsupported}，失败 ${result.failed}`);
+        showNetworkResult(`检测完成：可用 ${result.available}，ChatGPT 不支持 ${result.unsupported}，失败 ${result.failed}`);
       } finally {
         clearInterval(progressTimer);
       }
@@ -2533,7 +2772,42 @@ function accountRouteValue(sourceId, nodeName) {
   return `${sourceId}|${encodeURIComponent(nodeName)}`;
 }
 
+function accountRouteRecord(value) {
+  if (!value || value === 'direct') return { value: 'direct', label: '直连', detail: '不使用代理' };
+  const [sourceId, encodedNode = ''] = value.split('|');
+  const nodeName = decodeURIComponent(encodedNode);
+  const source = (state.networkSettings?.sources || []).find((item) => item.id === sourceId);
+  const node = source?.nodes?.find((item) => item.name === nodeName);
+  if (!source || !node) return { value: 'direct', label: '直连', detail: '不使用代理' };
+  return {
+    value,
+    label: source.kind !== 'subscription' && source.nodes.length === 1 ? source.name : node.name,
+    detail: `${node.protocol} · ${nodeRouteText(node)}`,
+  };
+}
+
 function populateAccountRouteSelect(select, selectedValue = 'direct') {
+  if (select === elements.accountNetworkRoute) {
+    const sources = state.networkSettings?.sources || [];
+    const standalone = sources.filter((source) => source.kind !== 'subscription' && source.nodes?.length === 1);
+    const localGroups = sources.filter((source) => source.kind !== 'subscription' && source.nodes?.length > 1);
+    const subscriptions = sources.filter((source) => source.kind === 'subscription' && source.nodes?.length);
+    const routeButton = (source, node) => {
+      const value = accountRouteValue(source.id, node.name);
+      const label = source.kind !== 'subscription' && source.nodes.length === 1 ? source.name : node.name;
+      return `<button type="button" class="account-route-option${value === selectedValue ? ' selected' : ''}" data-route-value="${escapeHtml(value)}"><span>${escapeHtml(label)}</span><small>${escapeHtml(node.protocol)} · ${escapeHtml(nodeRouteText(node))}</small><i>✓</i></button>`;
+    };
+    const standaloneMarkup = standalone.length
+      ? `<section class="account-route-section"><div class="account-route-section-title"><span>单独线路</span><b>${standalone.length}</b></div>${standalone.flatMap((source) => source.nodes.slice(0, 1).map((node) => routeButton(source, node))).join('')}</section>`
+      : '';
+    const localGroupMarkup = localGroups.map((source) => `<details class="account-route-group" open><summary><span>${escapeHtml(source.name)}</span><b>${source.nodes.length} 个节点</b><span class="fold-icon" aria-hidden="true"><span class="ui-chevron"></span></span></summary><div>${source.nodes.map((node) => routeButton(source, node)).join('')}</div></details>`).join('');
+    const subscriptionMarkup = subscriptions.map((source) => `<details class="account-route-group"><summary><span>${escapeHtml(source.name)}</span><b>${source.nodes.length} 个节点</b><span class="fold-icon" aria-hidden="true"><span class="ui-chevron"></span></span></summary><div>${source.nodes.map((node) => routeButton(source, node)).join('')}</div></details>`).join('');
+    elements.accountNetworkRouteMenu.innerHTML = `<button type="button" class="account-route-option account-route-direct${selectedValue === 'direct' ? ' selected' : ''}" data-route-value="direct"><span>直连</span><small>不使用代理</small><i>✓</i></button>${standaloneMarkup}${localGroupMarkup ? `<section class="account-route-section"><div class="account-route-section-title"><span>节点组</span><b>${localGroups.length}</b></div>${localGroupMarkup}</section>` : ''}${subscriptionMarkup ? `<section class="account-route-section account-route-subscriptions"><div class="account-route-section-title"><span>机场订阅</span><b>${subscriptions.length}</b></div>${subscriptionMarkup}</section>` : ''}`;
+    const record = accountRouteRecord(selectedValue);
+    select.value = record.value;
+    elements.accountNetworkRouteTrigger.querySelector('span').textContent = record.value === 'direct' ? record.label : `${record.label} · ${record.detail}`;
+    return;
+  }
   select.replaceChildren(new Option('直连', 'direct'));
   for (const source of state.networkSettings?.sources || []) {
     if (!source.nodes?.length) continue;
@@ -2550,11 +2824,11 @@ function populateAccountRouteSelect(select, selectedValue = 'direct') {
 
 function syncAccountNetworkPreview() {
   const value = elements.accountNetworkRoute.value;
-  const option = elements.accountNetworkRoute.selectedOptions[0];
+  const record = accountRouteRecord(value);
   const direct = value === 'direct';
   elements.testAccountNetwork.disabled = direct;
   elements.accountNetworkPreview.classList.toggle('active', !direct);
-  elements.accountNetworkPreview.querySelector('strong').textContent = direct ? '直连' : option.textContent;
+  elements.accountNetworkPreview.querySelector('strong').textContent = direct ? '直连' : `${record.label} · ${record.detail}`;
   const apiPool = state.accountNetworkId.startsWith('api-key:');
   elements.accountNetworkPreview.querySelector('small').textContent = direct
     ? (apiPool ? '该 API Key 的账号池请求全部直连' : '网页端和 Codex 均不使用代理')
@@ -2564,14 +2838,15 @@ function syncAccountNetworkPreview() {
 function openAccountNetwork(account) {
   state.accountNetworkId = account.id;
   elements.accountNetworkCopy.textContent = `为 ${account.label} 选择独立线路。`;
-  populateAccountRouteSelect(elements.accountNetworkRoute);
   const proxyNodeCount = (state.networkSettings?.sources || []).reduce((total, source) => total + (source.nodes?.length || 0), 0);
-  elements.accountNetworkRoute.value = account.network?.mode === 'proxy'
+  const selectedRoute = account.network?.mode === 'proxy'
     ? accountRouteValue(account.network.sourceId, account.network.nodeName)
     : 'direct';
-  if (!elements.accountNetworkRoute.value) elements.accountNetworkRoute.value = 'direct';
+  populateAccountRouteSelect(elements.accountNetworkRoute, selectedRoute);
+  elements.accountNetworkRouteMenu.hidden = false;
+  elements.accountNetworkRouteTrigger.setAttribute('aria-expanded', 'true');
   const noNodes = proxyNodeCount === 0;
-  elements.accountNetworkRoute.closest('label').hidden = noNodes;
+  elements.accountNetworkRouteField.hidden = noNodes;
   elements.accountNetworkPreview.hidden = noNodes;
   elements.accountNetworkEmpty.hidden = !noNodes;
   elements.saveAccountNetwork.hidden = noNodes;
@@ -2583,14 +2858,15 @@ function openAccountNetwork(account) {
 function openApiKeyNetwork(key) {
   state.accountNetworkId = `api-key:${key.id}`;
   elements.accountNetworkCopy.textContent = `为 ${key.name} 选择账号池统一线路。绑定到该 Key 的账号发起 API 请求时都会使用这条线路。`;
-  populateAccountRouteSelect(elements.accountNetworkRoute);
   const proxyNodeCount = (state.networkSettings?.sources || []).reduce((total, source) => total + (source.nodes?.length || 0), 0);
-  elements.accountNetworkRoute.value = key.network?.mode === 'proxy'
+  const selectedRoute = key.network?.mode === 'proxy'
     ? accountRouteValue(key.network.sourceId, key.network.nodeName)
     : 'direct';
-  if (!elements.accountNetworkRoute.value) elements.accountNetworkRoute.value = 'direct';
+  populateAccountRouteSelect(elements.accountNetworkRoute, selectedRoute);
+  elements.accountNetworkRouteMenu.hidden = false;
+  elements.accountNetworkRouteTrigger.setAttribute('aria-expanded', 'true');
   const noNodes = proxyNodeCount === 0;
-  elements.accountNetworkRoute.closest('label').hidden = noNodes;
+  elements.accountNetworkRouteField.hidden = noNodes;
   elements.accountNetworkPreview.hidden = noNodes;
   elements.accountNetworkEmpty.hidden = !noNodes;
   elements.saveAccountNetwork.hidden = noNodes;
@@ -2599,7 +2875,20 @@ function openApiKeyNetwork(key) {
   elements.accountNetworkDialog.showModal();
 }
 
-elements.accountNetworkRoute.addEventListener('change', syncAccountNetworkPreview);
+elements.accountNetworkRouteTrigger.addEventListener('click', () => {
+  const willOpen = elements.accountNetworkRouteMenu.hidden;
+  elements.accountNetworkRouteMenu.hidden = !willOpen;
+  elements.accountNetworkRouteTrigger.setAttribute('aria-expanded', String(willOpen));
+});
+elements.accountNetworkRouteMenu.addEventListener('click', (event) => {
+  const option = event.target.closest('[data-route-value]');
+  if (!option) return;
+  const value = option.dataset.routeValue;
+  populateAccountRouteSelect(elements.accountNetworkRoute, value);
+  elements.accountNetworkRouteMenu.hidden = false;
+  elements.accountNetworkRouteTrigger.setAttribute('aria-expanded', 'true');
+  syncAccountNetworkPreview();
+});
 elements.testAccountNetwork.addEventListener('click', async () => {
   const route = elements.accountNetworkRoute.value;
   if (!route || route === 'direct') return;
@@ -2619,7 +2908,7 @@ elements.testAccountNetwork.addEventListener('click', async () => {
     populateAccountRouteSelect(elements.accountNetworkRoute, route);
     syncAccountNetworkPreview();
     elements.accountNetworkResult.classList.toggle('error', !result.ok);
-    elements.accountNetworkResult.textContent = `${result.message}${result.latencyMs == null ? '' : ` · ${result.latencyMs} ms`}`;
+    elements.accountNetworkResult.textContent = `${result.message}${result.connectLatencyMs == null ? '' : ` · 连接 ${result.connectLatencyMs} ms`}`;
   } catch (error) {
     elements.accountNetworkResult.classList.add('error');
     elements.accountNetworkResult.textContent = error.message;
@@ -2746,41 +3035,106 @@ async function openApplicationSettings() {
   renderApplicationUpdate();
 }
 
+function renderCodexChangelog(info) {
+  const entries = Array.isArray(info.changelog) ? info.changelog : [];
+  const chinese = navoUsesChinese();
+  const visible = chinese ? entries.filter((entry) => entry.zh) : entries;
+  elements.codexReleaseNotes.hidden = visible.length === 0;
+  elements.codexChangelogLink.href = info.changelogUrl || 'https://learn.chatgpt.com/docs/changelog';
+  elements.codexReleaseNotes.querySelector('.codex-release-heading strong').textContent = chinese ? 'OpenAI 官方更新日志' : 'Official OpenAI changelog';
+  elements.codexChangelogLink.textContent = chinese ? '查看完整日志 ↗' : 'View full changelog ↗';
+  elements.codexReleaseList.replaceChildren(...visible.map((entry, index) => {
+    const copy = chinese ? entry.zh : entry.en;
+    const item = document.createElement('details');
+    item.className = 'codex-release-item';
+    item.open = index === 0;
+    const summary = document.createElement('summary');
+    const time = document.createElement('time');
+    time.textContent = entry.date || '';
+    const title = document.createElement('span');
+    title.textContent = copy?.title || '';
+    summary.append(time, title);
+    const body = document.createElement('p');
+    body.textContent = copy?.body || '';
+    item.append(summary, body);
+    return item;
+  }));
+}
+
+function renderCodexDesktopUpdate() {
+  const info = codexDesktopUpdate;
+  const chinese = navoUsesChinese();
+  const busy = ['checking', 'closing', 'downloading', 'verifying', 'installing', 'store-installing'].includes(info.status);
+  const percent = Math.max(0, Math.min(100, Number(info.percent) || 0));
+  elements.codexCurrentVersion.textContent = info.installed
+    ? `v${info.version}${info.updateAvailable && info.latestVersion ? ` → v${info.latestVersion}` : ''}`
+    : info.latestVersion ? (chinese ? '未安装' : 'Not installed') : '—';
+  const copies = chinese ? {
+    idle: '正在读取官方版本信息。',
+    checking: '正在检查 OpenAI 官方版本与安装包状态…',
+    available: info.packageReady
+      ? `发现 Codex v${info.latestVersion}，可直接在 Navo 中更新。`
+      : `OpenAI 已公布 Codex v${info.latestVersion}，官方安装包仍在分发中，请稍后重新检查。`,
+    propagating: `OpenAI 已公布 Codex v${info.latestVersion}，官方安装包仍在分发中，请稍后重新检查。`,
+    closing: '正在关闭 Codex，请稍候…',
+    'store-installing': '正在通过 Windows 官方更新服务下载并安装 Codex，请保持 Navo 运行…',
+    downloading: `正在下载 OpenAI 官方 Codex 安装包… ${percent}%`,
+    verifying: '正在校验包身份、发布者、版本与架构…',
+    installing: '正在通过 Windows 应用部署服务安装 Codex…',
+    completed: `Codex 已更新到 v${info.version || info.latestVersion}。`,
+    current: `当前 Codex v${info.version || info.latestVersion} 已是官方最新版。`,
+    error: `Codex 更新失败：${info.error || '请检查网络后重试。'}`,
+  } : {
+    idle: 'Loading official version information.',
+    checking: 'Checking the official OpenAI version and package availability…',
+    available: info.packageReady
+      ? `Codex v${info.latestVersion} is ready to update directly in Navo.`
+      : `OpenAI has announced Codex v${info.latestVersion}; the official package is still propagating. Check again shortly.`,
+    propagating: `OpenAI has announced Codex v${info.latestVersion}; the official package is still propagating. Check again shortly.`,
+    closing: 'Closing Codex…',
+    'store-installing': 'Downloading and installing Codex through the official Windows update service. Keep Navo running…',
+    downloading: `Downloading the official OpenAI Codex package… ${percent}%`,
+    verifying: 'Verifying package identity, publisher, version, and architecture…',
+    installing: 'Installing Codex through Windows App Deployment…',
+    completed: `Codex was updated to v${info.version || info.latestVersion}.`,
+    current: `Codex v${info.version || info.latestVersion} is up to date.`,
+    error: `Codex update failed: ${info.error || 'Check the network and try again.'}`,
+  };
+  elements.codexUpdateCopy.textContent = copies[info.status] || copies.idle;
+  elements.codexUpdateProgress.hidden = !busy;
+  elements.codexUpdateProgress.classList.toggle('indeterminate', info.status === 'store-installing');
+  elements.codexUpdateProgressBar.style.width = info.status === 'store-installing' ? '32%' : `${percent}%`;
+  elements.codexUpdateProgressLabel.textContent = info.status === 'store-installing' ? '…' : `${percent}%`;
+  elements.codexUpdateAction.disabled = busy;
+  if (busy) elements.codexUpdateAction.textContent = chinese ? '正在处理…' : 'Working…';
+  else if (info.updateAvailable && info.packageReady) elements.codexUpdateAction.textContent = info.installed
+    ? (chinese ? '立即更新' : 'Update now')
+    : (chinese ? '立即安装' : 'Install now');
+  else elements.codexUpdateAction.textContent = chinese ? '重新检查' : 'Check again';
+  renderCodexChangelog(info);
+}
+
 async function refreshCodexUpdateState() {
-  if (!window.codexUpdater?.getCodexState) {
-    elements.codexUpdateCopy.textContent = '请在 Microsoft Store 中检查 Codex 更新。';
-    return;
-  }
-  elements.codexUpdateAction.disabled = true;
-  elements.codexUpdateCopy.textContent = '正在读取已安装版本…';
+  if (!window.codexUpdater?.getCodexState) return;
+  codexDesktopUpdate = { ...codexDesktopUpdate, status: 'checking', phase: 'checking', percent: 0, error: '' };
+  renderCodexDesktopUpdate();
   try {
-    const info = await window.codexUpdater.getCodexState();
-    elements.codexCurrentVersion.textContent = info.installed ? `v${info.version}` : '未安装';
-    elements.codexUpdateCopy.textContent = info.installed
-      ? '已读取本机安装版本。点击“检查并更新”，Navo 会在后台完成官方版本更新。'
-      : '本机没有检测到 Codex 桌面应用，点击“检查并更新”可直接安装。';
+    codexDesktopUpdate = await window.codexUpdater.getCodexState();
   } catch (error) {
-    elements.codexUpdateCopy.textContent = error.message || '读取 Codex 版本失败。';
-  } finally {
-    elements.codexUpdateAction.disabled = false;
+    codexDesktopUpdate = { ...codexDesktopUpdate, status: 'error', error: error.message || String(error) };
   }
+  renderCodexDesktopUpdate();
 }
 
 async function installCodexUpdate() {
   if (!window.codexUpdater?.installCodexUpdate) return refreshCodexUpdateState();
-  elements.codexUpdateAction.disabled = true;
-  elements.codexUpdateAction.textContent = '正在更新…';
-  elements.codexUpdateCopy.textContent = '正在通过 Windows 包管理器检查并安装 Codex 更新，请不要关闭 Navo。';
+  if (!(codexDesktopUpdate.updateAvailable && codexDesktopUpdate.packageReady)) return refreshCodexUpdateState();
   try {
-    const info = await window.codexUpdater.installCodexUpdate();
-    elements.codexCurrentVersion.textContent = info.version ? `v${info.version}` : '未安装';
-    elements.codexUpdateCopy.textContent = info.message || (info.updated ? 'Codex 已更新到最新版。' : 'Codex 已是最新版。');
+    codexDesktopUpdate = await window.codexUpdater.installCodexUpdate({ locale: state.appLocale });
   } catch (error) {
-    elements.codexUpdateCopy.textContent = error.message || 'Codex 更新失败，请尝试从 Microsoft Store 更新。';
-  } finally {
-    elements.codexUpdateAction.disabled = false;
-    elements.codexUpdateAction.textContent = '检查并更新';
+    codexDesktopUpdate = { ...codexDesktopUpdate, status: 'error', error: error.message || String(error) };
   }
+  renderCodexDesktopUpdate();
 }
 
 async function performApplicationUpdateAction(button = elements.updatePrimaryAction) {
@@ -2904,18 +3258,71 @@ async function loadLanguageSettings() {
     state.localeCatalog = catalog;
     elements.appLanguageSelect.innerHTML = catalog.languages.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`).join('');
     elements.appLanguageSelect.value = catalog.languages.some((item) => item.id === state.appLocale) ? state.appLocale : catalog.defaultLanguage;
-  elements.languageStatus.textContent = navoUsesChinese() ? '当前使用完整简体中文界面。' : 'Navo is using the English interface. Codex will use the selected language.';
+    renderSettingsPicker(elements.appLanguageSelect, elements.appLanguageMenu);
+    elements.appThemeSelect.value = 'light';
+    elements.languageStatus.textContent = navoUsesChinese() ? '当前使用完整简体中文界面。' : 'Navo is using the English interface. Codex will use the selected language.';
+    elements.appThemeSelect.value = state.appTheme;
+    applyTheme();
   } catch (error) { showToast(error.message, true); }
 }
+
+function closeSettingsPickers(except = null) {
+  document.querySelectorAll('[data-settings-picker]').forEach((picker) => {
+    if (picker === except) return;
+    picker.classList.remove('open');
+    picker.querySelector('.settings-picker-trigger')?.setAttribute('aria-expanded', 'false');
+    const menu = picker.querySelector('.settings-picker-menu');
+    if (menu) menu.hidden = true;
+  });
+}
+
+function renderSettingsPicker(select, menu, selectedValue = select.value) {
+  if (!select || !menu) return;
+  if ([...select.options].some((option) => option.value === selectedValue)) select.value = selectedValue;
+  const picker = menu.closest('[data-settings-picker]');
+  const label = picker.querySelector('[data-settings-picker-label]');
+  label.textContent = select.selectedOptions[0]?.textContent || '';
+  menu.innerHTML = [...select.options].map((option) => `<button type="button" role="option" data-settings-value="${escapeHtml(option.value)}" aria-selected="${option.value === select.value}"><span>${escapeHtml(option.textContent)}</span><i aria-hidden="true">✓</i></button>`).join('');
+}
+
+document.querySelectorAll('[data-settings-picker]').forEach((picker) => {
+  const trigger = picker.querySelector('.settings-picker-trigger');
+  const menu = picker.querySelector('.settings-picker-menu');
+  const select = picker.querySelector('select');
+  trigger.addEventListener('click', () => {
+    const opening = menu.hidden;
+    closeSettingsPickers(opening ? picker : null);
+    menu.hidden = !opening;
+    picker.classList.toggle('open', opening);
+    trigger.setAttribute('aria-expanded', String(opening));
+  });
+  menu.addEventListener('click', (event) => {
+    const option = event.target.closest('[data-settings-value]');
+    if (!option) return;
+    select.value = option.dataset.settingsValue;
+    renderSettingsPicker(select, menu);
+    closeSettingsPickers();
+  });
+});
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('[data-settings-picker]')) closeSettingsPickers();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeSettingsPickers();
+});
 elements.languageForm.addEventListener('submit', (event) => {
   event.preventDefault();
   state.appLocale = elements.appLanguageSelect.value;
   localStorage.setItem(localeStorageKey, state.appLocale);
   document.documentElement.lang = state.appLocale;
+  applyTheme();
   window.codexFloating?.updateLocale?.(state.appLocale);
   elements.languageStatus.textContent = navoUsesChinese() ? '已保存。Navo 与 Codex 默认使用简体中文。' : 'Saved. Navo is using English and Codex will use the selected language.';
   showToast('语言设置已保存');
-  if (!navoUsesChinese()) translateUi();
+  if (!navoUsesChinese()) {
+    translateUi();
+    renderCodexDesktopUpdate();
+  }
   else window.location.reload();
 });
 

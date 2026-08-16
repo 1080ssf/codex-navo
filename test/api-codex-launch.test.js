@@ -55,6 +55,29 @@ test('API Codex validates its assigned proxy route before opening the desktop ap
     launch.indexOf('await prepareApiKeyNetwork') < launch.indexOf('spawnDetached(installation.executable'),
     'proxy preflight must finish before Codex Desktop is spawned',
   );
+  assert.match(launch, /const apiKeyNetwork = await prepareApiKeyNetwork/);
+  assert.match(launch, /--proxy-server=http:\/\/127\.0\.0\.1:\$\{apiKeyNetwork\.mixedPort\}/);
+  assert.match(launch, /--proxy-bypass-list=<local>;localhost;\*\.localhost;127\.0\.0\.1;\[::1\]/);
+});
+
+test('API Codex proxies arbitrary task websites while keeping only local IPC direct', () => {
+  const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
+  const environmentStart = server.indexOf('async function apiKeyTaskEnvironment');
+  const environmentEnd = server.indexOf('async function accountPoolDispatcher', environmentStart);
+  const launchStart = server.indexOf('async function launchApiKeyCodex');
+  const launchEnd = server.indexOf('\n}', launchStart);
+  const environmentSource = server.slice(environmentStart, environmentEnd);
+  const launchSource = server.slice(launchStart, launchEnd + 2);
+  assert.match(environmentSource, /networkManager\.environmentForRuntime/);
+  assert.match(launchSource, /apiKeyTaskEnvironment\(keyId, apiCodexEnvironment\(process\.env, secret\)\)/);
+  assert.doesNotMatch(launchSource, /github\.com|api\.github\.com/);
+  assert.match(launchSource, /--proxy-server=http:\/\/127\.0\.0\.1:/);
+  assert.match(launchSource, /--proxy-bypass-list=<local>;localhost;\*\.localhost;127\.0\.0\.1;\[::1\]/);
+  const backgroundStart = server.indexOf('async function backgroundTaskRuntime');
+  const backgroundEnd = server.indexOf('async function backgroundTaskEnvironment', backgroundStart);
+  const backgroundSource = server.slice(backgroundStart, backgroundEnd);
+  assert.match(backgroundSource, /readActiveApiCodex\(\)/);
+  assert.match(backgroundSource, /apiKeyNetworkId\(activeApi\.keyId\)/);
 });
 
 test('API Codex launch installs temporary API auth while sharing normal project and conversation state', () => {

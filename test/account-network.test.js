@@ -14,6 +14,7 @@ const {
   freeProxyPort,
   PROXY_PORT_END,
   PROXY_PORT_START,
+  unsupportedRegionFromNodeName,
 } = require('../lib/account-network');
 
 test('descriptive proxy text and split SOCKS5 fields are accepted', () => {
@@ -92,15 +93,15 @@ test('公开订阅信息会隐藏查询参数和节点密钥', () => {
   assert.equal(visible.nodes[0].delay, null);
 });
 
-test('公开节点按照可用状态和延迟排序，失败与未检测节点后置', () => {
+test('公开节点按照可用状态和连接延迟排序，失败与未检测节点后置', () => {
   const visible = publicSource({
     id: 'network-sort', kind: 'local', name: '排序测试', format: 'links',
     nodes: [
       { name: '连接失败', protocol: 'VMESS', delay: null, status: 'connection-failed' },
-      { name: '高延迟', protocol: 'VMESS', delay: 920, status: 'available' },
+      { name: '高延迟', protocol: 'VMESS', connectDelay: 320, delay: 920, status: 'available' },
       { name: '未检测', protocol: 'VMESS', delay: null, status: '' },
-      { name: '地区限制', protocol: 'VMESS', delay: 80, status: 'unsupported-region' },
-      { name: '低延迟', protocol: 'VMESS', delay: 105, status: 'available' },
+      { name: '地区限制', protocol: 'VMESS', connectDelay: 30, delay: 80, status: 'unsupported-region' },
+      { name: '低延迟', protocol: 'VMESS', connectDelay: 45, delay: 105, status: 'available' },
     ],
   });
   assert.deepEqual(visible.nodes.map((node) => node.name), [
@@ -113,7 +114,29 @@ test('ChatGPT 测速会区分正常、地区不支持和普通拒绝', () => {
   assert.equal(classifyChatGptResponse('HTTP/1.1 401 Unauthorized\r\n\r\n', 180).status, 'available');
   assert.equal(classifyChatGptResponse('HTTP/1.1 403 Forbidden\r\n\r\n{"error":"unsupported_country"}', 234).status, 'unsupported-region');
   assert.equal(classifyChatGptResponse('HTTP/1.1 403 Forbidden\r\n\r\nAccess denied', 345).status, 'blocked');
+  const challenge = classifyChatGptResponse('HTTP/1.1 403 Forbidden\r\ncf-mitigated: challenge\r\ncontent-type: text/html\r\n\r\nJust a moment', 321);
+  assert.equal(challenge.status, 'cloudflare-protected');
+  assert.equal(challenge.ok, true);
   assert.equal(classifyChatGptResponse('HTTP/1.1 429 Too Many Requests\r\n\r\n', 456).status, 'rate-limited');
+});
+
+test('节点测速只访问 ChatGPT 首页并使用普通 Chrome 标识', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'lib', 'account-network.js'), 'utf8');
+  const probe = source.slice(source.indexOf('function probeChatGpt('), source.indexOf('class AccountNetworkManager'));
+  assert.match(probe, /GET \/ HTTP\/1\.1/);
+  assert.match(probe, /AppleWebKit\/537\.36/);
+  assert.match(probe, /secure\.once\('secureConnect',[\s\S]*connectLatencyMs = Date\.now\(\) - startedAt/);
+  assert.ok(probe.indexOf('connectLatencyMs = Date.now() - startedAt') > probe.indexOf("secure.once('secureConnect'"));
+  assert.match(probe, /connectLatencyMs/);
+  assert.doesNotMatch(probe, /backend-api\/models|Codex-Navo\/1\.0/);
+});
+
+test('官方不支持地区可从节点国旗和名称预先识别', () => {
+  assert.equal(unsupportedRegionFromNodeName('🇭🇰 香港01 CloudFront'), '中国香港');
+  assert.equal(unsupportedRegionFromNodeName('RU Moscow Premium'), '俄罗斯');
+  assert.equal(unsupportedRegionFromNodeName('🇻🇪 Venezuela 01'), '委内瑞拉');
+  assert.equal(unsupportedRegionFromNodeName('🇹🇼 台湾 01'), '');
+  assert.equal(unsupportedRegionFromNodeName('🇸🇬 Singapore 01'), '');
 });
 
 test('登录链路检测会区分 JSON、Cloudflare HTML 和伪 JSON 页面', () => {
@@ -164,7 +187,8 @@ test('账号可以独立绑定节点，公开状态不会包含代理凭据', ()
     const source = manager.addSource('vless://uuid@example.org:443#Tokyo', '测试节点');
     const assignment = manager.assign('account-demo', { mode: 'proxy', sourceId: source.id, nodeName: 'Tokyo' });
     assert.equal(assignment.mode, 'proxy');
-    assert.equal(assignment.label, '测试节点 · Tokyo');
+    assert.equal(assignment.label, '测试节点');
+    assert.equal(assignment.displayName, '测试节点');
     assert.equal(JSON.stringify(manager.publicState()).includes('uuid'), false);
     assert.equal(manager.assign('account-demo', { mode: 'direct' }).mode, 'direct');
   } finally {
@@ -172,7 +196,7 @@ test('账号可以独立绑定节点，公开状态不会包含代理凭据', ()
   }
 });
 
-test('账号代理只注入 HTTP(S) 环境并明确绕过本机回环连接', () => {
+test('账号代理覆盖任意远程站点并只绕过本机回环连接', () => {
   const runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-navo-network-env-'));
   try {
     const manager = new AccountNetworkManager({ runtimeRoot });
@@ -188,17 +212,18 @@ test('账号代理只注入 HTTP(S) 环境并明确绕过本机回环连接', ()
     assert.match(environment.NO_PROXY, /localhost/);
     assert.match(environment.NO_PROXY, /127\.0\.0\.1/);
     assert.doesNotMatch(environment.NO_PROXY, /github\.com/);
+    assert.doesNotMatch(environment.NO_PROXY, /example\.com/);
     assert.equal(environment.no_proxy, environment.NO_PROXY);
   } finally {
     fs.rmSync(runtimeRoot, { recursive: true, force: true });
   }
 });
 
-test('后台任务优先使用正在运行账号的可用节点，否则选择最低延迟节点', () => {
+test('后台任务优先使用正在运行账号的可用节点，否则选择最低连接延迟节点', () => {
   const data = {
     sources: [
-      { id: 'source-a', nodes: [{ name: 'Active', status: 'available', delay: 680 }] },
-      { id: 'source-b', nodes: [{ name: 'Fast', status: 'available', delay: 95 }, { name: 'Failed', status: 'connection-failed', delay: 12 }] },
+      { id: 'source-a', nodes: [{ name: 'Active', status: 'available', connectDelay: 88, delay: 680 }] },
+      { id: 'source-b', nodes: [{ name: 'Fast', status: 'available', connectDelay: 42, delay: 95 }, { name: 'Failed', status: 'connection-failed', connectDelay: 12, delay: 12 }] },
     ],
     assignments: {
       active: { mode: 'proxy', sourceId: 'source-a', nodeName: 'Active' },
@@ -207,10 +232,10 @@ test('后台任务优先使用正在运行账号的可用节点，否则选择�
     },
   };
   assert.deepEqual(selectTaskRoute(data, 'active'), {
-    accountId: 'active', sourceId: 'source-a', nodeName: 'Active', delay: 680,
+    accountId: 'active', sourceId: 'source-a', nodeName: 'Active', delay: 88,
   });
   assert.deepEqual(selectTaskRoute(data), {
-    accountId: '', sourceId: 'source-b', nodeName: 'Fast', delay: 95,
+    accountId: '', sourceId: 'source-b', nodeName: 'Fast', delay: 42,
   });
   assert.equal(selectTaskRoute({
     sources: [{ id: 'failed-source', nodes: [{ name: 'Failed', status: 'connection-failed', delay: 12 }] }],

@@ -6,6 +6,7 @@ const path = require('node:path');
 const {
   createProtocolRunner,
   injectProtocolCookies,
+  navigateProtocolPage,
   normalizeChromeCookies,
   parseWindowsProxyServer,
   protocolPromptFromOutput,
@@ -13,6 +14,7 @@ const {
   readProtocolSession,
   resolveProtocolProxyEnvironment,
   validateProtocolInput,
+  webSessionAuthenticated,
 } = require('../lib/protocol-login');
 const { buildCodexAuthFromWebSession } = require('../lib/web-session-auth');
 const { isNonRefreshableWebSessionAuth, validateAuthPayload } = require('../lib/auth-package');
@@ -150,7 +152,8 @@ test('账号创建只允许官方浏览器登录或授权包导入', () => {
 
 test('Headless Chrome 写入 Cookie 后重试会话校验，并允许 403 延后到可见浏览器验证', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'lib', 'protocol-login.js'), 'utf8');
-  assert.match(source, /attempt <= 3/);
+  assert.match(source, /verificationAttempts = 3/);
+  assert.match(source, /attempt <= attempts/);
   assert.match(source, /allowHeadlessBlocked/);
   assert.match(source, /Number\(value\.status\) === 403/);
   assert.match(source, /method: 'Browser\.close'/);
@@ -177,6 +180,58 @@ test('Headless 403 延后验证路径真实执行三次重试并主动关闭浏�
   assert.deepEqual(result, { verified: false, deferred: true, status: 403, session: null });
   assert.equal(socket.methods.filter((method) => method === 'Runtime.evaluate').length, 3);
   assert.ok(socket.methods.includes('Browser.close'));
+});
+
+test('官方 OAuth 完成后可以保留 Chrome 并等待 ChatGPT 网页会话建立', async () => {
+  let socket;
+  class WebSocketImpl extends MockChromeSocket { constructor() { super(); socket = this; } }
+  const fetchImpl = async () => ({
+    ok: true,
+    json: async () => [{ type: 'page', url: 'https://chatgpt.com/auth/login', webSocketDebuggerUrl: 'ws://mock' }],
+  });
+  const result = await injectProtocolCookies({
+    port: 12345,
+    cookies: [],
+    fetchImpl,
+    WebSocketImpl,
+    allowUnauthenticated: true,
+    navigationUrl: 'https://chatgpt.com/auth/login?next=/',
+    verificationDelayMs: 1,
+  });
+  assert.equal(result.verified, false);
+  assert.equal(result.deferred, false);
+  assert.ok(socket.methods.includes('Page.navigate'));
+  assert.equal(socket.methods.includes('Browser.close'), false);
+});
+
+test('网页会话校验要求真实用户，不能把 user null 或字段名误判为已登录', () => {
+  assert.equal(webSessionAuthenticated('{"user":null,"expires":"2026-08-17"}'), false);
+  assert.equal(webSessionAuthenticated('{"accessToken":""}'), false);
+  assert.equal(webSessionAuthenticated('<html>"user": fake</html>'), false);
+  assert.equal(webSessionAuthenticated('{"user":{"email":"fixture@example.invalid"}}'), true);
+  assert.equal(webSessionAuthenticated('{"accessToken":"session-token"}'), true);
+});
+
+test('一次登录流程会在同一账号 Chrome 中从 ChatGPT 跳转到官方 Codex OAuth', async () => {
+  let socket;
+  class WebSocketImpl extends MockChromeSocket { constructor() { super(); socket = this; } }
+  const fetchImpl = async () => ({
+    ok: true,
+    json: async () => [{ type: 'page', url: 'https://chatgpt.com/', webSocketDebuggerUrl: 'ws://mock' }],
+  });
+  await navigateProtocolPage({
+    port: 12345,
+    url: 'https://auth.openai.com/oauth/authorize?client_id=fixture',
+    fetchImpl,
+    WebSocketImpl,
+  });
+  assert.ok(socket.methods.includes('Page.navigate'));
+  await assert.rejects(() => navigateProtocolPage({
+    port: 12345,
+    url: 'https://example.invalid/',
+    fetchImpl,
+    WebSocketImpl,
+  }), /非官方登录地址/);
 });
 
 test('web session builds an identifiable temporary auth.json', () => {
@@ -216,9 +271,9 @@ test('Chrome closes gracefully so protocol cookies can reach disk', () => {
   assert.match(source, /await closeChromeAndWait\(socket\)/);
 });
 
-test('协议登录异常不会带崩本地服务，重启后 finalizing 会标记为中断', () => {
+test('协议登录异常不会带崩本地服务，重启后未完成状态会标记为中断', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  assert.match(source, /\['starting', 'waiting', 'finalizing'\]\.includes\(attempt\.status\)/);
+  assert.match(source, /\['starting', 'waiting', 'finalizing', 'web-login'\]\.includes\(attempt\.status\)/);
   assert.doesNotMatch(source, /finalizeTemporaryWebSession/);
   assert.match(source, /const consumeSafely = \(chunk\) =>/);
   assert.match(source, /try \{ cleanupProtocolLoginFiles\(paths\); \} catch \{\}/);
@@ -242,5 +297,8 @@ test('协议登录入池后不自动打开窗口，手动网页端仍绑定账�
   assert.match(server, /async function waitForChromeDebugPort/);
   assert.match(server, /throw new Error\('独立 Chrome 环境启动后未绑定到对应账号目录'\)/);
   assert.doesNotMatch(server, /launchProtocolAccountWindow/);
-  assert.match(server, /if \(launchType === 'browser'\) \{[\s\S]*launchAccountBrowser\(account, settings\.browserStartUrl/);
+  assert.match(server, /if \(launchType === 'browser'\) \{[\s\S]*const browserUrl = account\.webLoginComplete \? settings\.browserStartUrl : CHATGPT_LOGIN_URL;[\s\S]*launchAccountBrowser\(account, browserUrl/);
+  assert.match(server, /watchAccountBrowserWebLogin\(account, browser\)/);
+  assert.match(server, /const port = await resolveAccountBrowserDebugPort\(account, browser\)/);
+  assert.match(server, /if \(!port\) \{[\s\S]*setTimeout\(check, 1_000\)/);
 });

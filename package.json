@@ -2,7 +2,7 @@
   "name": "codex-navo",
   "productName": "Codex Navo",
   "private": true,
-  "version": "1.2.89",
+  "version": "1.2.113",
   "description": "Open-source Windows workspace for Codex multi-account isolation, quota and token tracking, API pooling and failover, per-account proxies, sessions, notifications, and floating status.",
   "main": "desktop-src/main.js",
   "author": "1080ssf",
@@ -19,7 +19,8 @@
     "start": "node server.js",
     "dev": "electron .",
     "test:encoding": "node scripts/check-utf8.js",
-    "test": "node scripts/check-utf8.js && node --test test/*.test.js",
+    "test:locale": "node scripts/audit-ui-locales.js",
+    "test": "node scripts/check-utf8.js && node scripts/audit-ui-locales.js && node --test test/*.test.js",
     "prebuild:desktop": "node scripts/check-utf8.js && node scripts/prepare-network-core.js",
     "build:desktop": "electron-builder --win nsis --x64 --publish never"
   },
@@ -27,6 +28,10 @@
     "appId": "com.codexswitchboard.app",
     "productName": "Codex Navo",
     "asar": true,
+    "asarUnpack": [
+      "desktop-src/codex-store-update.ps1",
+      "desktop-src/codex-store-update.vbs"
+    ],
     "directories": {
       "output": "release/auto-update"
     },

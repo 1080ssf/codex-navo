@@ -69,6 +69,7 @@ test('floating window renders account, quota, usage, task progress, and task usa
   assert.match(styles, /-webkit-app-region: drag/);
   assert.match(styles, /animation: task-running/);
   assert.match(server, /function floatingWindowState\(\)/);
+  assert.match(server, /activeKey \? usageForLocalDate\(activeKey\)/);
   assert.match(server, /url\.pathname === '\/api\/floating-status'/);
   assert.match(server, /url\.pathname === '\/api\/floating-status\/refresh'/);
   assert.match(server, /activeStatuses = new Set\(\['running', 'waiting_input', 'waiting_approval'\]\)/);

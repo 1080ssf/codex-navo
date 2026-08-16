@@ -22,6 +22,7 @@ const { detectQuotaReset, localDateKey, normalizeWakeSettings, quotaObservation,
 const { authIdentity, createAuthPackage, isNonRefreshableWebSessionAuth, readAuthPackage, validateAuthPayload } = require('./lib/auth-package');
 const {
   injectProtocolCookies,
+  navigateProtocolPage,
   protocolPromptFromOutput,
   readProtocolCookies,
   readProtocolOauthExport,
@@ -36,7 +37,7 @@ const {
   testProxyConnection,
 } = require('./lib/codex-proxy');
 const { AccountNetworkManager } = require('./lib/account-network');
-const { ApiServiceManager, MAX_RESPONSE_BYTES, extractUsage } = require('./lib/api-service');
+const { ApiServiceManager, MAX_RESPONSE_BYTES, extractUsage, usageForLocalDate } = require('./lib/api-service');
 const { chatToResponses, responsesToChat, createChatSseTransform } = require('./lib/openai-compat');
 const { CodexSessionMonitor } = require('./lib/session-monitor');
 const { NotificationService } = require('./lib/notification-service');
@@ -57,6 +58,8 @@ const {
 const { applyDesktopLocaleBridge } = require('./lib/codex-desktop-locale');
 const { combinedAccountQuota } = require('./lib/api-account-quota');
 const { createUsageTap } = require('./lib/usage-stream');
+const { codexUpstreamHeaders } = require('./lib/codex-upstream-headers');
+const { resolveChromeDebugPort } = require('./lib/browser-debug-session');
 const { requestShape, upstreamMessage } = require('./lib/upstream-error');
 const { activateAutomationScope, deactivateAutomationScope, quarantineLegacyApiAutomations } = require('./lib/codex-automation-scope');
 const { parseRelayAccountPackage } = require('./lib/relay-account-import');
@@ -102,6 +105,7 @@ const API_LEGACY_AUTOMATION_SCOPE_FILE = path.join(API_AUTOMATION_SCOPE_DIR, 'le
 const LAUNCH_VIEW_ROOT = path.join(CODEX_PROFILES_DIR, '_launch-view');
 const ROLLOUT_BACKUP_ROOT = path.join(SHARED_CODEX_HOME, 'navo-rollout-backups');
 const IP_CHECK_URL = 'https://ipip.la/';
+const CHATGPT_LOGIN_URL = 'https://chatgpt.com/auth/login?next=/';
 const CHATGPT_CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses';
 const OPENAI_OAUTH_TOKEN_URL = 'https://auth.openai.com/oauth/token';
 const CODEX_OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
@@ -211,7 +215,7 @@ let authAttempts = readJson(AUTH_ATTEMPTS_FILE, {});
 for (const [accountId, attempt] of Object.entries(authAttempts)) {
   if (!validateAccountId(accountId) || !attempt || typeof attempt !== 'object') {
     delete authAttempts[accountId];
-  } else if (['starting', 'waiting', 'finalizing'].includes(attempt.status)) {
+  } else if (['starting', 'waiting', 'finalizing', 'web-login'].includes(attempt.status)) {
     authAttempts[accountId] = {
       ...attempt,
       status: 'interrupted',
@@ -222,6 +226,7 @@ for (const [accountId, attempt] of Object.entries(authAttempts)) {
 }
 writeJsonAtomic(AUTH_ATTEMPTS_FILE, authAttempts);
 const pendingCodexLogins = new Map();
+const browserWebLoginWatchers = new Map();
 const accountPoolRefreshes = new Map();
 const accountPoolLastUsed = new Map();
 const accountPoolCooldowns = new Map();
@@ -282,7 +287,12 @@ async function backgroundTaskRuntime() {
   let preferredAccountId = '';
   try {
     const snapshot = detectCodexDesktopSnapshot();
-    if (snapshot.pid) preferredAccountId = readActiveCodexAuth()?.accountId || '';
+    if (snapshot.pid) {
+      const activeApi = readActiveApiCodex();
+      preferredAccountId = activeApi?.keyId
+        ? apiKeyNetworkId(activeApi.keyId)
+        : readActiveCodexAuth()?.accountId || '';
+    }
   } catch {}
   return networkManager.ensureTask(preferredAccountId);
 }
@@ -1082,7 +1092,7 @@ function coolDownAccountPoolEntry(accountId, upstream) {
   accountPoolCooldowns.set(accountId, Date.now() + duration);
 }
 
-async function forwardAccountPoolResponses({ keyRecord, model, body, signal }) {
+async function forwardAccountPoolResponses({ keyRecord, model, body, upstreamHeaders = {}, signal }) {
   const candidates = accountPoolCandidates(keyRecord?.accountIds, model);
   if (!candidates.length) throw Object.assign(new Error(`所选账号均不可用或不支持模型 ${model}`), { statusCode: 503 });
   const failures = [];
@@ -1100,13 +1110,14 @@ async function forwardAccountPoolResponses({ keyRecord, model, body, signal }) {
         return fetch(CHATGPT_CODEX_RESPONSES_URL, {
           method: 'POST',
           headers: {
+            ...upstreamHeaders,
             'Content-Type': 'application/json',
             Accept: body.stream ? 'text/event-stream' : 'application/json',
             Authorization: `Bearer ${tokens.access_token}`,
             'ChatGPT-Account-ID': accountId,
-            Originator: 'codex_cli_rs',
+            Originator: upstreamHeaders.Originator || 'codex_cli_rs',
             Version: APP_VERSION,
-            'User-Agent': `codex_cli_rs/${APP_VERSION}`,
+            'User-Agent': upstreamHeaders['User-Agent'] || `codex_cli_rs/${APP_VERSION}`,
           },
           body: JSON.stringify({ ...body, model }), signal,
           ...(dispatcher ? { dispatcher } : {}),
@@ -1203,7 +1214,7 @@ function publicAuthAttempt(accountId) {
 function inspectAccountHealth(account) {
   const checkedAt = new Date().toISOString();
   const attempt = publicAuthAttempt(account.id);
-  if (attempt && ['starting', 'waiting', 'finalizing'].includes(attempt.status)) {
+  if (attempt && ['starting', 'waiting', 'finalizing', 'web-login'].includes(attempt.status)) {
     return { status: 'authorizing', label: '正在授权', detail: attempt.flow === 'protocol' ? '协议登录正在后台运行，请在应用内完成验证' : '请在账号独立浏览器中完成官方流程', checkedAt };
   }
   if (attempt?.status === 'interrupted') {
@@ -1671,7 +1682,7 @@ function floatingWindowState() {
   const activeAccount = accounts.find((account) => account.id === activeAccountId) || null;
   usageTracker.sync();
   const usageSummary = usageTracker.summary('today');
-  const usage = activeKey?.usage || usageSummary.accounts[activeAccountId] || {
+  const usage = activeKey ? usageForLocalDate(activeKey) : usageSummary.accounts[activeAccountId] || {
     inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
   };
   const quotaValues = (activeAccount?.quota?.windows || [])
@@ -1786,7 +1797,7 @@ function readChromeDebugPort(activePortFile) {
 async function isChromeDebugPortReady(port) {
   if (!port) return false;
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(600) });
+    const response = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(1_500) });
     return response.ok;
   } catch {
     return false;
@@ -1798,7 +1809,47 @@ async function readLiveChromeDebugPort(activePortFile) {
   return await isChromeDebugPortReady(port) ? port : 0;
 }
 
-async function waitForChromeDebugPort(port, timeoutMs = 10_000) {
+async function resolveAccountBrowserDebugPort(account, browser) {
+  if (!browser) return 0;
+  const { browserDir } = accountPaths(account);
+  const activePortFile = path.join(browserDir, 'DevToolsActivePort');
+  const previous = Number(browser.port) || 0;
+  const port = await resolveChromeDebugPort({
+    browser,
+    activePortFile,
+    isPortReady: isChromeDebugPortReady,
+  });
+  if (port && port !== previous) {
+    audit('codex.login.browser-rebound', {
+      accountId: account.id,
+      result: `${previous}->${port}`,
+    });
+  }
+  return port;
+}
+
+async function accountBrowserReadyForSessionProbe(port) {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(700) });
+    if (!response.ok) return false;
+    const targets = await response.json();
+    return targets.some((target) => {
+      if (target?.type !== 'page') return false;
+      try {
+        const page = new URL(target.url);
+        return page.protocol === 'https:'
+          && page.hostname.toLowerCase() === 'chatgpt.com'
+          && !/^\/(?:auth\/login|auth\/logout|login)(?:\/|$)/i.test(page.pathname);
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    return false;
+  }
+}
+
+async function waitForChromeDebugPort(port, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await isChromeDebugPortReady(port)) return port;
@@ -2112,6 +2163,7 @@ function cancelPendingCodexLogin(accountId) {
   const pending = pendingCodexLogins.get(accountId);
   if (!pending) return;
   clearTimeout(pending.timeout);
+  clearTimeout(pending.webLoginTimer);
   clearInterval(pending.browserWatchTimer);
   try { pending.devtoolsSocket?.close(); } catch {}
   pending.status = 'error';
@@ -2372,7 +2424,7 @@ async function launchApiKeyCodex(keyId, launchOptions = null) {
   let activeRecord = null;
   try {
     setCodexLaunchProgress({ stage: 'network', message: '正在检测 API 代理可用性…', percent: 16 });
-    await prepareApiKeyNetwork(keyId, { preflight: true, purpose: '启动 API Codex' });
+    const apiKeyNetwork = await prepareApiKeyNetwork(keyId, { preflight: true, purpose: '启动 API Codex' });
     setCodexLaunchProgress({ stage: 'sessions', message: '正在加载项目与会话…', percent: 30 });
     repairSharedCodexPreferences();
     const catalog = listCodexLaunchOptions(SHARED_CODEX_HOME);
@@ -2398,7 +2450,14 @@ async function launchApiKeyCodex(keyId, launchOptions = null) {
     const warmup = await warmCodexAppServer(findCodexCli(), codexHomeDir, 90_000, environment);
     audit('api.codex.prewarmed', { result: `${keyId}:${warmup.elapsedMs}ms` });
     const localeDebugPort = selection.language === 'en-US' ? 0 : await reserveLoopbackPort();
+    // Keep the local Navo API gateway direct, but send every remote Chromium
+    // destination opened by this API Codex task through its selected route.
+    // The environment above applies the same rule to app-server and child tools.
     const desktopArgs = [
+      ...(apiKeyNetwork ? [
+        `--proxy-server=http://127.0.0.1:${apiKeyNetwork.mixedPort}`,
+        '--proxy-bypass-list=<local>;localhost;*.localhost;127.0.0.1;[::1]',
+      ] : []),
       `--lang=${selection.language}`,
       ...(localeDebugPort ? ['--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${localeDebugPort}`] : []),
     ];
@@ -2513,15 +2572,16 @@ async function attachOfficialLoginDiagnostics(account, pending, browser) {
 
 function watchOfficialLoginBrowser(account, pending, browser) {
   pending.browser = browser;
-  let missed = 0;
   pending.browserWatchTimer = setInterval(async () => {
     if (pending.status === 'complete' || pending.status === 'error') return;
-    if (await isChromeDebugPortReady(browser.port)) {
-      missed = 0;
-      return;
-    }
-    missed += 1;
-    if (missed >= 3) pending.fail('登录窗口已关闭，授权任务已自动取消并释放账号');
+    if (await resolveAccountBrowserDebugPort(account, browser)) return;
+    // Chrome can replace its main process while completing a web sign-in. Its
+    // DevTools endpoint briefly disappears and DevToolsActivePort may then be
+    // rewritten. Keep resolving the profile port before treating that normal
+    // process transition as the user closing the login window.
+    if (Date.now() - browser.debugUnavailableSince < 30_000) return;
+    if (isProcessAlive(Number(browser.processPid))) return;
+    pending.fail('登录窗口已关闭，授权任务已自动取消并释放账号');
   }, 1_000);
   pending.browserWatchTimer.unref?.();
   // CDP network inspection is opt-in because an attached DevTools session can
@@ -2532,12 +2592,113 @@ function watchOfficialLoginBrowser(account, pending, browser) {
   }
 }
 
+function watchAccountBrowserWebLogin(account, browser) {
+  clearTimeout(browserWebLoginWatchers.get(account.id));
+  const deadline = Date.now() + 15 * 60 * 1000;
+  const check = async () => {
+    browserWebLoginWatchers.delete(account.id);
+    if (account.webLoginComplete || Date.now() >= deadline) return;
+    const port = await resolveAccountBrowserDebugPort(account, browser);
+    if (!port) {
+      const timer = setTimeout(check, 1_000);
+      timer.unref?.();
+      browserWebLoginWatchers.set(account.id, timer);
+      return;
+    }
+    try {
+      const session = await injectProtocolCookies({
+        port,
+        cookies: [],
+        allowUnauthenticated: true,
+        verificationDelayMs: 200,
+        verificationAttempts: 1,
+        navigationUrl: '',
+      });
+      if (session.verified) {
+        account.webLoginComplete = true;
+        account.setupStage = 'complete';
+        saveAccounts([...accounts]);
+        audit('codex.login.web-session-linked', { accountId: account.id, operator: '本机用户', result: 'account-browser' });
+        return;
+      }
+    } catch (error) {
+      audit('codex.login.web-session-check', { accountId: account.id, result: error.message });
+    }
+    const timer = setTimeout(check, 2_000);
+    timer.unref?.();
+    browserWebLoginWatchers.set(account.id, timer);
+  };
+  const timer = setTimeout(check, 1_000);
+  timer.unref?.();
+  browserWebLoginWatchers.set(account.id, timer);
+}
+
+async function waitForWebLoginThenOpenCodexOAuth(account, operator, pending, browser) {
+  while (!['complete', 'error'].includes(pending.status)) {
+    const port = await resolveAccountBrowserDebugPort(account, browser);
+    if (!port) {
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      continue;
+    }
+    // Poll only Chrome's loopback target list while the user is on the login
+    // page. This avoids repeatedly calling ChatGPT's session endpoint during
+    // credentials, challenge, or MFA screens. Probe the real session once the
+    // browser has navigated away from the login route, then throttle retries.
+    if (!await accountBrowserReadyForSessionProbe(port)) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      continue;
+    }
+    if (Date.now() - Number(browser.lastWebSessionProbeAt || 0) < 1_500) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      continue;
+    }
+    browser.lastWebSessionProbeAt = Date.now();
+    try {
+      const session = await injectProtocolCookies({
+        port,
+        cookies: [],
+        allowUnauthenticated: true,
+        verificationDelayMs: 200,
+        verificationAttempts: 1,
+        navigationUrl: '',
+      });
+      if (session.verified) {
+        account.webLoginComplete = true;
+        account.setupStage = 'oauth';
+        saveAccounts([...accounts]);
+        pending.webLoginComplete = true;
+        pending.status = 'waiting';
+        pending.promptHint = 'ChatGPT 网页登录已完成，正在继续 Codex 授权';
+        saveAuthAttempt(account.id, {
+          flow: 'browser', status: 'waiting', error: '', promptHint: pending.promptHint,
+        });
+        const navigationPort = await resolveAccountBrowserDebugPort(account, browser);
+        if (!navigationPort) throw new Error('Chrome 登录页面正在重新连接，请稍后重试');
+        await navigateProtocolPage({ port: navigationPort, url: pending.authUrl });
+        audit('codex.login.web-session-linked', { accountId: account.id, operator, result: 'before-codex-oauth' });
+        return;
+      }
+    } catch (error) {
+      audit('codex.login.web-session-check', { accountId: account.id, operator, result: error.message });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+}
+
 async function resetIncompleteLoginBrowser(account) {
   if (account.webLoginComplete) return;
   const { browserDir } = accountPaths(account);
   const activePortFile = path.join(browserDir, 'DevToolsActivePort');
-  if (await readLiveChromeDebugPort(activePortFile)) {
-    throw new Error('请先关闭该账号仍在运行的独立 Chrome 窗口，再重新发起授权');
+  const activePort = await readLiveChromeDebugPort(activePortFile);
+  if (activePort) {
+    // Reuse the already authenticated account-local Chrome. A fresh official
+    // OAuth URL is generated for every retry and the watcher navigates this
+    // existing browser as soon as the ChatGPT session is verified.
+    audit('codex.login.browser-state-preserved', {
+      accountId: account.id,
+      result: `active-browser-retry:${activePort}`,
+    });
+    return;
   }
   fs.mkdirSync(browserDir, { recursive: true });
   // Preserve cookies, local storage and Cloudflare clearance between retries.
@@ -2558,25 +2719,57 @@ async function completeCodexLogin(account, operator, pending) {
     pending.fail('Codex 登录已返回成功，但没有保存账号凭证，请重新发起授权');
     return;
   }
-  pending.status = 'finalizing';
-  saveAuthAttempt(account.id, { flow: 'browser', status: 'finalizing', error: '' });
-  let webLoginComplete = false;
-  if (pending.browser?.port && await isChromeDebugPortReady(pending.browser.port)) {
+  if (!pending.webLoginPrompted) {
+    pending.status = 'finalizing';
+    saveAuthAttempt(account.id, { flow: 'browser', status: 'finalizing', error: '' });
+  }
+  let webLoginComplete = account.webLoginComplete === true || pending.webLoginComplete === true;
+  const completionPort = !webLoginComplete && pending.browser
+    ? await resolveAccountBrowserDebugPort(account, pending.browser)
+    : 0;
+  if (!webLoginComplete && completionPort) {
     try {
       const webSession = await injectProtocolCookies({
-        port: pending.browser.port,
+        port: completionPort,
         cookies: [],
+        allowUnauthenticated: true,
         verificationDelayMs: 1_000,
+        navigationUrl: pending.webLoginPrompted ? '' : CHATGPT_LOGIN_URL,
       });
       webLoginComplete = webSession.verified === true;
+      if (!webLoginComplete) {
+        pending.webLoginPrompted = true;
+        pending.status = 'web-login';
+        saveAuthAttempt(account.id, {
+          flow: 'browser',
+          status: 'web-login',
+          error: '',
+          promptHint: 'Codex 授权已完成，请在当前 Chrome 中完成 ChatGPT 网页登录',
+        });
+        clearTimeout(pending.webLoginTimer);
+        pending.webLoginTimer = setTimeout(() => { completeCodexLogin(account, operator, pending); }, 1_500);
+        pending.webLoginTimer.unref?.();
+        return;
+      }
     } catch (error) {
-      // The Codex OAuth credential is already valid. Keep that result and leave
-      // Chrome on chatgpt.com so the user can finish the web session if needed.
       audit('codex.login.web-session-pending', { accountId: account.id, operator, result: error.message });
+      pending.webLoginPrompted = true;
+      pending.status = 'web-login';
+      saveAuthAttempt(account.id, {
+        flow: 'browser',
+        status: 'web-login',
+        error: '',
+        promptHint: 'Codex 授权已完成，请在当前 Chrome 中完成 ChatGPT 网页登录',
+      });
+      clearTimeout(pending.webLoginTimer);
+      pending.webLoginTimer = setTimeout(() => { completeCodexLogin(account, operator, pending); }, 1_500);
+      pending.webLoginTimer.unref?.();
+      return;
     }
   }
   pending.status = 'complete';
   clearTimeout(pending.timeout);
+  clearTimeout(pending.webLoginTimer);
   clearInterval(pending.browserWatchTimer);
   try { pending.devtoolsSocket?.close(); } catch {}
   pendingCodexLogins.delete(account.id);
@@ -2639,6 +2832,7 @@ async function startCodexBrowserLogin(account, operator, options = {}) {
     pending.error = message;
     saveAuthAttempt(account.id, { flow: 'browser', status: 'error', error: message });
     clearTimeout(pending.timeout);
+    clearTimeout(pending.webLoginTimer);
     clearInterval(pending.browserWatchTimer);
     try { pending.devtoolsSocket?.close(); } catch {}
     const lease = leases[account.id];
@@ -2696,14 +2890,17 @@ async function startCodexBrowserLogin(account, operator, options = {}) {
       prepareAccountNetwork(account, { preflight: true, purpose: '官方 OAuth' })
         .then(() => {
           if (pending.status === 'error' || pending.status === 'complete') return;
-          pending.status = 'waiting';
-          saveAuthAttempt(account.id, { flow: 'browser', status: 'waiting', error: '' });
+          pending.status = 'web-login';
+          pending.promptHint = '请先登录 ChatGPT 网页端，登录成功后将自动继续 Codex 授权';
+          saveAuthAttempt(account.id, { flow: 'browser', status: 'web-login', error: '', promptHint: pending.promptHint });
           if (pending.browserOpened) return;
           pending.browserOpened = true;
-          return launchAccountBrowser(account, authUrl, { returnSession: true })
+          return launchAccountBrowser(account, CHATGPT_LOGIN_URL, { returnSession: true, initialUrls: [CHATGPT_LOGIN_URL] })
             .then((browser) => {
               watchOfficialLoginBrowser(account, pending, browser);
-              audit('codex.login.browser-opened', { accountId: account.id, operator, result: `browser-oauth:${browser.port}` });
+              waitForWebLoginThenOpenCodexOAuth(account, operator, pending, browser)
+                .catch((error) => fail(`网页登录完成后无法继续 Codex 授权：${error.message}`));
+              audit('codex.login.browser-opened', { accountId: account.id, operator, result: `browser-web-first:${browser.port}` });
             });
         })
         .catch((error) => fail(`所选线路无法完成官方登录：${error.message}`));
@@ -2825,10 +3022,17 @@ async function launchAccount(account, launchType, operator, launchOptions = null
   if (settings.mockLaunch) return null;
 
   if (launchType === 'browser') {
-    return launchAccountBrowser(account, settings.browserStartUrl, {
+    const browserUrl = account.webLoginComplete ? settings.browserStartUrl : CHATGPT_LOGIN_URL;
+    const browser = await launchAccountBrowser(account, browserUrl, {
+      returnSession: account.webLoginComplete !== true,
       restoreLastSession: true,
-      initialUrls: [IP_CHECK_URL, settings.browserStartUrl],
+      initialUrls: [IP_CHECK_URL, browserUrl],
     });
+    if (account.webLoginComplete !== true && browser?.port) {
+      watchAccountBrowserWebLogin(account, browser);
+      return browser.processPid;
+    }
+    return browser;
   }
 
   if (findRunningCodexDesktopPid()) {
@@ -3155,6 +3359,7 @@ async function apiGatewayHandler(request, response) {
       const result = await apiServiceManager.forwardResponses({
         keyRecord,
         body,
+        upstreamHeaders: codexUpstreamHeaders(request.headers),
         signal: AbortSignal.timeout(10 * 60_000),
       });
       if (!result.upstream.ok) {
@@ -3205,6 +3410,7 @@ async function apiGatewayHandler(request, response) {
       const result = await apiServiceManager.forwardResponses({
         keyRecord,
         body: responsesBody,
+        upstreamHeaders: codexUpstreamHeaders(request.headers),
         signal: AbortSignal.timeout(10 * 60_000),
       });
       if (!result.upstream.ok) {

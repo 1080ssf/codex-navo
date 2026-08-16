@@ -102,12 +102,16 @@ test('版本入口进入应用设置更新卡片且官方授权结束后验证�
   assert.doesNotMatch(html, /data-app-page="updates"/);
   assert.match(html, /id="navo-settings-update-action"/);
   assert.match(html, /id="codex-update-action"/);
+  assert.match(html, /id="codex-update-progress"/);
+  assert.match(html, /id="codex-release-notes"/);
+  assert.match(html, /https:\/\/learn\.chatgpt\.com\/docs\/changelog/);
+  assert.match(client, /store-installing/);
   assert.match(html, /https:\/\/t\.me\/\+4VH9hBsRu7phNjg1/);
   assert.match(html, /https:\/\/qm\.qq\.com\/q\/f92ySNuLss/);
   assert.match(html, /https:\/\/github\.com\/1080ssf\/codex-navo/);
   assert.match(client, /showAppPage\('language'\)/);
   assert.doesNotMatch(client, /showAppPage\('updates'\)/);
-  assert.match(server, /injectProtocolCookies\(\{[\s\S]{0,180}pending\.browser\.port[\s\S]{0,180}cookies: \[\]/);
+  assert.match(server, /injectProtocolCookies\(\{[\s\S]{0,180}port: completionPort[\s\S]{0,180}cookies: \[\]/);
   assert.match(server, /account\.webLoginComplete = webLoginComplete/);
 });
 
@@ -122,7 +126,14 @@ test('新增账号使用官方浏览器 OAuth 一次完成登录和授权', () =
   assert.match(server, /\['app-server'\]/);
   assert.match(server, /method: 'account\/login\/start'/);
   assert.match(server, /type: 'chatgpt'/);
-  assert.match(server, /launchAccountBrowser\(account, authUrl, \{ returnSession: true \}\)/);
+  assert.match(server, /launchAccountBrowser\(account, CHATGPT_LOGIN_URL, \{ returnSession: true, initialUrls: \[CHATGPT_LOGIN_URL\] \}\)/);
+  assert.match(server, /waitForWebLoginThenOpenCodexOAuth\(account, operator, pending, browser\)/);
+  assert.match(server, /function accountBrowserReadyForSessionProbe\(port\)/);
+  assert.match(server, /\/json\/list/);
+  assert.match(server, /lastWebSessionProbeAt/);
+  assert.match(server, /verificationDelayMs: 200,[\s\S]{0,80}verificationAttempts: 1/);
+  assert.match(server, /setTimeout\(resolve, 300\)/);
+  assert.match(server, /navigateProtocolPage\(\{ port: navigationPort, url: pending\.authUrl \}\)/);
   assert.match(server, /authorize-device/);
 });
 
@@ -152,7 +163,13 @@ test('账号级节点池支持订阅、自动识别、测速和独立线路选�
 test('官方 OAuth 会监测独立 Chrome 关闭和登录接口 HTML 响应并自动释放', () => {
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.match(server, /function watchOfficialLoginBrowser\(account, pending, browser\)/);
-  assert.match(server, /missed >= 3[^\n]+登录窗口已关闭/);
+  assert.match(server, /function resolveAccountBrowserDebugPort\(account, browser\)/);
+  assert.match(server, /waitForChromeDebugPort\(port, timeoutMs = 30_000\)/);
+  assert.match(server, /resolveChromeDebugPort\(\{[\s\S]{0,180}activePortFile/);
+  assert.match(server, /codex\.login\.browser-rebound/);
+  assert.match(server, /debugUnavailableSince < 30_000/);
+  assert.match(server, /isProcessAlive\(Number\(browser\.processPid\)\)/);
+  assert.match(server, /pending\.fail\('登录窗口已关闭/);
   assert.match(server, /function attachOfficialLoginDiagnostics\(account, pending, browser\)/);
   assert.match(server, /CODEX_NAVO_LOGIN_DIAGNOSTICS === '1'/);
   assert.match(server, /\^\(\?:Fetch\|XHR\)\$/);
@@ -166,6 +183,8 @@ test('官方 OAuth 会监测独立 Chrome 关闭和登录接口 HTML 响应并�
     server.indexOf('function completeCodexLogin'),
   );
   assert.doesNotMatch(resetBody, /rmSync\(browserDir,/);
+  assert.match(resetBody, /active-browser-retry:\$\{activePort\}/);
+  assert.doesNotMatch(resetBody, /请先关闭该账号仍在运行的独立 Chrome 窗口/);
 });
 
 test('新增账号在界面和服务端都默认使用 Chrome', () => {
@@ -289,12 +308,23 @@ test('批量节点检测随完成结果实时刷新并继续后台检测', () =>
   assert.match(server, /url\.pathname === '\/api\/network-state'/);
 });
 
-test('节点列表按内容收缩且只在超过最大高度后滚动', () => {
+test('线路侧栏保持固定高度且节点列表只在超过最大高度后滚动', () => {
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
-  assert.match(styles, /\.network-page-form \.network-workspace\s*\{[^}]*min-height:\s*0/);
-  assert.match(styles, /\.network-node-list\s*\{[^}]*max-height:\s*226px[^}]*overflow-y:\s*auto/);
-  assert.match(styles, /\.network-node-list\s*\{[^}]*grid-auto-rows:\s*minmax\(38px, auto\)[^}]*align-content:\s*start/);
-  assert.match(styles, /\.network-node-pane\s*\{[^}]*align-self:\s*start/);
+  assert.match(styles, /\.network-page-form \.network-workspace\s*\{[^}]*height:\s*352px[^}]*min-height:\s*352px/);
+  assert.doesNotMatch(client, /network-workspace-height|--network-workspace-height/);
+  assert.match(styles, /\.network-workspace\s*\{[^}]*position:\s*relative[^}]*padding-left:\s*220px/);
+  assert.match(styles, /\.network-source-sidebar\s*\{[^}]*position:\s*absolute[^}]*inset:\s*0 auto 0 0[^}]*width:\s*220px/);
+  assert.match(styles, /\.network-source-tabs\s*\{[^}]*height:\s*calc\(100% - 30px\)[^}]*overflow-y:\s*auto/);
+  assert.match(styles, /\.network-node-list\s*\{[^}]*max-height:\s*204px[^}]*overflow-y:\s*auto/);
+  assert.match(styles, /\.network-node-list\s*\{[^}]*display:\s*block/);
+  assert.match(styles, /\.network-node\s*\{[^}]*height:\s*34px[^}]*min-height:\s*34px/);
+  assert.doesNotMatch(styles, /\.network-node-pane\s*\{[^}]*height:\s*100%/);
+  assert.doesNotMatch(client, /selected\.kind\s*===\s*['"]subscription['"][\s\S]{0,120}network-workspace-height/);
+  assert.match(client, /<span>连接延迟<\/span><span>ChatGPT 检测<\/span>/);
+  assert.match(client, /class="node-connect"/);
+  assert.doesNotMatch(client, /ChatGPT \$\{node\.delay\} ms/);
+  assert.match(styles, /\.network-node \.node-connect\s*\{/);
 });
 
 test('Token 大数保留 M 主值并补充亿单位小标签', () => {
@@ -312,6 +342,8 @@ test('单账号今日用量以总 Token 为主并将美元降级为估值明细'
   assert.match(client, /class="account-usage-total"/);
   assert.match(client, /account-usage-total[\s\S]*formatTokenCount\(usage\.totalTokens, true\)/);
   assert.match(client, /class="usage-estimate"[\s\S]*Token 估值/);
+  assert.match(client, /function apiUsageInSelectedRangeForKey/);
+  assert.match(client, /key\.dailyUsage/);
 });
 
 test('再次打开账号网页端时恢复各自上次关闭的 Chrome 窗口', () => {
@@ -320,15 +352,20 @@ test('再次打开账号网页端时恢复各自上次关闭的 Chrome 窗口', 
   assert.match(server, /--restore-last-session/);
   assert.match(server, /--disable-background-mode/);
   assert.match(server, /restoreLastSession: true/);
-  assert.match(server, /launchAccountBrowser\(account, authUrl, \{ returnSession: true \}\)/);
+  assert.match(server, /launchAccountBrowser\(account, CHATGPT_LOGIN_URL, \{ returnSession: true, initialUrls: \[CHATGPT_LOGIN_URL\] \}\)/);
 });
 
-test('首次创建账号时直接打开官方 OAuth 地址', () => {
+test('首次创建账号先登录 ChatGPT 并在同一浏览器自动继续官方 OAuth', () => {
   const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.match(server, /startCodexBrowserLogin\(account, operator\)/);
-  assert.match(server, /launchAccountBrowser\(account, authUrl, \{ returnSession: true \}\)/);
+  assert.match(server, /launchAccountBrowser\(account, CHATGPT_LOGIN_URL, \{ returnSession: true, initialUrls: \[CHATGPT_LOGIN_URL\] \}\)/);
+  assert.match(server, /pending\.promptHint = '请先登录 ChatGPT 网页端，登录成功后将自动继续 Codex 授权'/);
+  assert.match(server, /pending\.promptHint = 'ChatGPT 网页登录已完成，正在继续 Codex 授权'/);
   assert.match(server, /args\.push\('--new-window', \.\.\.initialUrls\)/);
+  assert.match(server, /status: 'web-login'/);
+  assert.match(server, /allowUnauthenticated: true/);
+  assert.match(server, /account\.webLoginComplete \? settings\.browserStartUrl : CHATGPT_LOGIN_URL/);
 });
 
 test('账号授权具备可恢复状态、健康检查与账号迁移入口', () => {
@@ -597,6 +634,46 @@ test('launch selection exposes progress and account groups fold independently', 
   assert.match(styles, /\.account-group-head/);
 });
 
+test('fold controls use one centered CSS chevron instead of font glyphs', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  const foldMarkup = `${html}\n${client}`;
+  assert.doesNotMatch(foldMarkup, /[›⌄⌃]/);
+  assert.doesNotMatch(client, /querySelector\('i'\)\.textContent = collapsed/);
+  assert.match(foldMarkup, /class="fold-icon"[\s\S]*class="ui-chevron"/);
+  assert.match(styles, /\.fold-icon \{[^}]*display: grid[^}]*place-items: center[^}]*line-height: 0/s);
+  assert.match(styles, /\.ui-chevron \{[^}]*border-right:[^}]*border-bottom:[^}]*rotate\(-45deg\)/s);
+  assert.match(styles, /\[aria-expanded="true"\][^{]*\.ui-chevron[^}]*rotate\(45deg\)/s);
+});
+
+test('application settings keep Navo on the stable light appearance', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(html, /id="theme-form"/);
+  assert.match(html, /id="app-theme-select"[\s\S]*value="light"/);
+  assert.doesNotMatch(html, /value="system"|value="dark"/);
+  assert.match(client, /themeStorageKey = 'codex-navo-app-theme'/);
+  assert.match(client, /state\.appTheme = 'light'/);
+  assert.match(client, /document\.documentElement\.dataset\.theme = 'light'/);
+  assert.match(client, /localStorage\.setItem\(themeStorageKey, state\.appTheme\)/);
+  assert.match(html, /data-settings-picker="language"/);
+  assert.doesNotMatch(html, /data-settings-picker="theme"/);
+  assert.match(client, /function renderSettingsPicker\(/);
+  assert.match(styles, /\.settings-picker-menu \{[^}]*border-radius:[^}]*box-shadow:/s);
+  assert.match(styles, /\.settings-picker-trigger \.ui-chevron \{[^}]*margin:[^}]*3px[^}]*12px/s);
+  assert.match(styles, /\.language-settings-layout \{[^}]*overflow:\s*visible/s);
+  assert.match(styles, /\.language-settings-layout:has\(\.settings-picker\.open\) \{[^}]*z-index:\s*60/s);
+  assert.match(styles, /\.theme-static-choice/);
+});
+
+test('Codex update card uses the packaged Codex icon instead of a letter mark', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  assert.match(html, /class="codex-product-mark"><img src="data:image\/png;base64,/);
+  assert.doesNotMatch(html, /class="codex-product-mark">C</);
+});
+
 test('local usage includes API key usage and sessions use nested project hierarchy', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
@@ -655,6 +732,8 @@ test('notification message is user-authored and sound rows keep aligned controls
   assert.match(html, /placeholder="有任务已处理完毕。"/);
   assert.doesNotMatch(client, /notificationTemplates|notificationTemplate/);
   assert.match(client, /notificationVolumeValue\.textContent/);
+  assert.match(client, /if \(state\.notificationPolling\) return;/);
+  assert.match(client, /finally \{ state\.notificationPolling = false; \}/);
   assert.match(styles, /\.notification-two-column \{[^}]*repeat\(2, minmax\(0, 1fr\)\)/s);
   assert.match(styles, /\.notification-control-card \{[^}]*min-height: 126px/s);
   assert.match(styles, /\.compact-switch input \{[^}]*width: 1px[^}]*height: 1px/s);
@@ -678,6 +757,16 @@ test('英文界面翻译只写入真正变化的文本，避免 MutationObserver
   assert.match(client, /if \(translated !== value\) node\.setAttribute\(name, translated\)/);
   assert.doesNotMatch(client, /root\.nodeValue = translateText\(root\.nodeValue\)/);
   assert.doesNotMatch(client, /node\.nodeValue = translateText\(node\.nodeValue\)/);
+  assert.match(client, /record\.type === 'attributes'/);
+  assert.match(client, /attributeFilter:\s*\['title', 'aria-label', 'placeholder'\]/);
+});
+
+test('发布前语言审计覆盖静态、动态和悬浮窗文案', () => {
+  const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  const audit = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'audit-ui-locales.js'), 'utf8');
+  assert.match(packageJson.scripts.test, /audit-ui-locales\.js/);
+  assert.match(audit, /Chinese UI strings are covered/);
+  assert.match(audit, /Floating locale audit passed/);
 });
 test('Navo API Codex temporarily switches provider config while retaining the normal desktop state', () => {
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
@@ -729,6 +818,24 @@ test('账号网络可以在保存前检测当前选择的代理线路', () => {
   assert.match(client, /elements\.testAccountNetwork\.addEventListener\('click'/);
   assert.match(client, /\/api\/network\/sources\/\$\{sourceId\}\/test/);
   assert.match(styles, /\.account-network-actions #test-account-network\s*\{[^}]*margin-right:\s*auto/);
+});
+
+test('单独节点显示线路名称且机场订阅在账号线路选择器中默认折叠', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const network = fs.readFileSync(path.join(__dirname, '..', 'lib', 'account-network.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(html, /<input[^>]*type="hidden"[^>]*id="account-network-route"/);
+  assert.match(html, /id="account-network-route-trigger"/);
+  assert.match(html, /id="account-network-route-menu"/);
+  assert.match(client, /source\.kind !== 'subscription' && source\.nodes\.length === 1 \? source\.name : node\.name/);
+  assert.match(client, /class="account-route-group"><summary>[\s\S]*source\.name/);
+  assert.doesNotMatch(client, /class="account-route-group" open><summary>[\s\S]{0,160}subscriptions\.map/);
+  assert.match(client, /accountNetworkRouteMenu\.hidden = false/);
+  assert.match(network, /const standalone = source\?\.kind !== 'subscription' && source\?\.nodes\?\.length === 1/);
+  assert.match(network, /displayName/);
+  assert.match(styles, /\.account-route-menu\s*\{[^}]*max-height:\s*270px[^}]*overflow-y:\s*auto/);
+  assert.match(styles, /\.account-route-menu\s*\{[^}]*position:\s*static/);
 });
 
 test('Add Account can create the same one-time Navo API Key used by API Service', () => {

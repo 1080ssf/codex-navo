@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { ACCOUNT_POOL_PROVIDER_ID, ApiServiceManager, extractUsage } = require('../lib/api-service');
+const { ACCOUNT_POOL_PROVIDER_ID, ApiServiceManager, extractUsage, usageForLocalDate } = require('../lib/api-service');
 
 function temporaryDirectory(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-navo-api-'));
@@ -89,12 +89,14 @@ test('routes Responses requests through the account-pool forwarder with ordered 
   const created = service.createKey({ name: 'Pool Key', modelAllowlist: ['gpt-test'], accountIds: ['account-b', 'account-a', 'account-b'] });
   const record = service.authenticate(`Bearer ${created.secret}`);
   const tools = [{ type: 'function', name: 'echo', parameters: { type: 'object' } }];
-  const result = await service.forwardResponses({ keyRecord: record, body: { model: 'gpt-test', input: 'hi', tools } });
+  const upstreamHeaders = { 'Session-Id': 'session-test', 'Thread-Id': 'thread-test' };
+  const result = await service.forwardResponses({ keyRecord: record, body: { model: 'gpt-test', input: 'hi', tools }, upstreamHeaders });
   const payload = await result.upstream.json();
   service.recordUsage(record, extractUsage(payload));
   assert.equal(forwarded.model, 'gpt-test');
   assert.deepEqual(forwarded.keyRecord.accountIds, ['account-b', 'account-a']);
   assert.deepEqual(forwarded.body.tools, tools);
+  assert.deepEqual(forwarded.upstreamHeaders, upstreamHeaders);
   assert.equal(record.usage.requests, 1);
   assert.equal(record.usage.inputTokens, 12);
   assert.equal(record.usage.outputTokens, 3);
@@ -148,6 +150,38 @@ test('estimates new and historical API token usage', (t) => {
   assert.equal(record.usage.pricedRequests, 3);
   assert.equal(record.usage.cacheWriteInputTokens, 250);
   assert.ok(record.usage.estimatedCostUsd > historicalEstimate);
+});
+
+test('stores API key usage in separate local-day buckets while keeping lifetime limits cumulative', (t) => {
+  const service = manager(t);
+  service.ensureAccountPool(['gpt-5.6-sol']);
+  const created = service.createKey({ name: 'Daily usage' });
+  const record = service.authenticate(`Bearer ${created.secret}`);
+  service.recordUsage(record, { inputTokens: 100, cachedInputTokens: 60, outputTokens: 10 }, 'gpt-5.6-sol', new Date(2026, 7, 14, 23, 55));
+  service.recordUsage(record, { inputTokens: 20, cachedInputTokens: 5, outputTokens: 2 }, 'gpt-5.6-sol', new Date(2026, 7, 15, 0, 5));
+  assert.equal(record.usage.requests, 2);
+  assert.equal(record.usage.inputTokens, 120);
+  assert.deepEqual(record.dailyUsage.map((item) => item.date), ['2026-08-14', '2026-08-15']);
+  assert.equal(record.dailyUsage[0].usage.inputTokens, 100);
+  assert.equal(record.dailyUsage[1].usage.inputTokens, 20);
+  assert.equal(record.dailyUsage[1].usage.cachedInputTokens, 5);
+  assert.equal(usageForLocalDate(record, new Date(2026, 7, 14, 12)).inputTokens, 100);
+  assert.equal(usageForLocalDate(record, new Date(2026, 7, 16, 12)).inputTokens, 0);
+});
+
+test('keeps legacy cumulative API usage out of daily totals', (t) => {
+  const root = temporaryDirectory(t);
+  writeJsonAtomic(path.join(root, 'api-service', 'keys.json'), [{
+    id: 'legacy-daily-key', name: 'Legacy daily', salt: 'salt', hash: 'hash',
+    usage: { requests: 4, inputTokens: 400, outputTokens: 40, lastUsedAt: '2026-08-14T12:00:00.000Z' },
+  }]);
+  const service = new ApiServiceManager({ runtimeRoot: root, readJson, writeJsonAtomic });
+  assert.equal(service.keys[0].dailyUsageVersion, 2);
+  assert.deepEqual(service.keys[0].dailyUsage, []);
+  assert.equal(service.keys[0].usage.inputTokens, 400);
+  const persisted = readJson(service.keysFile, []);
+  assert.equal(persisted[0].dailyUsageVersion, 2);
+  assert.deepEqual(persisted[0].dailyUsage, []);
 });
 
 test('extracts cache reads and cache writes from Responses usage', () => {
