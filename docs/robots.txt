@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://1080ssf.github.io/codex-navo/sitemap.xml

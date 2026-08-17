@@ -1,6 +1,10 @@
 # Codex Navo
 
-> 面向 Windows 的开源 Codex 多账号工作台：在一个桌面应用里完成账号隔离与切换、额度和 Token 统计、API 账号池、网络代理、项目会话管理、通知与悬浮窗。
+**简体中文** · [English](README_EN.md)
+
+> 面向 Windows 的开源 Codex 多账号工作台：在一个桌面应用里完成账号隔离与切换、额度和 Token 统计、OpenAI 兼容 API 账号池与故障切换、账号级代理、项目会话管理、通知与悬浮窗。
+>
+> Open-source Codex multi-account workspace for Windows with account isolation, quota and token tracking, OpenAI-compatible API pooling and failover, per-account proxies, session management, notifications, and a floating status window.
 
 [![Release](https://img.shields.io/github/v/release/1080ssf/codex-navo?display_name=tag&style=flat-square)](https://github.com/1080ssf/codex-navo/releases/latest)
 [![License](https://img.shields.io/github/license/1080ssf/codex-navo?style=flat-square)](LICENSE)
@@ -8,11 +12,35 @@
 [![Telegram](https://img.shields.io/badge/Telegram-加入群组-26A5E4?logo=telegram&logoColor=white&style=flat-square)](https://t.me/+4VH9hBsRu7phNjg1)
 [![QQ](https://img.shields.io/badge/QQ-加入群组-12B7F5?logo=tencentqq&logoColor=white&style=flat-square)](https://qm.qq.com/q/f92ySNuLss)
 
+<p>
+  <a href="https://github.com/1080ssf/codex-navo/releases/latest"><strong>下载最新版</strong></a>
+  · <a href="https://1080ssf.github.io/codex-navo/">项目主页</a>
+  · <a href="CHANGELOG.md">查看更新日志</a>
+  · <a href="#安装与快速开始">使用文档</a>
+  · <a href="https://github.com/1080ssf/codex-navo/issues">提交问题</a>
+</p>
+
 ![Codex Navo 账号池总览](docs/images/codex-navo-account-overview.jpg)
+
+## 目录
+
+- [为什么使用 Codex Navo](#为什么使用-codex-navo)
+- [核心优势](#核心优势)
+- [功能总览](#功能总览)
+- [OpenAI 兼容 API](#openai-兼容-api)
+- [网络代理](#网络代理)
+- [项目与会话管理](#项目与会话管理)
+- [通知提醒与悬浮窗](#通知提醒)
+- [安装与快速开始](#安装与快速开始)
+- [常见问题](#常见问题)
+- [社区与支持](#社区与支持)
+- [从源码运行](#从源码运行)
 
 ## 为什么使用 Codex Navo
 
-当账号、项目、代理线路和 Codex 会话逐渐增多，手工切换授权很容易打断工作。Codex Navo 把这些流程集中到一个本地优先的桌面应用中：每个普通账号拥有独立环境，项目与会话继续保留；多个账号还可以组成 OpenAI 兼容 API 账号池，在额度耗尽、限流或临时错误时尝试下一个可用账号。
+**一个应用管理多个 Codex 账号，并通过账号隔离、额度监控、代理路由和 API 账号池自动故障切换，让账号切换尽量不打断任务。**
+
+当账号、项目、代理线路和 Codex 会话逐渐增多，手工切换授权很容易打断工作。Codex Navo 把这些流程集中到一个本地优先的桌面应用中：每个普通账号拥有独立环境，切换账号时项目与会话继续保留；多个账号还可以组成 OpenAI 兼容 API 账号池，在额度耗尽、限流或临时错误时尝试下一个可用账号。
 
 ### 核心优势
 
@@ -238,7 +266,6 @@ npm run dev
 
 ```powershell
 npm test
-npm run test:smoke
 npm audit --audit-level=high
 npm run build:desktop
 ```

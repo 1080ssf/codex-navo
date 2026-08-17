@@ -1,0 +1,29 @@
+# Codex Navo
+
+> Codex Navo is an independent, unofficial, open-source Windows workspace for managing multiple Codex accounts. It is not affiliated with or endorsed by OpenAI.
+
+Codex Navo provides isolated Chrome profiles and Codex OAuth authorization for standard accounts, quota and token monitoring, an OpenAI-compatible local API account pool with automatic failover, per-account and per-key proxy routing, project and session management, notifications, and a configurable floating status window.
+
+## Authoritative links
+
+- Project website: https://1080ssf.github.io/codex-navo/
+- GitHub repository: https://github.com/1080ssf/codex-navo
+- Chinese documentation: https://github.com/1080ssf/codex-navo/blob/main/README.md
+- English documentation: https://github.com/1080ssf/codex-navo/blob/main/README_EN.md
+- Releases: https://github.com/1080ssf/codex-navo/releases/latest
+- API guide: https://github.com/1080ssf/codex-navo/blob/main/docs/api-service.md
+- Issues: https://github.com/1080ssf/codex-navo/issues
+
+## Core capabilities
+
+- Multi-account isolation and one-click Codex authorization switching on Windows
+- Quota, input, cached input, output, cache-rate, model-call, and token-estimate monitoring
+- OpenAI-compatible `/v1/models`, `/v1/responses`, and `/v1/chat/completions` endpoints
+- Ordered API account pools with cooldown and automatic failover for eligible failures
+- Per-account and per-API-key proxy routing with subscription and single-node support
+- Local Codex project, session, archive, failure, and task-status management
+- Windows and external-channel notifications plus a configurable floating status window
+
+## License
+
+MIT License. Use the official GitHub Releases page for installers.

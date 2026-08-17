@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex Navo — Windows Codex 多账号工作台</title>
+  <meta name="description" content="Codex Navo 是面向 Windows 的开源 Codex 多账号工作台，支持账号隔离与切换、额度和 Token 监控、OpenAI 兼容 API 账号池故障切换、账号级代理和会话管理。">
+  <meta name="keywords" content="Codex Navo,Codex multi-account,Codex 多账号,OpenAI compatible API,API failover,Windows,quota tracker,proxy manager">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Codex Navo — Codex Multi-Account Workspace">
+  <meta property="og:description" content="Account isolation, quota tracking, OpenAI-compatible API pooling and failover, per-account proxies, and session management for Windows.">
+  <meta property="og:url" content="https://1080ssf.github.io/codex-navo/">
+  <meta property="og:image" content="https://1080ssf.github.io/codex-navo/images/codex-navo-social-preview.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="theme-color" content="#2768e6">
+  <link rel="canonical" href="https://1080ssf.github.io/codex-navo/">
+  <link rel="icon" href="https://raw.githubusercontent.com/1080ssf/codex-navo/main/desktop-src/icon.png">
+  <link rel="stylesheet" href="assets/site.css">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Codex Navo",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Windows 11 x64",
+    "description": "Open-source Codex multi-account workspace with account isolation, quota tracking, API pooling and failover, per-account proxies, and session management.",
+    "url": "https://1080ssf.github.io/codex-navo/",
+    "downloadUrl": "https://github.com/1080ssf/codex-navo/releases/latest",
+    "license": "https://opensource.org/license/mit",
+    "author": { "@type": "Person", "name": "1080ssf" },
+    "codeRepository": "https://github.com/1080ssf/codex-navo"
+  }
+  </script>
+</head>
+<body>
+  <nav class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top"><img src="https://raw.githubusercontent.com/1080ssf/codex-navo/main/desktop-src/icon.png" alt=""><span>Codex Navo</span></a>
+      <div class="nav-links">
+        <a href="#features">功能 / Features</a>
+        <a href="#api">API</a>
+        <a href="https://github.com/1080ssf/codex-navo">GitHub</a>
+        <a class="nav-download" href="https://github.com/1080ssf/codex-navo/releases/latest">下载 / Download</a>
+      </div>
+    </div>
+  </nav>
+
+  <main id="top">
+    <section class="wrap hero">
+      <div>
+        <span class="eyebrow">OPEN SOURCE · WINDOWS</span>
+        <h1>一个应用，管理你的<br><span class="gradient">Codex 工作空间</span></h1>
+        <p class="lead">账号隔离与切换、额度和 Token 监控、API 账号池故障切换、账号级代理与会话管理，集中在一个本地优先的 Windows 应用中。</p>
+        <p class="lead-en">A local-first Codex multi-account workspace with isolation, quota tracking, API pooling and failover, per-account proxies, and session management.</p>
+        <div class="actions">
+          <a class="button primary" href="https://github.com/1080ssf/codex-navo/releases/latest">下载最新版</a>
+          <a class="button" href="https://github.com/1080ssf/codex-navo">查看 GitHub</a>
+          <a class="button" href="https://github.com/1080ssf/codex-navo/blob/main/README_EN.md">English README</a>
+        </div>
+      </div>
+      <div class="hero-shot">
+        <img src="images/codex-navo-account-overview.jpg" alt="Codex Navo account overview">
+      </div>
+    </section>
+
+    <section class="wrap section" id="features">
+      <div class="section-heading">
+        <h2>切换账号，不切断工作</h2>
+        <p>Switch authorization without replacing local project directories. Keep the tools that matter visible and route each account through the network line it needs.</p>
+      </div>
+      <div class="grid">
+        <article class="card"><div class="icon">01</div><h3>账号真正隔离</h3><p>每个普通账号拥有独立 Chrome 用户目录、Cookie、网页登录状态和 Codex OAuth。</p></article>
+        <article class="card"><div class="icon">02</div><h3>额度与 Token</h3><p>集中查看额度、重置时间、输入、缓存、输出、缓存率、模型调用和估值。</p></article>
+        <article class="card"><div class="icon">03</div><h3>API 账号池</h3><p>通过 OpenAI 兼容 API 使用授权账号，遇到额度耗尽、限流或可重试错误时自动尝试下一账号。</p></article>
+        <article class="card"><div class="icon">04</div><h3>账号级代理</h3><p>登录、OAuth、额度刷新、Codex 启动和 API 请求均可使用指定线路。</p></article>
+        <article class="card"><div class="icon">05</div><h3>项目与会话</h3><p>按项目归类进行中、失败、全部与已归档会话，支持折叠、归档和清理。</p></article>
+        <article class="card"><div class="icon">06</div><h3>任务随时可见</h3><p>通知、提示音和可置顶悬浮窗共同展示账号、额度、进度与本次 Token。</p></article>
+      </div>
+    </section>
+
+    <section class="wrap section" id="api">
+      <div class="api-panel">
+        <div>
+          <h2>OpenAI-compatible API</h2>
+          <p>把选中的普通账号和临时凭证组成一个本机账号池。每个 Navo API Key 可独立配置账号顺序、模型权限和网络代理。</p>
+          <p>Base URL: <code>http://127.0.0.1:18300/v1</code></p>
+        </div>
+        <pre><code>GET  /v1/models
+POST /v1/responses
+POST /v1/chat/completions
+
+Account pool
+  → quota / rate-limit check
+  → retryable-error cooldown
+  → automatic failover</code></pre>
+      </div>
+    </section>
+
+    <section class="wrap community">
+      <div class="community-box">
+        <h2>下载、交流与反馈</h2>
+        <p>Download the latest release, join the community, or help improve Codex Navo.</p>
+        <div class="actions">
+          <a class="button primary" href="https://github.com/1080ssf/codex-navo/releases/latest">GitHub Releases</a>
+          <a class="button" href="https://t.me/+4VH9hBsRu7phNjg1">Telegram</a>
+          <a class="button" href="https://qm.qq.com/q/f92ySNuLss">QQ 群</a>
+          <a class="button" href="https://github.com/1080ssf/codex-navo/issues">Issues</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="wrap">Codex Navo is an independent, unofficial open-source project and is not affiliated with or endorsed by OpenAI. · MIT License</footer>
+</body>
+</html>
