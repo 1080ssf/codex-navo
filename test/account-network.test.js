@@ -9,11 +9,13 @@ const {
   classifyChatGptResponse,
   classifyOpenAiEndpoint,
   parseProxyInput,
+  proxyUriToMihomo,
   publicSource,
   selectTaskRoute,
   freeProxyPort,
   PROXY_PORT_END,
   PROXY_PORT_START,
+  PROXY_RUNTIME_PORT_START,
   unsupportedRegionFromNodeName,
 } = require('../lib/account-network');
 
@@ -42,7 +44,9 @@ test('descriptive proxy text and split SOCKS5 fields are accepted', () => {
 test('代理运行时使用 18301-18399 可复用端口池并跳过已占用端口', async (t) => {
   assert.equal(PROXY_PORT_START, 18301);
   assert.equal(PROXY_PORT_END, 18399);
+  assert.equal(PROXY_RUNTIME_PORT_START, 18302);
   const candidate = await freeProxyPort();
+  assert.ok(candidate >= PROXY_RUNTIME_PORT_START);
   const occupied = net.createServer();
   await new Promise((resolve, reject) => occupied.once('error', reject).listen(candidate, '127.0.0.1', resolve));
   t.after(() => { if (occupied.listening) occupied.close(); });
@@ -74,6 +78,67 @@ test('自动识别单节点、多节点、Base64 订阅内容和远程订阅', (
   const subscription = parseProxyInput('https://sub.example.com/api/v1/client/subscribe?token=secret', '机场 A');
   assert.equal(subscription.kind, 'subscription');
   assert.equal(subscription.name, '机场 A');
+});
+
+test('单节点 URI 转换为 Mihomo provider 配置而不是原始文本', () => {
+  const base64url = (value) => Buffer.from(value).toString('base64url');
+  const values = [
+    ['HTTP', 'http://user:pass@127.0.0.1:8080#HTTP', 'http'],
+    ['SOCKS5', 'socks5://user:pass@127.0.0.1:1080#SOCKS5', 'socks5'],
+    ['SS', `ss://${base64url('aes-128-gcm:pass')}@127.0.0.1:8388#SS`, 'ss'],
+    ['SSR', `ssr://${base64url(`127.0.0.1:8389:origin:aes-128-cfb:plain:${base64url('pass')}/?remarks=${base64url('SSR')}`)}`, 'ssr'],
+    ['VMESS', `vmess://${base64url(JSON.stringify({ ps: 'VMESS', add: '127.0.0.1', port: '443', id: '00000000-0000-4000-8000-000000000001', aid: '0', scy: 'auto', net: 'ws', path: '/', tls: 'tls' }))}`, 'vmess'],
+    ['VLESS', 'vless://00000000-0000-4000-8000-000000000001@127.0.0.1:443?security=tls&type=ws&path=%2F#VLESS', 'vless'],
+    ['TROJAN', 'trojan://pass@127.0.0.1:443?sni=example.com#TROJAN', 'trojan'],
+    ['HYSTERIA', 'hysteria://auth@127.0.0.1:443?sni=example.com#HYSTERIA', 'hysteria'],
+    ['HYSTERIA2', 'hysteria2://pass@127.0.0.1:443?sni=example.com#HYSTERIA2', 'hysteria2'],
+    ['TUIC', 'tuic://00000000-0000-4000-8000-000000000001:pass@127.0.0.1:443?sni=example.com#TUIC', 'tuic'],
+    ['WIREGUARD', `wireguard://${encodeURIComponent(Buffer.alloc(32, 1).toString('base64'))}@127.0.0.1:51820?ip=${encodeURIComponent('172.16.0.2/32')}&publickey=${encodeURIComponent(Buffer.alloc(32, 2).toString('base64'))}#WIREGUARD`, 'wireguard'],
+  ];
+  for (const [name, uri, type] of values) {
+    const proxy = proxyUriToMihomo(uri, name);
+    assert.equal(proxy.name, name);
+    assert.equal(proxy.type, type);
+    assert.equal(proxy.server, '127.0.0.1');
+    assert.ok(Number.isInteger(proxy.port));
+  }
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'navo-uri-provider-'));
+  try {
+    const manager = new AccountNetworkManager({ runtimeRoot: root });
+    const source = manager.addSource(values.map((item) => item[1]).join('\n'), 'URI nodes');
+    const runtime = path.join(root, 'runtime');
+    const provider = manager.writeProvider(manager.source(source.id), runtime);
+    const content = JSON.parse(fs.readFileSync(provider.path, 'utf8'));
+    assert.deepEqual(content.proxies.map((proxy) => proxy.type), values.map((item) => item[2]));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('旧版 URI 节点测速后丢失 uri 时可从 source content 自动恢复', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'navo-uri-repair-'));
+  try {
+    const dataFile = path.join(root, 'config', 'network-settings.json');
+    fs.mkdirSync(path.dirname(dataFile), { recursive: true });
+    fs.writeFileSync(dataFile, JSON.stringify({
+      version: 1,
+      assignments: {},
+      sources: [{
+        id: 'network-123456789abc', kind: 'local', format: 'uri-list', name: 'Legacy',
+        content: 'socks5://user:pass@127.0.0.1:1080#Legacy',
+        nodes: [{ name: 'Legacy', protocol: 'SOCKS5', status: 'available', delay: 12 }],
+      }],
+    }));
+    const manager = new AccountNetworkManager({ runtimeRoot: root });
+    const repaired = manager.source('network-123456789abc');
+    assert.match(repaired.nodes[0].uri, /^socks5:\/\//);
+    assert.equal(repaired.nodes[0].status, 'available');
+    const provider = manager.writeProvider(repaired, path.join(root, 'runtime'));
+    assert.equal(JSON.parse(fs.readFileSync(provider.path, 'utf8')).proxies[0].type, 'socks5');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('HTTP 主机端口识别为节点，带路径和令牌的 URL 识别为订阅', () => {

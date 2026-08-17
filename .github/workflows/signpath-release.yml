@@ -1,0 +1,86 @@
+name: Build and sign Windows release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  build-and-sign:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Read package version
+        id: metadata
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "installer=release/auto-update/Codex-Navo-Setup-$version-windows-x64.exe" >> $env:GITHUB_OUTPUT
+
+      - name: Build unsigned Windows installer
+        run: npm run build:desktop
+
+      - name: Upload unsigned installer for trusted-build verification
+        id: upload-unsigned
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-navo-unsigned-${{ steps.metadata.outputs.version }}
+          path: ${{ steps.metadata.outputs.installer }}
+          archive: false
+          if-no-files-found: error
+
+      - name: Submit SignPath signing request
+        id: signpath
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: release/signed
+          skip-decompress: true
+          parameters: |
+            version: ${{ toJSON(steps.metadata.outputs.version) }}
+
+      - name: Verify Authenticode signature
+        shell: pwsh
+        run: |
+          $file = Get-ChildItem release/signed -Filter '*.exe' -File | Select-Object -First 1
+          if (-not $file) { throw 'SignPath did not return a signed installer.' }
+          $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
+          if ($signature.Status -ne 'Valid') { throw "Invalid Authenticode signature: $($signature.Status)" }
+          "SIGNED_INSTALLER=$($file.FullName)" >> $env:GITHUB_ENV
+
+      - name: Upload signed installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: codex-navo-signed-${{ steps.metadata.outputs.version }}
+          path: ${{ env.SIGNED_INSTALLER }}
+          archive: false
+          if-no-files-found: error

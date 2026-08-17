@@ -37,8 +37,15 @@ const {
   testProxyConnection,
 } = require('./lib/codex-proxy');
 const { AccountNetworkManager } = require('./lib/account-network');
+const { StableProxyRelay } = require('./lib/stable-proxy-relay');
 const { ApiServiceManager, MAX_RESPONSE_BYTES, extractUsage, usageForLocalDate } = require('./lib/api-service');
-const { chatToResponses, responsesToChat, createChatSseTransform } = require('./lib/openai-compat');
+const {
+  chatToResponses,
+  responsesToChat,
+  responsesSseToJson,
+  createResponsesSseTransform,
+  createChatSseTransform,
+} = require('./lib/openai-compat');
 const { CodexSessionMonitor } = require('./lib/session-monitor');
 const { NotificationService } = require('./lib/notification-service');
 const {
@@ -185,6 +192,8 @@ const configuredApiGatewayPort = Number.parseInt(process.env.CODEX_NAVO_API_PORT
 const API_GATEWAY_PORT = Number.isInteger(configuredApiGatewayPort) && configuredApiGatewayPort > 0 && configuredApiGatewayPort <= 65_535
   ? configuredApiGatewayPort
   : 18300;
+const API_CODEX_PROXY_PORT = 18301;
+const apiCodexProxyRelay = new StableProxyRelay({ port: API_CODEX_PROXY_PORT });
 const MAX_API_REQUEST_BYTES = 64 * 1024 * 1024;
 const apiServiceManager = new ApiServiceManager({
   runtimeRoot: RUNTIME_ROOT,
@@ -398,9 +407,30 @@ function terminalSafeText(value) {
   });
 }
 
-function sendOpenAiError(response, statusCode, message, type = 'invalid_request_error') {
+function sendOpenAiError(response, statusCode, message, type = 'invalid_request_error', code = null) {
   response.writeHead(statusCode, securityHeaders({ 'Content-Type': 'application/json; charset=utf-8' }));
-  response.end(JSON.stringify({ error: { message, type, param: null, code: null } }));
+  response.end(JSON.stringify({ error: { message, type, param: null, code } }));
+}
+
+function createGatewayAbort(request, response, timeoutMs = 10 * 60_000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(Object.assign(new Error('API 请求超时'), { code: 'request_timeout' })), timeoutMs);
+  timer.unref?.();
+  const abortDisconnected = () => {
+    if (!response.writableEnded && !controller.signal.aborted) {
+      controller.abort(Object.assign(new Error('API 客户端已断开'), { code: 'client_disconnected' }));
+    }
+  };
+  request.once('aborted', abortDisconnected);
+  response.once('close', abortDisconnected);
+  return {
+    signal: controller.signal,
+    cleanup() {
+      clearTimeout(timer);
+      request.off('aborted', abortDisconnected);
+      response.off('close', abortDisconnected);
+    },
+  };
 }
 
 async function readRawBody(request, maxBytes = 1_048_576) {
@@ -1067,6 +1097,29 @@ async function apiKeyTaskEnvironment(keyId, environment = process.env) {
   return networkManager.environmentForRuntime(runtime, { ...environment });
 }
 
+function stableApiCodexProxyEnvironment(environment = process.env) {
+  const proxyUrl = `http://127.0.0.1:${API_CODEX_PROXY_PORT}`;
+  const bypass = 'localhost,127.0.0.1,::1,.localhost,0.0.0.0';
+  return {
+    ...environment,
+    HTTP_PROXY: proxyUrl,
+    HTTPS_PROXY: proxyUrl,
+    http_proxy: proxyUrl,
+    https_proxy: proxyUrl,
+    ALL_PROXY: proxyUrl,
+    all_proxy: proxyUrl,
+    NODE_USE_ENV_PROXY: '1',
+    NO_PROXY: bypass,
+    no_proxy: bypass,
+  };
+}
+
+async function prepareStableApiCodexProxy(runtime) {
+  apiCodexProxyRelay.setTargetPort(runtime?.mixedPort || 0);
+  await apiCodexProxyRelay.listen();
+  return API_CODEX_PROXY_PORT;
+}
+
 async function accountPoolDispatcher(keyRecord) {
   const runtime = await apiKeyNetworkRuntime(keyRecord.id);
   return runtime ? new ProxyAgent(`http://127.0.0.1:${runtime.mixedPort}`) : null;
@@ -1092,9 +1145,61 @@ function coolDownAccountPoolEntry(accountId, upstream) {
   accountPoolCooldowns.set(accountId, Date.now() + duration);
 }
 
+function accountPoolHealth(keyRecord) {
+  const selected = new Set(Array.isArray(keyRecord?.accountIds) ? keyRecord.accountIds : []);
+  const now = Date.now();
+  return accounts
+    .filter((account) => !selected.size || selected.has(account.id))
+    .map((account) => {
+      const cooldownUntil = accountPoolCooldowns.get(account.id) || 0;
+      const authenticated = isCodexAuthenticated(account) && account.quotaErrorCode !== 'auth_expired';
+      const remainingPercent = accountRemainingPercent(account);
+      let status = 'available';
+      if (account.enabled === false) status = 'disabled';
+      else if (!authenticated) status = 'authentication_required';
+      else if (remainingPercent <= 0) status = 'quota_exhausted';
+      else if (cooldownUntil > now) status = 'cooldown';
+      return {
+        id: account.id,
+        name: account.label,
+        status,
+        remaining_percent: remainingPercent,
+        cooldown_until: cooldownUntil > now ? new Date(cooldownUntil).toISOString() : null,
+        models: [...(accountModelCapabilities.get(account.id) || [])],
+      };
+    });
+}
+
+function poolFailureError(failures) {
+  const statuses = failures.map((failure) => Number(failure.status) || 0);
+  const all = (predicate) => statuses.length > 0 && statuses.every(predicate);
+  let statusCode = 502;
+  let errorCode = 'account_pool_upstream_error';
+  let message = '账号池请求失败，所有可用账号均未成功响应';
+  if (all((status) => status === 401)) {
+    statusCode = 503; errorCode = 'account_pool_auth_unavailable'; message = '账号池中的账号授权均已失效';
+  } else if (all((status) => status === 403)) {
+    statusCode = 403; errorCode = 'account_pool_model_forbidden'; message = '账号池中的账号均无权使用所请求的模型';
+  } else if (all((status) => status === 400 || status === 429)) {
+    statusCode = 429; errorCode = 'account_pool_rate_limited'; message = '账号池中的账号均已达到额度或速率限制';
+  } else if (all((status) => status === 0)) {
+    statusCode = 502; errorCode = 'account_pool_network_error'; message = '账号池网络连接失败';
+  }
+  return Object.assign(new Error(message), {
+    statusCode,
+    errorType: 'account_pool_error',
+    errorCode,
+    failures,
+  });
+}
+
 async function forwardAccountPoolResponses({ keyRecord, model, body, upstreamHeaders = {}, signal }) {
   const candidates = accountPoolCandidates(keyRecord?.accountIds, model);
-  if (!candidates.length) throw Object.assign(new Error(`所选账号均不可用或不支持模型 ${model}`), { statusCode: 503 });
+  if (!candidates.length) throw Object.assign(new Error(`所选账号均不可用、处于冷却状态或不支持模型 ${model}`), {
+    statusCode: 503,
+    errorType: 'account_pool_error',
+    errorCode: 'account_pool_unavailable',
+  });
   const failures = [];
   for (const account of candidates) {
     let dispatcher = null;
@@ -1107,19 +1212,27 @@ async function forwardAccountPoolResponses({ keyRecord, model, body, upstreamHea
         const tokens = currentAuth.tokens || currentAuth;
         const accountId = accountIdFromAuth(currentAuth);
         if (!accountId) throw Object.assign(new Error('账号授权缺少 ChatGPT Account ID'), { statusCode: 401 });
+        // The ChatGPT Codex upstream only accepts stored=false and streaming
+        // responses. The gateway aggregates the stream for non-stream callers.
+        const upstreamBody = { ...body, model, store: false, stream: true };
+        // ChatGPT's account-backed Codex endpoint does not accept the public
+        // Responses max_output_tokens field. Accept it at the Navo boundary and
+        // keep it in the normalized final response, but do not let it make the
+        // account-backed upstream reject the complete request.
+        delete upstreamBody.max_output_tokens;
         return fetch(CHATGPT_CODEX_RESPONSES_URL, {
           method: 'POST',
           headers: {
             ...upstreamHeaders,
             'Content-Type': 'application/json',
-            Accept: body.stream ? 'text/event-stream' : 'application/json',
+            Accept: 'text/event-stream',
             Authorization: `Bearer ${tokens.access_token}`,
             'ChatGPT-Account-ID': accountId,
             Originator: upstreamHeaders.Originator || 'codex_cli_rs',
             Version: APP_VERSION,
             'User-Agent': upstreamHeaders['User-Agent'] || `codex_cli_rs/${APP_VERSION}`,
           },
-          body: JSON.stringify({ ...body, model }), signal,
+          body: JSON.stringify(upstreamBody), signal,
           ...(dispatcher ? { dispatcher } : {}),
         });
       };
@@ -1133,7 +1246,7 @@ async function forwardAccountPoolResponses({ keyRecord, model, body, upstreamHea
         const status = upstream.status;
         coolDownAccountPoolEntry(account.id, upstream);
         try { upstream.body?.cancel(); } catch {}
-        failures.push(`${account.label}:HTTP ${status}`);
+        failures.push({ accountId: account.id, name: account.label, status, reason: `HTTP ${status}` });
         if (status === 401) {
           account.quotaError = '登录已失效，请重新授权';
           account.quotaErrorCode = 'auth_expired';
@@ -1147,11 +1260,20 @@ async function forwardAccountPoolResponses({ keyRecord, model, body, upstreamHea
       return { upstream, accountId: account.id, cleanup: () => dispatcher?.close().catch(() => {}) };
     } catch (error) {
       if (dispatcher) await dispatcher.close().catch(() => {});
-      failures.push(`${account.label}:${error.statusCode || error.code || 'error'}`);
+      if (signal?.aborted) throw error;
+      accountPoolCooldowns.set(account.id, Date.now() + 15_000);
+      failures.push({
+        accountId: account.id,
+        name: account.label,
+        status: Number(error.statusCode) || 0,
+        reason: String(error.code || error.message || 'error').slice(0, 160),
+      });
     }
   }
-  audit('api.pool.exhausted', { result: failures.join(',').slice(0, 500) });
-  throw Object.assign(new Error('账号池请求失败，所有可用账号均未成功响应'), { statusCode: 502 });
+  audit('api.pool.exhausted', {
+    result: failures.map((failure) => `${failure.name}:${failure.status || failure.reason}`).join(',').slice(0, 500),
+  });
+  throw poolFailureError(failures);
 }
 
 apiServiceManager.poolForwarder = forwardAccountPoolResponses;
@@ -1568,20 +1690,34 @@ function restoreSharedCodexAuth(accountId) {
   const active = readActiveCodexAuth();
   if (!active || active.accountId !== accountId) return;
   const account = accounts.find((item) => item.id === accountId);
-  if (account && fs.existsSync(SHARED_CODEX_AUTH_FILE)) {
+  if (active.status !== 'restore_failed' && account && fs.existsSync(SHARED_CODEX_AUTH_FILE)) {
     const { codexHomeDir } = accountPaths(account);
     copyFileAtomic(SHARED_CODEX_AUTH_FILE, path.join(codexHomeDir, 'auth.json'));
   }
+  let launchViewRestoreError = null;
   try { restoreLaunchView(active.launchView); }
-  catch (error) { audit('codex.launch-view.restore-failed', { result: error.message }); }
+  catch (error) {
+    launchViewRestoreError = error;
+    audit('codex.launch-view.restore-failed', { result: error.message });
+  }
   if (active.hadOriginalAuth && fs.existsSync(SHARED_AUTH_BACKUP_FILE)) {
     copyFileAtomic(SHARED_AUTH_BACKUP_FILE, SHARED_CODEX_AUTH_FILE);
   } else {
     fs.rmSync(SHARED_CODEX_AUTH_FILE, { force: true });
   }
-  fs.rmSync(ACTIVE_CODEX_AUTH_FILE, { force: true });
+  if (launchViewRestoreError) {
+    writeJsonAtomic(ACTIVE_CODEX_AUTH_FILE, {
+      ...active,
+      status: 'restore_failed',
+      processIdentity: null,
+      restoreError: launchViewRestoreError.message,
+    });
+  } else {
+    fs.rmSync(ACTIVE_CODEX_AUTH_FILE, { force: true });
+  }
   try { repairSharedCodexThreadCatalog(SHARED_CODEX_HOME); } catch {}
-  audit('codex.auth.restored', { accountId, result: 'shared-projects' });
+  if (!launchViewRestoreError) audit('codex.auth.restored', { accountId, result: 'shared-projects' });
+  return !launchViewRestoreError;
 }
 
 function ensureCodexProfileConfig(codexHomeDir) {
@@ -2038,13 +2174,18 @@ async function launchCodexDesktop(account, launchOptions = null) {
       for (const item of optimized) audit('codex.rollout.optimized', { result: `${item.threadId}:${item.beforeBytes}->${item.afterBytes}` });
     }
     setCodexLaunchProgress({ stage: 'credentials', message: '正在切换账号授权…', percent: 58 });
+    const staleAccount = readActiveCodexAuth();
+    if (staleAccount) {
+      restoreSharedCodexAuth(staleAccount.accountId);
+      if (readActiveCodexAuth()) throw new Error('上一次 Codex 启动状态尚未恢复，请先完成会话状态恢复');
+    }
     activateSharedCodexAuth(account);
     const active = readActiveCodexAuth();
     const launchView = prepareLaunchView(
       SHARED_CODEX_HOME,
       path.join(LAUNCH_VIEW_ROOT, `account-${active.startedAt || active.activatedAt}`.replace(/[^a-z0-9-]/gi, '')),
       selection,
-      { manageConfig: true },
+      { manageConfig: true, modelProvider: 'openai' },
     );
     writeJsonAtomic(ACTIVE_CODEX_AUTH_FILE, { ...active, launchView });
     const environment = codexEnvironment({ ...process.env, CODEX_HOME: SHARED_CODEX_HOME }, account);
@@ -2216,6 +2357,25 @@ function apiKeyCodexConfig(source, model, secret, language = 'zh-CN') {
   ].join('\n'), language);
 }
 
+function configAfterApiKeyCodex(source) {
+  const output = [];
+  let section = '';
+  let skipProvider = false;
+  for (const line of String(source || '').split(/\r?\n/)) {
+    const match = line.trim().match(/^\[([^\]]+)]$/);
+    if (match) {
+      section = match[1].trim();
+      skipProvider = section === 'model_providers.codex_navo';
+      if (skipProvider) continue;
+    }
+    if (skipProvider) continue;
+    if (!section && /^\s*(?:model|model_provider|cli_auth_credentials_store)\s*=/.test(line)) continue;
+    output.push(line);
+  }
+  const result = output.join('\n').replace(/^\s+|\s+$/g, '');
+  return result ? `${result}\n` : '';
+}
+
 function prepareApiKeyCodexHome(keyId, model, secret, selection) {
   fs.mkdirSync(SHARED_CODEX_HOME, { recursive: true });
   fs.mkdirSync(API_SHARED_BACKUP_DIR, { recursive: true });
@@ -2311,8 +2471,12 @@ function attemptLegacyAutomationQuarantine() {
 
 function restoreApiKeyCodexHome(active = readJson(ACTIVE_API_CODEX_FILE, null)) {
   if (!active) return;
+  let launchViewRestoreError = null;
   try { restoreLaunchView(active.launchView); }
-  catch (error) { audit('codex.launch-view.restore-failed', { result: error.message }); }
+  catch (error) {
+    launchViewRestoreError = error;
+    audit('codex.launch-view.restore-failed', { result: error.message });
+  }
   if (active.automationScopeFile && active.normalAutomationBackupFile && fs.existsSync(active.normalAutomationBackupFile)) {
     try {
       deactivateAutomationScope(SHARED_CODEX_HOME, active.automationScopeFile, active.normalAutomationBackupFile);
@@ -2328,7 +2492,14 @@ function restoreApiKeyCodexHome(active = readJson(ACTIVE_API_CODEX_FILE, null)) 
   if (managesSharedHome) {
     const configFile = path.join(SHARED_CODEX_HOME, 'config.toml');
     if (active.hadConfig && fs.existsSync(API_SHARED_CONFIG_BACKUP_FILE)) copyFileAtomic(API_SHARED_CONFIG_BACKUP_FILE, configFile);
-    else if (typeof active.hadConfig === 'boolean') fs.rmSync(configFile, { force: true });
+    else if (typeof active.hadConfig === 'boolean') {
+      // A first API launch can make Codex create its normal Windows/plugin
+      // defaults while the temporary provider is active. Preserve those new
+      // defaults, but remove Navo's provider, model override, and bearer token.
+      const preserved = fs.existsSync(configFile) ? configAfterApiKeyCodex(fs.readFileSync(configFile, 'utf8')) : '';
+      if (preserved) fs.writeFileSync(configFile, preserved, { mode: 0o600 });
+      else fs.rmSync(configFile, { force: true });
+    }
     // authManaged is false for current launches. Keep backward-compatible
     // restoration for a package prepared by v1.2.60 or earlier.
     if (active.authManaged !== false) {
@@ -2338,10 +2509,20 @@ function restoreApiKeyCodexHome(active = readJson(ACTIVE_API_CODEX_FILE, null)) 
     fs.rmSync(API_SHARED_CONFIG_BACKUP_FILE, { force: true });
     fs.rmSync(API_SHARED_AUTH_BACKUP_FILE, { force: true });
   }
-  fs.rmSync(ACTIVE_API_CODEX_FILE, { force: true });
-  if (active.configLockId) releaseCodexConfigLock(API_SHARED_CONFIG_LOCK_FILE, active.configLockId);
+  if (launchViewRestoreError) {
+    writeJsonAtomic(ACTIVE_API_CODEX_FILE, {
+      ...active,
+      status: 'restore_failed',
+      processIdentity: null,
+      restoreError: launchViewRestoreError.message,
+    });
+  } else {
+    fs.rmSync(ACTIVE_API_CODEX_FILE, { force: true });
+    if (active.configLockId) releaseCodexConfigLock(API_SHARED_CONFIG_LOCK_FILE, active.configLockId);
+  }
   try { repairSharedCodexThreadCatalog(SHARED_CODEX_HOME); } catch {}
-  audit('api.codex.profile-restored', { result: active.keyId || 'stale' });
+  if (!launchViewRestoreError) audit('api.codex.profile-restored', { result: active.keyId || 'stale' });
+  return !launchViewRestoreError;
 }
 
 const API_CODEX_LAUNCH_GRACE_MS = 120_000;
@@ -2422,6 +2603,7 @@ async function launchApiKeyCodex(keyId, launchOptions = null) {
     }
   };
   let activeRecord = null;
+  let spawnedPid = 0;
   try {
     setCodexLaunchProgress({ stage: 'network', message: '正在检测 API 代理可用性…', percent: 16 });
     const apiKeyNetwork = await prepareApiKeyNetwork(keyId, { preflight: true, purpose: '启动 API Codex' });
@@ -2434,7 +2616,10 @@ async function launchApiKeyCodex(keyId, launchOptions = null) {
       for (const item of optimized) audit('codex.rollout.optimized', { result: `${item.threadId}:${item.beforeBytes}->${item.afterBytes}` });
     }
     const staleApi = readJson(ACTIVE_API_CODEX_FILE, null);
-    if (staleApi) restoreApiKeyCodexHome(staleApi);
+    if (staleApi) {
+      restoreApiKeyCodexHome(staleApi);
+      if (readJson(ACTIVE_API_CODEX_FILE, null)) throw new Error('上一次 API Codex 启动状态尚未恢复，请先完成会话状态恢复');
+    }
     setCodexLaunchProgress({ stage: 'credentials', message: '正在准备 API 授权环境…', percent: 52 });
     const { record, secret } = apiServiceManager.issueLaunchSecret(keyId);
     const pool = apiServiceManager.accountPool();
@@ -2442,7 +2627,9 @@ async function launchApiKeyCodex(keyId, launchOptions = null) {
     activeRecord = prepareApiKeyCodexHome(keyId, model, secret, selection);
     const codexHomeDir = activeRecord.codexHomeDir;
     const installation = findCodexDesktop();
-    const environment = await apiKeyTaskEnvironment(keyId, apiCodexEnvironment(process.env, secret));
+    const routeEnvironment = await apiKeyTaskEnvironment(keyId, apiCodexEnvironment(process.env, secret));
+    const stableProxyPort = await prepareStableApiCodexProxy(apiKeyNetwork);
+    const environment = stableApiCodexProxyEnvironment(routeEnvironment);
     // A fresh CODEX_HOME can need dozens of SQLite migrations. Codex Desktop
     // applies a fixed 30-second initialize deadline, so finish those migrations
     // before opening the GUI instead of racing its handshake timer.
@@ -2454,22 +2641,23 @@ async function launchApiKeyCodex(keyId, launchOptions = null) {
     // destination opened by this API Codex task through its selected route.
     // The environment above applies the same rule to app-server and child tools.
     const desktopArgs = [
-      ...(apiKeyNetwork ? [
-        `--proxy-server=http://127.0.0.1:${apiKeyNetwork.mixedPort}`,
-        '--proxy-bypass-list=<local>;localhost;*.localhost;127.0.0.1;[::1]',
-      ] : []),
+      `--proxy-server=http://127.0.0.1:${stableProxyPort}`,
+      '--proxy-bypass-list=<local>;localhost;*.localhost;127.0.0.1;[::1]',
       `--lang=${selection.language}`,
       ...(localeDebugPort ? ['--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${localeDebugPort}`] : []),
     ];
     setCodexLaunchProgress({ stage: 'starting', message: '正在打开 Codex…', percent: 82 });
-    const spawnedPid = await spawnDetached(installation.executable, desktopArgs, {
+    spawnedPid = await spawnDetached(installation.executable, desktopArgs, {
       detached: true,
       stdio: 'ignore',
       windowsHide: false,
       env: environment,
     });
     setCodexLaunchProgress({ stage: 'waiting', message: '正在等待 Codex 窗口…', percent: 92 });
-    const processPid = await waitForCodexDesktop(10_000);
+    // Store-packaged Codex can spend well over ten seconds replacing its
+    // bootstrap process after app-server migrations. Restoring config during
+    // that interval leaves the late desktop process without codex_navo.
+    const processPid = await waitForCodexDesktop(60_000);
     if (!processPid) throw new Error(`Codex 启动进程 ${spawnedPid} 已退出`);
     if (localeDebugPort) {
       await applyDesktopLocaleBridge(localeDebugPort, selection.language);
@@ -2486,6 +2674,26 @@ async function launchApiKeyCodex(keyId, launchOptions = null) {
     closeTransaction();
     return processPid;
   } catch (error) {
+    if (spawnedPid) {
+      const snapshot = detectCodexDesktopSnapshot({ preferCache: false });
+      if (snapshot.pid && activeRecord) {
+        const recovered = {
+          ...activeRecord,
+          processPid: snapshot.pid,
+          processIdentity: codexProcessIdentity(snapshot),
+          status: 'running',
+        };
+        writeJsonAtomic(ACTIVE_API_CODEX_FILE, recovered);
+        audit('api.codex.started', { result: `${keyId}:recovered-after-launch-warning` });
+        closeTransaction();
+        return snapshot.pid;
+      }
+      if (isProcessAlive(spawnedPid)) {
+        spawnSync('taskkill.exe', ['/PID', String(spawnedPid), '/T', '/F'], {
+          encoding: 'utf8', windowsHide: true, timeout: 12_000,
+        });
+      }
+    }
     if (activeRecord || fs.existsSync(ACTIVE_API_CODEX_FILE)) {
       restoreApiKeyCodexHome(activeRecord || undefined);
     }
@@ -3343,6 +3551,9 @@ async function importRelayAccounts(value, operator) {
 }
 
 async function apiGatewayHandler(request, response) {
+  const requestId = `req_${crypto.randomBytes(12).toString('hex')}`;
+  response.setHeader('x-request-id', requestId);
+  let abortContext = null;
   try {
     if (!apiServiceManager.config.enabled) return sendOpenAiError(response, 503, 'Codex Navo API 服务尚未启用', 'service_unavailable');
     const url = new URL(request.url, `http://${request.headers.host || '127.0.0.1'}`);
@@ -3351,16 +3562,35 @@ async function apiGatewayHandler(request, response) {
     if (request.method === 'GET' && url.pathname === '/v1/models') {
       return sendJson(response, 200, { object: 'list', data: apiServiceManager.modelsForKey(keyRecord) });
     }
+    if (request.method === 'GET' && url.pathname === '/v1/pool/health') {
+      const pool = accountPoolHealth(keyRecord);
+      return sendJson(response, 200, {
+        object: 'account_pool.health',
+        status: pool.some((item) => item.status === 'available') ? 'available' : 'unavailable',
+        request_id: requestId,
+        limits: {
+          request_bytes: MAX_API_REQUEST_BYTES,
+          response_bytes: MAX_RESPONSE_BYTES,
+          timeout_seconds: 600,
+          max_output_tokens: 'accepted; account-backed upstream does not expose a strict token cutoff',
+        },
+        accounts: pool,
+      });
+    }
     if (request.method === 'POST' && url.pathname === '/v1/responses') {
       const raw = await readRawBody(request, MAX_API_REQUEST_BYTES);
       let body;
       try { body = JSON.parse(raw.toString('utf8')); }
       catch { return sendOpenAiError(response, 400, '请求不是有效的 JSON'); }
+      if (body.max_output_tokens != null && (!Number.isInteger(body.max_output_tokens) || body.max_output_tokens <= 0)) {
+        return sendOpenAiError(response, 400, 'max_output_tokens 必须是正整数', 'invalid_request_error', 'invalid_max_output_tokens');
+      }
+      abortContext = createGatewayAbort(request, response);
       const result = await apiServiceManager.forwardResponses({
         keyRecord,
         body,
         upstreamHeaders: codexUpstreamHeaders(request.headers),
-        signal: AbortSignal.timeout(10 * 60_000),
+        signal: abortContext.signal,
       });
       if (!result.upstream.ok) {
         const contentType = result.upstream.headers.get('content-type') || '';
@@ -3369,9 +3599,22 @@ async function apiGatewayHandler(request, response) {
         auditUpstreamFailure(result.upstream.status, result.model, body, message);
         apiServiceManager.recordUsage(keyRecord, {}, result.model);
         await result.cleanup?.();
+        abortContext.cleanup();
         return sendOpenAiError(response, result.upstream.status, message, 'upstream_error');
       }
       const contentType = result.upstream.headers.get('content-type') || '';
+      if (!body.stream) {
+        const text = await result.upstream.text();
+        await result.cleanup?.();
+        abortContext.cleanup();
+        if (Buffer.byteLength(text, 'utf8') > MAX_RESPONSE_BYTES) return sendOpenAiError(response, 502, '上游响应过大', 'upstream_error');
+        const payload = responsesSseToJson(text, { maxOutputTokens: body.max_output_tokens });
+        if (!payload) return sendOpenAiError(response, 502, '上游没有返回完整 Responses 结果', 'upstream_error');
+        apiServiceManager.recordUsage(keyRecord, extractUsage(payload), result.model);
+        response.writeHead(200, securityHeaders({ 'Content-Type': 'application/json; charset=utf-8' }));
+        response.end(JSON.stringify(payload));
+        return;
+      }
       if (body.stream || contentType.includes('text/event-stream')) {
         response.writeHead(200, securityHeaders({
           'Content-Type': 'text/event-stream; charset=utf-8',
@@ -3379,18 +3622,22 @@ async function apiGatewayHandler(request, response) {
           'X-Accel-Buffering': 'no',
         }));
         let usageRecorded = false;
-        if (!result.upstream.body) return response.end();
+        if (!result.upstream.body) { abortContext.cleanup(); await result.cleanup?.(); return response.end(); }
         const stream = Readable.fromWeb(result.upstream.body);
         const usageTap = createUsageTap((usage) => { usageRecorded = true; apiServiceManager.recordUsage(keyRecord, usage, result.model); });
-        const cleanup = () => result.cleanup?.();
+        const transform = createResponsesSseTransform({ maxOutputTokens: body.max_output_tokens });
+        const heartbeat = setInterval(() => { if (!response.writableEnded) response.write(': navo-heartbeat\n\n'); }, 15_000);
+        heartbeat.unref?.();
+        const cleanup = () => { clearInterval(heartbeat); abortContext.cleanup(); result.cleanup?.(); };
         stream.once('error', () => { if (!usageRecorded) apiServiceManager.recordUsage(keyRecord, {}, result.model); cleanup(); response.end(); });
         usageTap.once('end', () => { if (!usageRecorded) apiServiceManager.recordUsage(keyRecord, {}, result.model); cleanup(); });
         response.once('close', cleanup);
-        stream.pipe(usageTap).pipe(response);
+        stream.pipe(usageTap).pipe(transform).pipe(response);
         return;
       }
       const buffer = Buffer.from(await result.upstream.arrayBuffer());
       await result.cleanup?.();
+      abortContext.cleanup();
       if (buffer.length > MAX_RESPONSE_BYTES) return sendOpenAiError(response, 502, '上游响应过大', 'upstream_error');
       let payload;
       try { payload = JSON.parse(buffer.toString('utf8')); }
@@ -3406,12 +3653,17 @@ async function apiGatewayHandler(request, response) {
       try { chatBody = JSON.parse(raw.toString('utf8')); }
       catch { return sendOpenAiError(response, 400, '请求不是有效的 JSON'); }
       if (!Array.isArray(chatBody.messages)) return sendOpenAiError(response, 400, 'messages 必须是数组');
+      const requestedMaxOutputTokens = chatBody.max_completion_tokens ?? chatBody.max_tokens;
+      if (requestedMaxOutputTokens != null && (!Number.isInteger(requestedMaxOutputTokens) || requestedMaxOutputTokens <= 0)) {
+        return sendOpenAiError(response, 400, 'max_completion_tokens/max_tokens 必须是正整数', 'invalid_request_error', 'invalid_max_output_tokens');
+      }
       const responsesBody = chatToResponses(chatBody);
+      abortContext = createGatewayAbort(request, response);
       const result = await apiServiceManager.forwardResponses({
         keyRecord,
         body: responsesBody,
         upstreamHeaders: codexUpstreamHeaders(request.headers),
-        signal: AbortSignal.timeout(10 * 60_000),
+        signal: abortContext.signal,
       });
       if (!result.upstream.ok) {
         const contentType = result.upstream.headers.get('content-type') || '';
@@ -3420,9 +3672,20 @@ async function apiGatewayHandler(request, response) {
         auditUpstreamFailure(result.upstream.status, result.model, responsesBody, message);
         apiServiceManager.recordUsage(keyRecord, {}, result.model);
         await result.cleanup?.();
+        abortContext.cleanup();
         return sendOpenAiError(response, result.upstream.status, message, 'upstream_error');
       }
       const contentType = result.upstream.headers.get('content-type') || '';
+      if (!chatBody.stream) {
+        const text = await result.upstream.text();
+        await result.cleanup?.();
+        abortContext.cleanup();
+        if (Buffer.byteLength(text, 'utf8') > MAX_RESPONSE_BYTES) return sendOpenAiError(response, 502, '上游响应过大', 'upstream_error');
+        const payload = responsesSseToJson(text, { maxOutputTokens: responsesBody.max_output_tokens });
+        if (!payload) return sendOpenAiError(response, 502, '上游没有返回完整 Responses 结果', 'upstream_error');
+        apiServiceManager.recordUsage(keyRecord, extractUsage(payload), result.model);
+        return sendJson(response, 200, responsesToChat(payload));
+      }
       if (chatBody.stream || contentType.includes('text/event-stream')) {
         response.writeHead(200, securityHeaders({
           'Content-Type': 'text/event-stream; charset=utf-8',
@@ -3430,11 +3693,13 @@ async function apiGatewayHandler(request, response) {
           'X-Accel-Buffering': 'no',
         }));
         let usageRecorded = false;
-        if (!result.upstream.body) { await result.cleanup?.(); return response.end(); }
+        if (!result.upstream.body) { abortContext.cleanup(); await result.cleanup?.(); return response.end(); }
         const stream = Readable.fromWeb(result.upstream.body);
         const usageTap = createUsageTap((usage) => { usageRecorded = true; apiServiceManager.recordUsage(keyRecord, usage, result.model); });
         const transform = createChatSseTransform({ model: result.model });
-        const cleanup = () => result.cleanup?.();
+        const heartbeat = setInterval(() => { if (!response.writableEnded) response.write(': navo-heartbeat\n\n'); }, 15_000);
+        heartbeat.unref?.();
+        const cleanup = () => { clearInterval(heartbeat); abortContext.cleanup(); result.cleanup?.(); };
         stream.once('error', () => { if (!usageRecorded) apiServiceManager.recordUsage(keyRecord, {}, result.model); cleanup(); response.end(); });
         usageTap.once('end', () => { if (!usageRecorded) apiServiceManager.recordUsage(keyRecord, {}, result.model); cleanup(); });
         response.once('close', cleanup);
@@ -3443,6 +3708,7 @@ async function apiGatewayHandler(request, response) {
       }
       const buffer = Buffer.from(await result.upstream.arrayBuffer());
       await result.cleanup?.();
+      abortContext.cleanup();
       if (buffer.length > MAX_RESPONSE_BYTES) return sendOpenAiError(response, 502, '上游响应过大', 'upstream_error');
       let payload;
       try { payload = JSON.parse(buffer.toString('utf8')); }
@@ -3452,7 +3718,17 @@ async function apiGatewayHandler(request, response) {
     }
     return sendOpenAiError(response, 404, '接口不存在', 'not_found_error');
   } catch (error) {
-    return sendOpenAiError(response, error.statusCode || 502, error.message || 'API 网关请求失败', 'gateway_error');
+    abortContext?.cleanup();
+    if (response.headersSent || response.writableEnded) return;
+    const aborted = error.name === 'AbortError' || error.code === 'UND_ERR_ABORTED';
+    const message = aborted ? 'API 请求已取消或超时' : error.message || 'API 网关请求失败';
+    return sendOpenAiError(
+      response,
+      aborted ? 408 : error.statusCode || 502,
+      message,
+      error.errorType || 'gateway_error',
+      aborted ? 'request_aborted' : error.errorCode || null,
+    );
   }
 }
 
@@ -3633,19 +3909,25 @@ const server = http.createServer(async (request, response) => {
       const previousAssignment = networkManager.publicAssignment(networkId);
       try {
         const assignment = networkManager.assign(networkId, body);
-        await networkManager.ensureAccount(networkId);
+        const runtime = await networkManager.ensureAccount(networkId);
         const activeApi = readJson(ACTIVE_API_CODEX_FILE, null);
-        if (activeApi?.keyId === keyId && assignment.mode === 'proxy') {
-          const preflight = await networkManager.preflightAccount(networkId, 12_000);
-          if (!preflight.ok) throw new Error(`新线路检测未通过：${preflight.message}`);
-          audit('api.key.network.hot-switch-validated', { operator, result: `${keyId}:${preflight.status}:${preflight.latencyMs || 0}ms` });
+        if (activeApi?.keyId === keyId) {
+          if (assignment.mode === 'proxy') {
+            const preflight = await networkManager.preflightAccount(networkId, 12_000);
+            if (!preflight.ok) throw new Error(`新线路检测未通过：${preflight.message}`);
+            audit('api.key.network.hot-switch-validated', { operator, result: `${keyId}:${preflight.status}:${preflight.latencyMs || 0}ms` });
+          }
+          await prepareStableApiCodexProxy(runtime);
+          audit('api.codex.proxy-relay-switched', { operator, result: `${keyId}:${runtime?.mixedPort || 'DIRECT'}` });
         }
         audit('api.key.network.updated', { operator, result: `${keyId}:${assignment.label}` });
         return sendJson(response, 200, { ok: true, data: { assignment, networkSettings: networkManager.publicState() } });
       } catch (error) {
         try {
           networkManager.assign(networkId, previousAssignment);
-          await networkManager.ensureAccount(networkId);
+          const rollbackRuntime = await networkManager.ensureAccount(networkId);
+          const activeApi = readJson(ACTIVE_API_CODEX_FILE, null);
+          if (activeApi?.keyId === keyId) await prepareStableApiCodexProxy(rollbackRuntime);
         } catch (rollbackError) {
           audit('api.key.network.rollback-failed', { operator, result: `${keyId}:${rollbackError.message}` });
         }

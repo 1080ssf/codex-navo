@@ -28,6 +28,12 @@ test('desktop locale override is stored in the Codex desktop settings section', 
   assert.equal((replaced.match(/localeOverride/g) || []).length, 1);
 });
 
+test('desktop locale also constrains generated plan and progress text', () => {
+  const output = withDesktopLocale('model = "gpt-5.6-sol"\n', 'zh-CN');
+  assert.match(output, /^developer_instructions = ".*Simplified Chinese.*"/m);
+  assert.match(output, /localeOverride = "zh-CN"/);
+});
+
 test('launch view keeps only selected projects and conversations', () => {
   const source = {
     'local-projects': { p1: { rootPaths: ['C:/one'] }, p2: { rootPaths: ['C:/two'] } },
@@ -111,6 +117,77 @@ print(json.dumps(db.execute('SELECT id,model_provider,archived,title FROM thread
 db.close()
 `, [db]));
   assert.deepEqual(after, [['t1', 'openai', 0, 'changed'], ['t2', 'openai', 0, 'two']]);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('launch transaction maps mixed providers for the active mode and restores each original provider', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-launch-provider-'));
+  const home = path.join(root, 'home');
+  const backup = path.join(root, 'backup');
+  fs.mkdirSync(home, { recursive: true });
+  const db = path.join(home, 'state_5.sqlite');
+  python(`
+import sqlite3, sys
+db=sqlite3.connect(sys.argv[1])
+db.execute('CREATE TABLE threads(id TEXT PRIMARY KEY, model_provider TEXT NOT NULL, archived INTEGER NOT NULL, title TEXT NOT NULL)')
+db.executemany('INSERT INTO threads VALUES(?,?,?,?)', [('account-thread','openai',0,'account'),('api-thread','codex_navo',0,'api')])
+db.commit(); db.close()
+`, [db]);
+  const record = prepareLaunchView(home, backup, {
+    language: 'zh-CN', projectIds: [], threadIds: ['account-thread', 'api-thread'],
+  }, { modelProvider: 'openai' });
+  const during = JSON.parse(python(`
+import json, sqlite3, sys
+db=sqlite3.connect(sys.argv[1])
+print(json.dumps(db.execute('SELECT id,model_provider FROM threads ORDER BY id').fetchall()))
+db.close()
+`, [db]));
+  assert.deepEqual(during, [['account-thread', 'openai'], ['api-thread', 'openai']]);
+  python("import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); db.execute(\"UPDATE threads SET title='continued' WHERE id='api-thread'\"); db.commit(); db.close()", [db]);
+  restoreLaunchView(record);
+  const after = JSON.parse(python(`
+import json, sqlite3, sys
+db=sqlite3.connect(sys.argv[1])
+print(json.dumps(db.execute('SELECT id,model_provider,title FROM threads ORDER BY id').fetchall()))
+db.close()
+`, [db]));
+  assert.deepEqual(after, [['account-thread', 'openai', 'account'], ['api-thread', 'codex_navo', 'continued']]);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('launch view restoration tolerates Codex adding and removing thread columns during startup', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-launch-schema-'));
+  const home = path.join(root, 'home');
+  const backup = path.join(root, 'backup');
+  fs.mkdirSync(home, { recursive: true });
+  const db = path.join(home, 'state_5.sqlite');
+  python(`
+import sqlite3, sys
+db=sqlite3.connect(sys.argv[1])
+db.execute('CREATE TABLE threads(id TEXT PRIMARY KEY, model_provider TEXT, archived INTEGER, legacy_value TEXT)')
+db.execute('INSERT INTO threads VALUES(?,?,?,?)', ('t1','openai',0,'legacy'))
+db.commit(); db.close()
+`, [db]);
+  const record = prepareLaunchView(home, backup, {
+    language: 'zh-CN', projectIds: [], threadIds: ['t1'],
+  }, { modelProvider: 'codex_navo' });
+  python(`
+import sqlite3, sys
+db=sqlite3.connect(sys.argv[1])
+db.execute('ALTER TABLE threads RENAME TO threads_old')
+db.execute('CREATE TABLE threads(id TEXT PRIMARY KEY, model_provider TEXT, archived INTEGER, current_value TEXT)')
+db.execute('INSERT INTO threads VALUES(?,?,?,?)', ('t1','codex_navo',0,'current'))
+db.execute('DROP TABLE threads_old')
+db.commit(); db.close()
+`, [db]);
+  restoreLaunchView(record);
+  const after = JSON.parse(python(`
+import json, sqlite3, sys
+db=sqlite3.connect(sys.argv[1])
+print(json.dumps(db.execute('SELECT id,model_provider,archived,legacy_value FROM threads').fetchall()))
+db.close()
+`, [db]));
+  assert.deepEqual(after, [['t1', 'openai', 0, 'legacy']]);
   fs.rmSync(root, { recursive: true, force: true });
 });
 

@@ -56,7 +56,9 @@ test('API Codex validates its assigned proxy route before opening the desktop ap
     'proxy preflight must finish before Codex Desktop is spawned',
   );
   assert.match(launch, /const apiKeyNetwork = await prepareApiKeyNetwork/);
-  assert.match(launch, /--proxy-server=http:\/\/127\.0\.0\.1:\$\{apiKeyNetwork\.mixedPort\}/);
+  assert.match(server, /const API_CODEX_PROXY_PORT = 18301/);
+  assert.match(launch, /await prepareStableApiCodexProxy\(apiKeyNetwork\)/);
+  assert.match(launch, /--proxy-server=http:\/\/127\.0\.0\.1:\$\{stableProxyPort\}/);
   assert.match(launch, /--proxy-bypass-list=<local>;localhost;\*\.localhost;127\.0\.0\.1;\[::1\]/);
 });
 
@@ -172,6 +174,14 @@ test('API Codex launch status cannot be mistaken for an exited desktop during wa
   assert.match(server, /\['preparing', 'launching'\]\.includes\(active\.status\) && launchIsRecent/);
   assert.match(server, /const apiCodexLifecycleTimer = setInterval/);
   assert.match(server, /reconcileActiveApiCodexState\(\)/);
+  const launchStart = server.indexOf('async function launchApiKeyCodex');
+  const launch = server.slice(launchStart, server.indexOf('function stopApiKeyCodex', launchStart));
+  assert.match(launch, /await waitForCodexDesktop\(60_000\)/);
+  assert.match(launch, /recovered-after-launch-warning/);
+  assert.ok(
+    launch.indexOf('if (snapshot.pid && activeRecord)') < launch.indexOf('restoreApiKeyCodexHome(activeRecord || undefined)'),
+    'a late Store process must be adopted before restoring codex_navo config',
+  );
 });
 
 test('API Codex shared-state transaction preserves launch config during warmup and restores original bytes', async () => {
@@ -217,6 +227,14 @@ test('API Codex shared-state transaction preserves launch config during warmup a
     if (secondLaunchAuth.OPENAI_API_KEY !== 'second-launch-secret') throw new Error('temporary auth was not installed without an original auth file');
     mod.__test.restoreApiKeyCodexHome(preparedWithoutOriginalAuth);
     if (fs.existsSync(path.join(shared, 'auth.json'))) throw new Error('missing original auth state was not restored');
+
+    fs.rmSync(path.join(shared, 'config.toml'), { force: true });
+    const preparedWithoutOriginalConfig = mod.__test.prepareApiKeyCodexHome('key-test', 'gpt-5.6-sol', 'third-launch-secret');
+    fs.appendFileSync(path.join(shared, 'config.toml'), '\\n[windows]\\nsandbox = "elevated"\\n');
+    mod.__test.restoreApiKeyCodexHome(preparedWithoutOriginalConfig);
+    const generatedDefaults = fs.readFileSync(path.join(shared, 'config.toml'), 'utf8');
+    if (!generatedDefaults.includes('[windows]')) throw new Error('Codex-generated defaults were deleted after first API launch');
+    if (generatedDefaults.includes('codex_navo') || generatedDefaults.includes('third-launch-secret')) throw new Error('launch-scoped provider leaked into preserved defaults');
     mod.server.close();
     mod.apiGatewayServer.close();
     process.exit(0);

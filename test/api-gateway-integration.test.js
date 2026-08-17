@@ -41,11 +41,20 @@ test('gateway serves account-pool models with Navo key authentication', { timeou
   const headers = { Authorization: `Bearer ${created.secret}`, 'Content-Type': 'application/json' };
   const models = await fetch(`http://127.0.0.1:${gatewayPort}/v1/models`, { headers }).then((value) => value.json());
   assert.ok(models.data.some((model) => model.id === 'gpt-5.6-sol'));
+  const healthResponse = await fetch(`http://127.0.0.1:${gatewayPort}/v1/pool/health`, { headers });
+  assert.match(healthResponse.headers.get('x-request-id') || '', /^req_[a-f0-9]+$/);
+  const health = await healthResponse.json();
+  assert.equal(health.object, 'account_pool.health');
+  assert.equal(health.status, 'unavailable');
+  assert.equal(health.limits.timeout_seconds, 600);
   const noAccounts = await fetch(`http://127.0.0.1:${gatewayPort}/v1/responses`, {
     method: 'POST', headers, body: JSON.stringify({ model: 'gpt-5.6-sol', input: 'hello' }),
   });
   assert.equal(noAccounts.status, 503);
-  assert.doesNotMatch(await noAccounts.text(), /resolveProvider/);
+  assert.match(noAccounts.headers.get('x-request-id') || '', /^req_[a-f0-9]+$/);
+  const noAccountsText = await noAccounts.text();
+  assert.doesNotMatch(noAccountsText, /resolveProvider/);
+  assert.equal(JSON.parse(noAccountsText).error.code, 'account_pool_unavailable');
   const largeHistory = await fetch(`http://127.0.0.1:${gatewayPort}/v1/responses`, {
     method: 'POST', headers, body: JSON.stringify({ model: 'gpt-5.6-sol', input: 'x'.repeat(3 * 1024 * 1024) }),
   });

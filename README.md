@@ -258,3 +258,11 @@ npm run build:desktop
 ## License
 
 [MIT License](LICENSE)
+
+## Code signing policy and privacy
+
+Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+
+- [Code signing policy](CODE_SIGNING_POLICY.md)
+- [Privacy policy](PRIVACY.md)
+- Signed installers are published only through the [official GitHub Releases page](https://github.com/1080ssf/codex-navo/releases).
