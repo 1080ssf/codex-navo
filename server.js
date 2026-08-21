@@ -15,7 +15,7 @@ const {
   normalizeOperator,
   validateAccountId,
 } = require('./lib/core');
-const { readCodexModels, readCodexQuota, warmCodexAppServer } = require('./lib/codex-quota');
+const { hasSpendableCredits, readCodexModels, readCodexQuota, warmCodexAppServer } = require('./lib/codex-quota');
 const { CodexUsageTracker } = require('./lib/codex-usage');
 const { readModelCatalog } = require('./lib/model-catalog');
 const { detectQuotaReset, localDateKey, normalizeWakeSettings, quotaObservation, shouldWakeAccount } = require('./lib/wake');
@@ -25,6 +25,7 @@ const {
   navigateProtocolPage,
   protocolPromptFromOutput,
   readProtocolCookies,
+  readProtocolSubscription,
   readProtocolOauthExport,
   readProtocolSession,
   resolveProtocolProxyEnvironment,
@@ -59,6 +60,7 @@ const {
   normalizeLaunchSelection,
   optimizeSelectedRollouts,
   prepareLaunchView,
+  pruneMissingLocalProjects,
   restoreLaunchView,
   withDesktopLocale,
 } = require('./lib/codex-launch-view');
@@ -68,7 +70,6 @@ const { createUsageTap } = require('./lib/usage-stream');
 const { codexUpstreamHeaders } = require('./lib/codex-upstream-headers');
 const { resolveChromeDebugPort } = require('./lib/browser-debug-session');
 const { requestShape, upstreamMessage } = require('./lib/upstream-error');
-const { activateAutomationScope, deactivateAutomationScope, quarantineLegacyApiAutomations } = require('./lib/codex-automation-scope');
 const { parseRelayAccountPackage } = require('./lib/relay-account-import');
 const { version: APP_VERSION } = require('./package.json');
 
@@ -106,9 +107,6 @@ const API_SHARED_BACKUP_DIR = path.join(CODEX_PROFILES_DIR, '_api-shared');
 const API_SHARED_CONFIG_BACKUP_FILE = path.join(API_SHARED_BACKUP_DIR, 'original-config.toml');
 const API_SHARED_AUTH_BACKUP_FILE = path.join(API_SHARED_BACKUP_DIR, 'original-auth.json');
 const API_SHARED_CONFIG_LOCK_FILE = path.join(API_SHARED_BACKUP_DIR, 'config.lock');
-const API_AUTOMATION_SCOPE_DIR = path.join(CODEX_PROFILES_DIR, '_api-automations');
-const API_NORMAL_AUTOMATION_BACKUP_FILE = path.join(API_SHARED_BACKUP_DIR, 'normal-automations.json');
-const API_LEGACY_AUTOMATION_SCOPE_FILE = path.join(API_AUTOMATION_SCOPE_DIR, 'legacy-unassigned.json');
 const LAUNCH_VIEW_ROOT = path.join(CODEX_PROFILES_DIR, '_launch-view');
 const ROLLOUT_BACKUP_ROOT = path.join(SHARED_CODEX_HOME, 'navo-rollout-backups');
 const IP_CHECK_URL = 'https://ipip.la/';
@@ -686,11 +684,11 @@ function detectCodexDesktopSnapshot({ preferCache = true } = {}) {
 
   const queries = [
     {
-      command: "$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); Get-CimInstance Win32_Process -Filter \"Name = 'ChatGPT.exe' OR Name = 'codex.exe'\" | Where-Object { $_.CommandLine -notmatch '--type=' } | Sort-Object CreationDate | Select-Object -First 1 ProcessId,ParentProcessId,@{n='CreationDate';e={$_.CreationDate.ToUniversalTime().ToString('o')}},ExecutablePath,CommandLine | ConvertTo-Json -Compress",
+      command: "$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); Get-CimInstance Win32_Process -Filter \"Name = 'ChatGPT.exe' OR Name = 'codex.exe'\" | Where-Object { $_.CommandLine -notmatch '--type=' -and $_.CommandLine -notmatch '(?:^|\\s)(?:app-server|login|exec|resume|fork|mcp|cloud)(?:\\s|$)' } | Sort-Object @{e={if ($_.Name -eq 'ChatGPT.exe') {0} else {1}}},CreationDate | Select-Object -First 1 ProcessId,ParentProcessId,@{n='CreationDate';e={$_.CreationDate.ToUniversalTime().ToString('o')}},ExecutablePath,CommandLine | ConvertTo-Json -Compress",
       timeout: 3_000,
     },
     {
-      command: "$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); Get-Process -Name ChatGPT,codex -ErrorAction SilentlyContinue | Sort-Object StartTime | Select-Object -First 1 Id,@{n='StartTime';e={$_.StartTime.ToUniversalTime().ToString('o')}},Path | ConvertTo-Json -Compress",
+      command: "$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); Get-Process -Name ChatGPT -ErrorAction SilentlyContinue | Sort-Object StartTime | Select-Object -First 1 Id,@{n='StartTime';e={$_.StartTime.ToUniversalTime().ToString('o')}},Path | ConvertTo-Json -Compress",
       timeout: 2_000,
     },
   ];
@@ -1053,10 +1051,14 @@ function accountRemainingPercent(account) {
   return values.length ? Math.min(...values) : 50;
 }
 
+function accountHasUsableQuota(account) {
+  return accountRemainingPercent(account) > 0 || hasSpendableCredits(account.quota?.credits);
+}
+
 function accountPoolCandidates(accountIds = [], model = '') {
   const now = Date.now();
   const eligible = accounts.filter((account) => account.enabled !== false && isCodexAuthenticated(account)
-    && account.quotaErrorCode !== 'auth_expired' && accountRemainingPercent(account) > 0
+    && account.quotaErrorCode !== 'auth_expired' && accountHasUsableQuota(account)
     && (accountPoolCooldowns.get(account.id) || 0) <= now);
   const requestedModel = String(model || '').split('/').pop();
   const supportsModel = (account) => {
@@ -1157,13 +1159,14 @@ function accountPoolHealth(keyRecord) {
       let status = 'available';
       if (account.enabled === false) status = 'disabled';
       else if (!authenticated) status = 'authentication_required';
-      else if (remainingPercent <= 0) status = 'quota_exhausted';
+      else if (!accountHasUsableQuota(account)) status = 'quota_exhausted';
       else if (cooldownUntil > now) status = 'cooldown';
       return {
         id: account.id,
         name: account.label,
         status,
         remaining_percent: remainingPercent,
+        credit_backed: remainingPercent <= 0 && hasSpendableCredits(account.quota?.credits),
         cooldown_until: cooldownUntil > now ? new Date(cooldownUntil).toISOString() : null,
         models: [...(accountModelCapabilities.get(account.id) || [])],
       };
@@ -1700,24 +1703,25 @@ function restoreSharedCodexAuth(accountId) {
     launchViewRestoreError = error;
     audit('codex.launch-view.restore-failed', { result: error.message });
   }
+  if (launchViewRestoreError) {
+    // Keep the launch-scoped auth and backups intact. Restoring credentials
+    // while Codex still owns its SQLite WAL leaves a half-restored profile.
+    writeJsonAtomic(ACTIVE_CODEX_AUTH_FILE, {
+      ...active,
+      status: 'restore_failed',
+      restoreError: launchViewRestoreError.message,
+    });
+    return false;
+  }
   if (active.hadOriginalAuth && fs.existsSync(SHARED_AUTH_BACKUP_FILE)) {
     copyFileAtomic(SHARED_AUTH_BACKUP_FILE, SHARED_CODEX_AUTH_FILE);
   } else {
     fs.rmSync(SHARED_CODEX_AUTH_FILE, { force: true });
   }
-  if (launchViewRestoreError) {
-    writeJsonAtomic(ACTIVE_CODEX_AUTH_FILE, {
-      ...active,
-      status: 'restore_failed',
-      processIdentity: null,
-      restoreError: launchViewRestoreError.message,
-    });
-  } else {
-    fs.rmSync(ACTIVE_CODEX_AUTH_FILE, { force: true });
-  }
+  fs.rmSync(ACTIVE_CODEX_AUTH_FILE, { force: true });
   try { repairSharedCodexThreadCatalog(SHARED_CODEX_HOME); } catch {}
-  if (!launchViewRestoreError) audit('codex.auth.restored', { accountId, result: 'shared-projects' });
-  return !launchViewRestoreError;
+  audit('codex.auth.restored', { accountId, result: 'shared-projects' });
+  return true;
 }
 
 function ensureCodexProfileConfig(codexHomeDir) {
@@ -1828,7 +1832,12 @@ function floatingWindowState() {
     ? Number(activeKey.quota?.remainingPercent)
     : quotaValues.length ? Math.min(...quotaValues) : null;
   const activeStatuses = new Set(['running', 'waiting_input', 'waiting_approval']);
-  const task = sessionMonitor.snapshot().tasks.find((item) => activeStatuses.has(item.status)) || null;
+  // Rollout files can end without a terminal event after a reboot or forced
+  // shutdown. Never surface that stale state as a running task when no Codex
+  // desktop process exists.
+  const task = codexSnapshot.pid
+    ? sessionMonitor.snapshot().tasks.find((item) => activeStatuses.has(item.status)) || null
+    : null;
   return {
     account: {
       id: activeKey?.id || activeAccount?.id || '',
@@ -2142,6 +2151,58 @@ async function waitForCodexDesktop(timeoutMs = 8_000, stableMs = 1_200) {
   return null;
 }
 
+const PLAN_EXPIRY_REFRESH_MS = 12 * 60 * 60_000;
+
+async function refreshAccountPlanExpiry(account, { force = false } = {}) {
+  if (!account || account.accountKind === 'relay' || !isCodexAuthenticated(account)) return null;
+  const lastChecked = Date.parse(account.planExpiryCheckedAt || '');
+  const refreshInterval = account.planExpiryError ? 10 * 60_000 : PLAN_EXPIRY_REFRESH_MS;
+  if (!force && Number.isFinite(lastChecked) && Date.now() - lastChecked < refreshInterval) {
+    return account.planExpiresAt || null;
+  }
+  const { browserDir } = accountPaths(account);
+  const activePortFile = path.join(browserDir, 'DevToolsActivePort');
+  let port = await readLiveChromeDebugPort(activePortFile);
+  let browser = null;
+  try {
+    const auth = readAccountAuth(account);
+    const tokens = auth.tokens && typeof auth.tokens === 'object' ? auth.tokens : auth;
+    const accessToken = String(tokens.access_token || '');
+    const claims = decodeJwtClaims(accessToken);
+    const authClaims = claims['https://api.openai.com/auth'] || {};
+    const accountId = String(tokens.account_id || auth.account_id || authClaims.chatgpt_account_id || claims.chatgpt_account_id || '');
+    if (!accessToken || !accountId) throw new Error('Codex OAuth 授权中缺少账号标识');
+    if (!port) {
+      browser = await launchAccountBrowserForProtocol(account, { visibleOffscreen: true });
+      port = browser.port;
+    }
+    const subscription = await readProtocolSubscription({
+      port, accessToken, accountId, closeBrowser: Boolean(browser),
+    });
+    account.planExpiryCheckedAt = new Date().toISOString();
+    account.planExpiryError = '';
+    account.planRenewsAt = subscription.renewsAt;
+    account.planBillingPeriod = subscription.billingPeriod;
+    if (subscription.expiresAt) account.planExpiresAt = subscription.expiresAt;
+    else delete account.planExpiresAt;
+    saveAccounts([...accounts]);
+    audit('account.plan-expiry.refreshed', { accountId: account.id, result: subscription.expiresAt || 'not-returned' });
+    return account.planExpiresAt || null;
+  } catch (error) {
+    account.planExpiryCheckedAt = new Date().toISOString();
+    account.planExpiryError = error.message;
+    saveAccounts([...accounts]);
+    audit('account.plan-expiry.failed', { accountId: account.id, result: error.message });
+    return null;
+  } finally {
+    if (browser && isProcessAlive(browser.processPid)) stopProtocolBrowser(browser);
+  }
+}
+
+async function refreshStaleAccountPlanExpiries({ force = false } = {}) {
+  await Promise.allSettled(accounts.map((account) => refreshAccountPlanExpiry(account, { force })));
+}
+
 async function launchCodexDesktop(account, launchOptions = null) {
   setCodexLaunchProgress({ stage: 'proxy', message: '正在检测代理可用性…', percent: 16 });
   const accountNetwork = await prepareAccountNetwork(account, { preflight: true, purpose: '启动 Codex' });
@@ -2166,6 +2227,7 @@ async function launchCodexDesktop(account, launchOptions = null) {
   };
   try {
     setCodexLaunchProgress({ stage: 'sessions', message: '正在加载项目与会话…', percent: 34 });
+    restoreStoppedLaunchStateBeforeCatalog();
     repairSharedCodexPreferences();
     const catalog = listCodexLaunchOptions(SHARED_CODEX_HOME);
     const selection = normalizeLaunchSelection(launchOptions, catalog);
@@ -2174,11 +2236,7 @@ async function launchCodexDesktop(account, launchOptions = null) {
       for (const item of optimized) audit('codex.rollout.optimized', { result: `${item.threadId}:${item.beforeBytes}->${item.afterBytes}` });
     }
     setCodexLaunchProgress({ stage: 'credentials', message: '正在切换账号授权…', percent: 58 });
-    const staleAccount = readActiveCodexAuth();
-    if (staleAccount) {
-      restoreSharedCodexAuth(staleAccount.accountId);
-      if (readActiveCodexAuth()) throw new Error('上一次 Codex 启动状态尚未恢复，请先完成会话状态恢复');
-    }
+    if (readActiveCodexAuth()) throw new Error('上一次 Codex 启动状态尚未恢复，请先完成会话状态恢复');
     activateSharedCodexAuth(account);
     const active = readActiveCodexAuth();
     const launchView = prepareLaunchView(
@@ -2398,23 +2456,15 @@ function prepareApiKeyCodexHome(keyId, model, secret, selection) {
       hadAuth,
       authManaged: true,
       configLockId: lock.id,
-      automationScopeFile: path.join(API_AUTOMATION_SCOPE_DIR, `${crypto.createHash('sha256').update(keyId).digest('hex').slice(0, 24)}.json`),
-      normalAutomationBackupFile: API_NORMAL_AUTOMATION_BACKUP_FILE,
       status: 'preparing',
       startedAt: new Date().toISOString(),
     };
     // Save the rollback marker before changing shared files. Status polling can
     // then distinguish app-server warmup from a desktop process that has exited.
     writeJsonAtomic(ACTIVE_API_CODEX_FILE, active);
-    const automationScope = activateAutomationScope(
-      SHARED_CODEX_HOME,
-      active.automationScopeFile,
-      active.normalAutomationBackupFile,
-      API_LEGACY_AUTOMATION_SCOPE_FILE,
-    );
-    active = { ...active, automationScopeActive: automationScope.active };
-    writeJsonAtomic(ACTIVE_API_CODEX_FILE, active);
-    if (automationScope.migrated) audit('api.codex.automations-migrated', { result: `${keyId}:${automationScope.migrated}` });
+    // Scheduled tasks and their run history are device state, not account
+    // credentials. Keep the shared Codex catalog in every launch mode so a
+    // completed occurrence cannot become due again after an account/API switch.
     const sourceConfig = hadConfig ? fs.readFileSync(configFile, 'utf8') : '';
     fs.writeFileSync(configFile, apiKeyCodexConfig(sourceConfig, model, secret, selection?.language), { mode: 0o600 });
     // Codex Desktop special-cases the built-in `openai` provider and requires
@@ -2442,31 +2492,23 @@ function prepareApiKeyCodexHome(keyId, model, secret, selection) {
 }
 
 function repairSharedCodexPreferences() {
+  const projects = pruneMissingLocalProjects(SHARED_CODEX_HOME);
+  if (projects.changed) audit('codex.projects.pruned', { result: `${projects.removed.length}:${projects.prunedRoots}` });
   const config = repairSharedCodexConfig(SHARED_CODEX_HOME);
   if (config.changed) audit('codex.config.recovered', { result: config.recovered.join(',') });
   const catalog = repairSharedCodexThreadCatalog(SHARED_CODEX_HOME);
   if (catalog.changed) audit('codex.thread-catalog.recovered', { result: `${catalog.catalogCount || 0}` });
   else if (catalog.reason === 'repair-failed') audit('codex.thread-catalog.repair-failed', { result: catalog.error || catalog.reason });
-  return { config, catalog, changed: Boolean(config.changed || catalog.changed) };
+  return { projects, config, catalog, changed: Boolean(projects.changed || config.changed || catalog.changed) };
 }
 
-function quarantineLeakedApiAutomations() {
-  if (readJson(ACTIVE_API_CODEX_FILE, null) || findRunningCodexDesktopPid()) return { migrated: 0 };
-  const result = quarantineLegacyApiAutomations(SHARED_CODEX_HOME, API_LEGACY_AUTOMATION_SCOPE_FILE);
-  if (result.migrated) audit('api.codex.automations-quarantined', { result: `${result.migrated}` });
-  return result;
-}
-
-let legacyAutomationQuarantinePending = true;
-function attemptLegacyAutomationQuarantine() {
-  if (!legacyAutomationQuarantinePending) return;
-  if (readJson(ACTIVE_API_CODEX_FILE, null) || findRunningCodexDesktopPid()) return;
-  try {
-    quarantineLeakedApiAutomations();
-    legacyAutomationQuarantinePending = false;
-  } catch (error) {
-    audit('api.codex.automations-quarantine-failed', { result: error.message });
-  }
+function restoreStoppedLaunchStateBeforeCatalog() {
+  if (findRunningCodexDesktopPid()) return false;
+  const activeApi = readJson(ACTIVE_API_CODEX_FILE, null);
+  if (activeApi && !restoreApiKeyCodexHome(activeApi)) throw new Error('上一次 API Codex 会话状态仍被占用，请确认 Codex 已完全退出后重试');
+  const activeAccount = readActiveCodexAuth();
+  if (activeAccount && !restoreSharedCodexAuth(activeAccount.accountId)) throw new Error('上一次 Codex 会话状态仍被占用，请确认 Codex 已完全退出后重试');
+  return true;
 }
 
 function restoreApiKeyCodexHome(active = readJson(ACTIVE_API_CODEX_FILE, null)) {
@@ -2477,14 +2519,17 @@ function restoreApiKeyCodexHome(active = readJson(ACTIVE_API_CODEX_FILE, null)) 
     launchViewRestoreError = error;
     audit('codex.launch-view.restore-failed', { result: error.message });
   }
-  if (active.automationScopeFile && active.normalAutomationBackupFile && fs.existsSync(active.normalAutomationBackupFile)) {
-    try {
-      deactivateAutomationScope(SHARED_CODEX_HOME, active.automationScopeFile, active.normalAutomationBackupFile);
-    } catch (error) {
-      audit('api.codex.automations-restore-failed', { result: error.message });
-      throw error;
-    }
+  if (launchViewRestoreError) {
+    writeJsonAtomic(ACTIVE_API_CODEX_FILE, {
+      ...active,
+      status: 'restore_failed',
+      restoreError: launchViewRestoreError.message,
+    });
+    return false;
   }
+  // Older releases stored per-Key automation snapshots in this marker. Do not
+  // restore that stale backup: the currently active database contains the most
+  // recent execution ledger and becomes the shared device-level state.
   const managesSharedHome = typeof active.hadConfig === 'boolean'
     || typeof active.hadAuth === 'boolean'
     || fs.existsSync(API_SHARED_CONFIG_BACKUP_FILE)
@@ -2509,20 +2554,11 @@ function restoreApiKeyCodexHome(active = readJson(ACTIVE_API_CODEX_FILE, null)) 
     fs.rmSync(API_SHARED_CONFIG_BACKUP_FILE, { force: true });
     fs.rmSync(API_SHARED_AUTH_BACKUP_FILE, { force: true });
   }
-  if (launchViewRestoreError) {
-    writeJsonAtomic(ACTIVE_API_CODEX_FILE, {
-      ...active,
-      status: 'restore_failed',
-      processIdentity: null,
-      restoreError: launchViewRestoreError.message,
-    });
-  } else {
-    fs.rmSync(ACTIVE_API_CODEX_FILE, { force: true });
-    if (active.configLockId) releaseCodexConfigLock(API_SHARED_CONFIG_LOCK_FILE, active.configLockId);
-  }
+  fs.rmSync(ACTIVE_API_CODEX_FILE, { force: true });
+  if (active.configLockId) releaseCodexConfigLock(API_SHARED_CONFIG_LOCK_FILE, active.configLockId);
   try { repairSharedCodexThreadCatalog(SHARED_CODEX_HOME); } catch {}
-  if (!launchViewRestoreError) audit('api.codex.profile-restored', { result: active.keyId || 'stale' });
-  return !launchViewRestoreError;
+  audit('api.codex.profile-restored', { result: active.keyId || 'stale' });
+  return true;
 }
 
 const API_CODEX_LAUNCH_GRACE_MS = 120_000;
@@ -2608,6 +2644,7 @@ async function launchApiKeyCodex(keyId, launchOptions = null) {
     setCodexLaunchProgress({ stage: 'network', message: '正在检测 API 代理可用性…', percent: 16 });
     const apiKeyNetwork = await prepareApiKeyNetwork(keyId, { preflight: true, purpose: '启动 API Codex' });
     setCodexLaunchProgress({ stage: 'sessions', message: '正在加载项目与会话…', percent: 30 });
+    restoreStoppedLaunchStateBeforeCatalog();
     repairSharedCodexPreferences();
     const catalog = listCodexLaunchOptions(SHARED_CODEX_HOME);
     const selection = normalizeLaunchSelection(launchOptions, catalog);
@@ -2615,11 +2652,7 @@ async function launchApiKeyCodex(keyId, launchOptions = null) {
       const optimized = await optimizeSelectedRollouts(SHARED_CODEX_HOME, selection.threadIds, ROLLOUT_BACKUP_ROOT);
       for (const item of optimized) audit('codex.rollout.optimized', { result: `${item.threadId}:${item.beforeBytes}->${item.afterBytes}` });
     }
-    const staleApi = readJson(ACTIVE_API_CODEX_FILE, null);
-    if (staleApi) {
-      restoreApiKeyCodexHome(staleApi);
-      if (readJson(ACTIVE_API_CODEX_FILE, null)) throw new Error('上一次 API Codex 启动状态尚未恢复，请先完成会话状态恢复');
-    }
+    if (readJson(ACTIVE_API_CODEX_FILE, null)) throw new Error('上一次 API Codex 启动状态尚未恢复，请先完成会话状态恢复');
     setCodexLaunchProgress({ stage: 'credentials', message: '正在准备 API 授权环境…', percent: 52 });
     const { record, secret } = apiServiceManager.issueLaunchSecret(keyId);
     const pool = apiServiceManager.accountPool();
@@ -3266,6 +3299,9 @@ function accountView(account, context = {}) {
     browserType: 'chrome',
     enabled: account.enabled !== false,
     createdAt: account.createdAt,
+    planExpiresAt: account.planExpiresAt || null,
+    planExpiryCheckedAt: account.planExpiryCheckedAt || null,
+    planExpiryError: account.planExpiryError || '',
     quota: account.quota || null,
     codexActive: activeAccountId === account.id,
     browserInitialized: fs.existsSync(path.join(browserDir, 'Local State')),
@@ -3411,6 +3447,8 @@ async function importAuthorizationPackage(envelope, operator) {
   }
 }
 
+const MANAGED_CODEX_EXIT_GRACE_MS = 20_000;
+
 function cleanLeases(codexSnapshot = detectCodexDesktopSnapshot()) {
   const result = cleanExpiredLeases(leases);
   let changed = result.changed;
@@ -3424,11 +3462,24 @@ function cleanLeases(codexSnapshot = detectCodexDesktopSnapshot()) {
     }
     if (lease.launchType === 'codex' && lease.processIdentity && codexSnapshot.reliable
       && !codexProcessIdentityMatches(lease.processIdentity, codexSnapshot)) {
-      restoreSharedCodexAuth(accountId);
-      delete next[accountId];
-      changed = true;
-      audit('lease.auto-release', { accountId, operator: lease.operator, result: 'process-identity-changed' });
-      continue;
+      if (codexSnapshot.pid) {
+        next[accountId] = {
+          ...lease,
+          processPid: codexSnapshot.pid,
+          processIdentity: codexProcessIdentity(codexSnapshot),
+          missingSince: undefined,
+        };
+        const active = readActiveCodexAuth();
+        if (active?.accountId === accountId) {
+          const rebound = { ...active, processIdentity: codexProcessIdentity(codexSnapshot) };
+          delete rebound.missingSince;
+          writeJsonAtomic(ACTIVE_CODEX_AUTH_FILE, rebound);
+        }
+        changed = true;
+        audit('lease.process-reconciled', { accountId, operator: lease.operator, result: String(codexSnapshot.pid) });
+        continue;
+      }
+      if (isProcessAlive(Number(lease.processIdentity.pid))) continue;
     }
     if (lease.processPid && !isProcessAlive(lease.processPid)) {
       if (lease.launchType === 'codex' && codexSnapshot.reliable && codexSnapshot.pid) {
@@ -3437,7 +3488,16 @@ function cleanLeases(codexSnapshot = detectCodexDesktopSnapshot()) {
         audit('lease.process-reconciled', { accountId, operator: lease.operator, result: String(codexSnapshot.pid) });
         continue;
       }
-      if (lease.launchType === 'codex') restoreSharedCodexAuth(accountId);
+      if (lease.launchType === 'codex') {
+        const missingSince = Date.parse(lease.missingSince || '');
+        if (!Number.isFinite(missingSince)) {
+          next[accountId] = { ...lease, missingSince: new Date().toISOString() };
+          changed = true;
+          continue;
+        }
+        if (Date.now() - missingSince < MANAGED_CODEX_EXIT_GRACE_MS) continue;
+        if (!restoreSharedCodexAuth(accountId)) continue;
+      }
       delete next[accountId];
       changed = true;
       audit('lease.auto-release', { accountId, operator: lease.operator, result: 'process-exited' });
@@ -3449,7 +3509,18 @@ function cleanLeases(codexSnapshot = detectCodexDesktopSnapshot()) {
     ? !codexProcessIdentityMatches(activeAuth.processIdentity, codexSnapshot)
     : !codexSnapshot.pid;
   if (activeAuth && codexSnapshot.reliable && activeProcessMissing && !launchPending) {
-    restoreSharedCodexAuth(activeAuth.accountId);
+    if (codexSnapshot.pid) {
+      const rebound = { ...activeAuth, processIdentity: codexProcessIdentity(codexSnapshot) };
+      delete rebound.missingSince;
+      writeJsonAtomic(ACTIVE_CODEX_AUTH_FILE, rebound);
+    } else if (!isProcessAlive(Number(activeAuth.processIdentity?.pid))) {
+      const missingSince = Date.parse(activeAuth.missingSince || '');
+      if (!Number.isFinite(missingSince)) {
+        writeJsonAtomic(ACTIVE_CODEX_AUTH_FILE, { ...activeAuth, missingSince: new Date().toISOString() });
+      } else if (Date.now() - missingSince >= MANAGED_CODEX_EXIT_GRACE_MS) {
+        restoreSharedCodexAuth(activeAuth.accountId);
+      }
+    }
   }
   if (changed) saveLeases(next);
 }
@@ -3831,6 +3902,9 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === 'GET' && url.pathname === '/api/codex-launch-options') {
       try {
+        if (!restoreStoppedLaunchStateBeforeCatalog()) {
+          return sendError(response, 409, '请先退出当前 Codex，再选择下一次加载的项目和会话');
+        }
         repairSharedCodexPreferences();
         return sendJson(response, 200, { ok: true, data: listCodexLaunchOptions(SHARED_CODEX_HOME) });
       } catch (error) {
@@ -4338,6 +4412,7 @@ const server = http.createServer(async (request, response) => {
           account.quotaErrorCode = '';
           account.quotaCheckedAt = account.quota.refreshedAt;
           saveAccounts([...accounts]);
+          refreshAccountPlanExpiry(account, { force: true }).catch(() => {});
           audit('quota.refresh', { accountId, operator, result: 'success' });
           return sendJson(response, 200, { ok: true, data: accountView(account) });
         } catch (error) {
@@ -4515,7 +4590,6 @@ startApiGateway().catch((error) => {
 
 server.listen(settings.port, '127.0.0.1', () => {
   fs.writeFileSync(PID_FILE, String(process.pid));
-  attemptLegacyAutomationQuarantine();
   sessionMonitor.start().catch((error) => audit('sessions.monitor.failed', { result: error.message }));
   const url = `http://127.0.0.1:${settings.port}/?token=${encodeURIComponent(accessToken)}`;
   if (process.env.CODEX_MANAGER_NO_OPEN === '1') console.log('\nCodex Navo started in test mode.\n');
@@ -4526,6 +4600,7 @@ server.listen(settings.port, '127.0.0.1', () => {
     child.unref();
   }
   setTimeout(runScheduledWakes, 5_000).unref?.();
+  setTimeout(() => refreshStaleAccountPlanExpiries({ force: true }), 3_000).unref?.();
 });
 
 const wakeScheduleTimer = setInterval(runScheduledWakes, 60_000);
@@ -4533,6 +4608,9 @@ wakeScheduleTimer.unref?.();
 
 const protocolLoginTimer = setInterval(pollProtocolLoginResults, 2_000);
 protocolLoginTimer.unref?.();
+
+const planExpiryTimer = setInterval(refreshStaleAccountPlanExpiries, 10 * 60_000);
+planExpiryTimer.unref?.();
 
 // Restore the normal Codex configuration as soon as an API-launched desktop
 // exits. This is independent of UI polling, so closing the window is enough to
@@ -4543,8 +4621,6 @@ const apiCodexLifecycleTimer = setInterval(() => {
 }, 2_000);
 apiCodexLifecycleTimer.unref?.();
 
-const legacyAutomationQuarantineTimer = setInterval(attemptLegacyAutomationQuarantine, 5_000);
-legacyAutomationQuarantineTimer.unref?.();
 
 let activeCodexNetworkRecovery = null;
 async function recoverActiveCodexNetwork() {

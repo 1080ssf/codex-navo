@@ -49,22 +49,32 @@ try {
   Add-Type -AssemblyName System.Runtime.WindowsRuntime
   $context = [Windows.Services.Store.StoreContext, Windows.Services.Store, ContentType = WindowsRuntime]::GetDefault()
   $updateListType = [System.Collections.Generic.IReadOnlyList[Windows.Services.Store.StorePackageUpdate]]
-  $updates = @(Await-Operation ($context.GetAppAndOptionalStorePackageUpdatesAsync()) $updateListType)
+  $rawUpdates = Await-Operation ($context.GetAppAndOptionalStorePackageUpdatesAsync()) $updateListType
+  $updates = [System.Collections.Generic.List[Windows.Services.Store.StorePackageUpdate]]::new()
+  foreach ($update in $rawUpdates) { [void]$updates.Add($update) }
+  $canSilent = [bool]$context.CanSilentlyDownloadStorePackageUpdates
   if ($Mode -eq 'check') {
-    Write-Result @{ ok = $true; mode = $Mode; hasUpdate = $updates.Count -gt 0; updateCount = $updates.Count }
+    Write-Result @{ ok = $true; mode = $Mode; hasUpdate = $updates.Count -gt 0; updateCount = $updates.Count; canSilent = $canSilent }
     exit 0
   }
   if ($updates.Count -eq 0) {
-    Write-Result @{ ok = $true; mode = $Mode; hasUpdate = $false; updateCount = 0; overallState = 'NoUpdates' }
+    Write-Result @{ ok = $true; mode = $Mode; hasUpdate = $false; updateCount = 0; overallState = 'NoUpdates'; canSilent = $canSilent }
     exit 0
   }
-  $result = Await-ProgressOperation ($context.RequestDownloadAndInstallStorePackageUpdatesAsync($updates)) ([Windows.Services.Store.StorePackageUpdateResult]) ([Windows.Services.Store.StorePackageUpdateStatus])
+  if (-not $canSilent) {
+    Write-Result @{ ok = $false; mode = $Mode; hasUpdate = $true; updateCount = $updates.Count; overallState = 'SilentConsentRequired'; canSilent = $false }
+    exit 2
+  }
+  # The interactive Request* API requires an app UI thread and a valid window
+  # handle. Navo intentionally runs this helper hidden, so use the Store's
+  # background-safe silent API instead.
+  $result = Await-ProgressOperation ($context.TrySilentDownloadAndInstallStorePackageUpdatesAsync($updates)) ([Windows.Services.Store.StorePackageUpdateResult]) ([Windows.Services.Store.StorePackageUpdateStatus])
   $states = @($result.StorePackageUpdateStatuses | ForEach-Object {
     @{ packageFamilyName = [string]$_.PackageFamilyName; state = [string]$_.PackageUpdateState; error = ('0x{0:X8}' -f $_.ErrorCode.HResult) }
   })
   $overallState = [string]$result.OverallState
   $ok = $overallState -eq 'Completed'
-  Write-Result @{ ok = $ok; mode = $Mode; hasUpdate = $true; updateCount = $updates.Count; overallState = $overallState; statuses = $states }
+  Write-Result @{ ok = $ok; mode = $Mode; hasUpdate = $true; updateCount = $updates.Count; overallState = $overallState; statuses = $states; canSilent = $canSilent }
   if (-not $ok) { exit 2 }
 } catch {
   Write-Result @{ ok = $false; mode = $Mode; error = $_.Exception.Message; hresult = ('0x{0:X8}' -f $_.Exception.HResult) }

@@ -201,6 +201,40 @@ test('notification service ignores historical terminal events replayed by a sess
   assert.equal(service.listEvents(0).length, 0);
 });
 
+test('子智能体终止事件不会触发任务完成通知', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-navo-notify-subagent-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const service = new NotificationService({
+    file: path.join(root, 'notifications.json'),
+    readJson: () => ({}),
+    writeJsonAtomic: (target, value) => fs.writeFileSync(target, JSON.stringify(value)),
+  });
+  const result = await service.notify({
+    type: 'completed',
+    task: { id: 'child', turnId: 'turn-child', isSubagent: true, parentThreadId: 'root', completedAt: new Date().toISOString() },
+  });
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, 'subagent-terminal-event');
+  assert.equal(service.listEvents(0).length, 0);
+});
+
+test('子智能体身份不会被后续 cwd 更新清除', () => {
+  const id = '00000000-0000-4000-8000-000000000103';
+  const state = new SessionState(path.join('sessions', `${id}.jsonl`));
+  state.apply({ type: 'session_meta', timestamp: new Date().toISOString(), payload: {
+    id, source: { subagent: { thread_spawn: { parent_thread_id: 'root-thread' } } },
+  } });
+  state.apply({ type: 'turn_context', timestamp: new Date().toISOString(), payload: { cwd: 'C:\\work\\child' } });
+  assert.equal(state.snapshot().isSubagent, true);
+  assert.equal(state.snapshot().parentThreadId, 'root-thread');
+
+  const tailOnly = new SessionState(path.join('sessions', `${id}.jsonl`));
+  tailOnly.setMeta({ thread_source: 'subagent', source: JSON.stringify({ subagent: { thread_spawn: { parent_thread_id: 'root-thread' } } }) });
+  tailOnly.apply({ type: 'session_meta', timestamp: new Date().toISOString(), payload: { id: 'root-thread', source: 'user' } });
+  assert.equal(tailOnly.snapshot().isSubagent, true);
+  assert.equal(tailOnly.snapshot().parentThreadId, 'root-thread');
+});
+
 test('notification channels send the user-authored message without an added preset', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-navo-notify-message-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

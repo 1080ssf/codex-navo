@@ -131,7 +131,12 @@ test('应用设置在 Navo 内通过 OpenAI 官方清单直接更新 Codex 桌�
   assert.match(main, /codex-store-update\.vbs/);
   assert.match(main, /wscript\.exe/);
   assert.doesNotMatch(main, /Invoke-CommandInDesktopPackage[^\n]+WindowsPowerShell/);
-  assert.match(fs.readFileSync(path.join(root, 'desktop-src', 'codex-store-update.ps1'), 'utf8'), /RequestDownloadAndInstallStorePackageUpdatesAsync/);
+  const storeHelper = fs.readFileSync(path.join(root, 'desktop-src', 'codex-store-update.ps1'), 'utf8');
+  assert.match(storeHelper, /CanSilentlyDownloadStorePackageUpdates/);
+  assert.match(storeHelper, /TrySilentDownloadAndInstallStorePackageUpdatesAsync/);
+  assert.doesNotMatch(storeHelper, /\$context\.RequestDownloadAndInstallStorePackageUpdatesAsync/);
+  assert.match(storeHelper, /List\[Windows\.Services\.Store\.StorePackageUpdate\]/);
+  assert.doesNotMatch(storeHelper, /\$updates\s*=\s*@\(Await-Operation/);
   assert.match(fs.readFileSync(path.join(root, 'desktop-src', 'codex-store-update.vbs'), 'utf8'), /shell\.Run\(commandLine, 0, True\)/);
   assert.match(fs.readFileSync(path.join(root, 'package.json'), 'utf8'), /asarUnpack[\s\S]*codex-store-update\.ps1[\s\S]*codex-store-update\.vbs/);
   assert.match(main, /ForceApplicationShutdown/);

@@ -107,9 +107,6 @@ const elements = {
   codexUpdateProgress: document.querySelector('#codex-update-progress'),
   codexUpdateProgressBar: document.querySelector('#codex-update-progress-bar'),
   codexUpdateProgressLabel: document.querySelector('#codex-update-progress-label'),
-  codexReleaseNotes: document.querySelector('#codex-release-notes'),
-  codexReleaseList: document.querySelector('#codex-release-list'),
-  codexChangelogLink: document.querySelector('#codex-changelog-link'),
   usageOverview: document.querySelector('#usage-overview'),
   usageLedger: document.querySelector('#usage-ledger'),
   usageUpdated: document.querySelector('#usage-updated'),
@@ -286,7 +283,6 @@ const englishUi = new Map([
   ['管理界面语言、Codex 启动语言以及 Codex Navo 与 Codex 桌面端更新。', 'Manage interface language, the Codex launch language, and updates for Codex Navo and Codex Desktop.'],
   ['应用更新', 'Application updates'], ['Navo 桌面应用', 'Navo desktop app'], ['Windows 桌面应用', 'Windows desktop app'],
   ['正在读取版本和更新状态。', 'Loading version and update status.'], ['正在读取本机安装版本。', 'Loading the installed version.'], ['检查并更新', 'Check and update'],
-  ['官方更新日志', 'Official changelog'], ['查看完整日志 ↗', 'View full changelog ↗'],
   ['社区与项目', 'Community and project'], ['加入社区交流使用经验、反馈问题，或前往 GitHub 查看项目源码与版本动态。', 'Join the community to share feedback, or visit GitHub for source code and releases.'],
   ['Telegram 群组', 'Telegram group'], ['加入 TG 社区', 'Join the Telegram community'], ['QQ 群', 'QQ group'], ['加入中文交流群', 'Join the Chinese community'], ['GitHub 项目', 'GitHub project'], ['源码、Issue 与版本', 'Source, issues, and releases'],
   ['ChatGPT 不支持', 'ChatGPT unsupported'],
@@ -395,7 +391,9 @@ const englishUi = new Map([
   ['Codex 默认模型', 'Codex default model'], ['Codex 授权已导入，网页会话需要重新登录', 'Codex authorization imported; the web session requires sign-in'],
   ['Codex 授权已导入；该授权包不包含网页会话。', 'Codex authorization imported; this package does not contain a web session.'],
   ['Codex 授权已完成。网页端仍需登录时，可在该账号的独立 Chrome 中继续。', 'Codex authorization is complete. If Web still requires sign-in, continue in this account’s isolated Chrome.'],
-  ['Codex 已退出，账号认证已安全保存', 'Codex exited; account authorization was saved safely'], ['Key 名称', 'Key name'], ['OpenAI 官方更新日志', 'Official OpenAI changelog'],
+  ['套餐到期：', 'Plan expires: '], ['到期 自动检测中', 'Expiration: checking'], ['到期 暂未读取', 'Expiration unavailable'],
+  ['Codex 返回的可用额度重置卡', 'Available quota reset credits returned by Codex'],
+  ['Codex 已退出，账号认证已安全保存', 'Codex exited; account authorization was saved safely'], ['Key 名称', 'Key name'],
   ['Token 上限', 'Token limit'], ['需要检查', 'Needs attention'], ['凭证存在，但最近一次在线检查失败', 'Credentials exist, but the latest online check failed'],
   ['正在授权', 'Authorizing'], ['协议登录正在后台运行，请在应用内完成验证', 'Protocol sign-in is running in the background; complete verification in the app'],
   ['请在账号独立浏览器中完成官方流程', 'Complete the official flow in the account’s isolated browser'], ['授权已中断', 'Authorization interrupted'],
@@ -418,6 +416,8 @@ const englishUiPatterns = [
   [/^今日用量$/, 'Today usage'], [/^昨日用量$/, 'Yesterday usage'], [/^近 7 天$/, 'Last 7 days'], [/^近 30 天$/, 'Last 30 days'], [/^全部记录$/, 'All records'],
   [/^(\d+) 次待定价$/, '$1 unpriced calls'], [/^约 ([\d.]+) 亿$/, 'About $1 hundred million'],
   [/^(\d+) 秒$/, '$1 sec'], [/^(\d+) 分钟$/, '$1 min'], [/^(\d+) 小时 (\d+) 分$/, '$1 hr $2 min'], [/^(\d+) 分钟前$/, '$1 min ago'], [/^(\d+) 小时前$/, '$1 hr ago'], [/^(\d+) 天前$/, '$1 days ago'],
+  [/^剩余 (\d+) 天$/, '$1 days left'], [/^重置卡 (\d+) 张$/, '$1 reset credits'],
+  [/^套餐到期：(.+)$/, 'Plan expires: $1'],
   [/^已选 (\d+) \/ (\d+)$/, '$1 / $2 selected'], [/^已读取 (\d+) 个模型，请勾选要使用的模型$/, '$1 models loaded; select the models to use'],
   [/^已刷新全部 (\d+) 个账号额度$/, 'Refreshed quota for all $1 accounts'], [/^已刷新 (\d+) 个账号，(\d+) 个刷新失败$/, 'Refreshed $1 accounts; $2 failed'],
   [/^已唤醒 (\d+) 个账号，(\d+) 个失败$/, 'Woke $1 accounts; $2 failed'], [/^已成功唤醒全部 (\d+) 个账号$/, 'Successfully woke all $1 accounts'],
@@ -557,7 +557,7 @@ let applicationUpdate = {
 };
 let codexDesktopUpdate = {
   status: 'idle', installed: false, version: '', latestVersion: '', updateAvailable: false,
-  packageReady: false, percent: 0, phase: '', changelog: [], changelogUrl: '', error: '',
+  packageReady: false, percent: 0, phase: '', error: '',
 };
 
 function renderApplicationUpdate() {
@@ -720,25 +720,11 @@ function formatPlan(planType) {
   return labels[normalized] || normalized.toUpperCase();
 }
 
-function creditQuantity(credits) {
-  const candidate = credits?.quantity ?? credits?.points ?? credits?.rawBalance;
-  const numeric = Number(candidate);
-  return Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : null;
-}
-
-function formatCredits(credits) {
-  if (!credits) return '';
-  if (credits.unlimited) return 'Credits ∞';
-  const quantity = creditQuantity(credits);
-  if (quantity == null) return '';
-  return `Credits ${quantity.toLocaleString('en-US')}`;
-}
-
 function formatUsdBalance(credits) {
   if (!credits || credits.unlimited) return '';
   const amount = Number(credits.usdBalance);
   return Number.isFinite(amount)
-    ? `US$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    ? `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : '';
 }
 
@@ -1901,10 +1887,13 @@ function render() {
     const planBadge = planType
       ? `<span class="plan-badge plan-${escapeHtml(String(planType).toLowerCase())}">${escapeHtml(formatPlan(planType))}</span>`
       : '';
-    const creditText = formatCredits(account.quota?.credits);
-    const creditBadge = creditText
-      ? `<span class="credit-badge" title="Codex 返回的原始 Credits">${escapeHtml(creditText)}</span>`
+    const expiryMs = Date.parse(account.planExpiresAt || '');
+    const remainingDays = Number.isFinite(expiryMs) ? Math.max(0, Math.ceil((expiryMs - Date.now()) / 86_400_000)) : null;
+    const expiryBadge = planType
+      ? `<span class="expiry-badge" title="${remainingDays == null ? escapeHtml(account.planExpiryError || '正在自动读取官方套餐到期时间') : `套餐到期：${escapeHtml(new Date(expiryMs).toLocaleDateString())}`}">${remainingDays == null ? (account.planExpiryCheckedAt ? '到期 暂未读取' : '到期 自动检测中') : `剩余 ${remainingDays} 天`}</span>`
       : '';
+    const resetCount = Number(account.quota?.resetCredits?.availableCount);
+    const resetBadge = Number.isFinite(resetCount) ? `<span class="reset-credit-badge" title="Codex 返回的可用额度重置卡">重置卡 ${Math.max(0, Math.floor(resetCount))} 张</span>` : '';
     const usdBalance = formatUsdBalance(account.quota?.credits);
     const balanceBadge = usdBalance
       ? `<span class="balance-badge" title="按 Codex 官方美国定价 US$0.04/Credit 换算">余额 ${escapeHtml(usdBalance)}</span>`
@@ -1947,7 +1936,7 @@ function render() {
       <div class="account-overview">
         <div class="account-identity">
           <div class="identity-title"><h3>${escapeHtml(account.label)}</h3></div>
-          ${(planBadge || creditBadge || balanceBadge || sessionBadge || healthBadge || networkBadge) ? `<div class="identity-badges">${planBadge}${creditBadge}${balanceBadge}${sessionBadge}${healthBadge}${networkBadge}</div>` : ''}
+          ${(planBadge || expiryBadge || resetBadge || balanceBadge || sessionBadge || healthBadge || networkBadge) ? `<div class="identity-badges">${planBadge}${expiryBadge}${resetBadge}${balanceBadge}${sessionBadge}${healthBadge}${networkBadge}</div>` : ''}
           ${secondaryIdentity}
         </div>
       </div>
@@ -3035,32 +3024,6 @@ async function openApplicationSettings() {
   renderApplicationUpdate();
 }
 
-function renderCodexChangelog(info) {
-  const entries = Array.isArray(info.changelog) ? info.changelog : [];
-  const chinese = navoUsesChinese();
-  const visible = chinese ? entries.filter((entry) => entry.zh) : entries;
-  elements.codexReleaseNotes.hidden = visible.length === 0;
-  elements.codexChangelogLink.href = info.changelogUrl || 'https://learn.chatgpt.com/docs/changelog';
-  elements.codexReleaseNotes.querySelector('.codex-release-heading strong').textContent = chinese ? 'OpenAI 官方更新日志' : 'Official OpenAI changelog';
-  elements.codexChangelogLink.textContent = chinese ? '查看完整日志 ↗' : 'View full changelog ↗';
-  elements.codexReleaseList.replaceChildren(...visible.map((entry, index) => {
-    const copy = chinese ? entry.zh : entry.en;
-    const item = document.createElement('details');
-    item.className = 'codex-release-item';
-    item.open = index === 0;
-    const summary = document.createElement('summary');
-    const time = document.createElement('time');
-    time.textContent = entry.date || '';
-    const title = document.createElement('span');
-    title.textContent = copy?.title || '';
-    summary.append(time, title);
-    const body = document.createElement('p');
-    body.textContent = copy?.body || '';
-    item.append(summary, body);
-    return item;
-  }));
-}
-
 function renderCodexDesktopUpdate() {
   const info = codexDesktopUpdate;
   const chinese = navoUsesChinese();
@@ -3111,7 +3074,6 @@ function renderCodexDesktopUpdate() {
     ? (chinese ? '立即更新' : 'Update now')
     : (chinese ? '立即安装' : 'Install now');
   else elements.codexUpdateAction.textContent = chinese ? '重新检查' : 'Check again';
-  renderCodexChangelog(info);
 }
 
 async function refreshCodexUpdateState() {

@@ -6,12 +6,10 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const {
-  CODEX_CHANGELOG_URL,
   CODEX_PACKAGE_IDENTITY,
   CODEX_UPDATE_MANIFEST_URL,
   buildCodexPackageUrl,
   comparePackageVersions,
-  parseCodexChangelog,
   validateCodexPackageMetadata,
   validateCodexUpdateManifest,
 } = require('../lib/codex-update-state');
@@ -60,8 +58,6 @@ let codexUpdateState = {
   packageReady: false,
   percent: 0,
   phase: '',
-  changelog: [],
-  changelogUrl: CODEX_CHANGELOG_URL,
   error: '',
 };
 
@@ -526,6 +522,13 @@ function readInstalledCodexPackageState() {
 
 function publishCodexUpdateState(patch) {
   codexUpdateState = { ...codexUpdateState, ...patch };
+  try {
+    fs.mkdirSync(path.join(USER_DATA_ROOT, 'data'), { recursive: true });
+    fs.writeFileSync(
+      path.join(USER_DATA_ROOT, 'data', 'codex-update-state.json'),
+      `${JSON.stringify({ ...codexUpdateState, installLocation: undefined }, null, 2)}\n`,
+    );
+  } catch {}
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('codex-updates:state', codexUpdateState);
   return codexUpdateState;
 }
@@ -602,10 +605,7 @@ async function fetchOfficialCodexUpdateState() {
   try {
     const route = await configureUpdaterNetwork();
     const updaterSession = autoUpdater.netSession;
-    const [manifestResponse, changelogResponse] = await Promise.all([
-      updaterSession.fetch(CODEX_UPDATE_MANIFEST_URL, { cache: 'no-store' }),
-      updaterSession.fetch(CODEX_CHANGELOG_URL).catch(() => null),
-    ]);
+    const manifestResponse = await updaterSession.fetch(CODEX_UPDATE_MANIFEST_URL, { cache: 'no-store' });
     if (!manifestResponse.ok) throw new Error(`The official Codex update manifest returned HTTP ${manifestResponse.status}.`);
     if (new URL(manifestResponse.url || CODEX_UPDATE_MANIFEST_URL).protocol !== 'https:') throw new Error('The official Codex update manifest redirected to an insecure URL.');
     const manifest = validateCodexUpdateManifest(await manifestResponse.json());
@@ -615,7 +615,6 @@ async function fetchOfficialCodexUpdateState() {
       updaterSession.fetch(packageUrl, { method: 'HEAD', cache: 'no-store' }),
       installed.installed ? runCodexStoreHelper('check', { timeoutMs: 60_000 }).catch(() => ({ ok: false, hasUpdate: false })) : Promise.resolve({ ok: false, hasUpdate: false }),
     ]);
-    const changelog = changelogResponse?.ok ? parseCodexChangelog(await changelogResponse.text()) : codexUpdateState.changelog;
     const updateAvailable = !installed.installed || comparePackageVersions(manifest.buildVersion, installed.version) > 0;
     const updateSource = storeUpdate.ok && storeUpdate.hasUpdate ? 'store' : packageResponse.ok ? 'msix' : 'propagating';
     return publishCodexUpdateState({
@@ -629,8 +628,6 @@ async function fetchOfficialCodexUpdateState() {
       networkRoute: route.nodeName || '',
       percent: updateAvailable ? 0 : 100,
       phase: updateAvailable ? 'available' : 'current',
-      changelog,
-      changelogUrl: CODEX_CHANGELOG_URL,
       error: '',
     });
   } catch (error) {
@@ -777,6 +774,16 @@ async function installCodexPackage(packagePath) {
   if (result.code !== 0) throw new Error('Windows rejected the official Codex package. The package signature or deployment details did not validate.');
 }
 
+async function waitForInstalledCodexVersion(targetVersion, timeoutMs = 5 * 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  let installed = readInstalledCodexPackageState();
+  while ((!installed.installed || comparePackageVersions(installed.version, targetVersion) < 0) && Date.now() < deadline) {
+    await delay(500);
+    installed = readInstalledCodexPackageState();
+  }
+  return installed;
+}
+
 async function confirmCloseCodex(locale, state) {
   const chinese = String(locale || '').toLowerCase().startsWith('zh');
   const result = await dialog.showMessageBox(mainWindow, {
@@ -810,19 +817,29 @@ async function installCodexWindowsUpdate({ locale = 'en-US' } = {}) {
     if (state.updateSource === 'store') {
       publishCodexUpdateState({ status: 'store-installing', phase: 'store-installing', percent: 0, error: '' });
       const result = await runCodexStoreHelper('install', { targetVersion: state.latestVersion });
-      if (!result.ok || !['Completed', 'NoUpdates'].includes(String(result.overallState || ''))) {
-        throw new Error(`Windows Store update service returned ${result.overallState || result.error || 'an unknown error'}.`);
+      const installed = await waitForInstalledCodexVersion(
+        state.latestVersion,
+        result.canSilent === false ? 2_000 : 5 * 60_000,
+      );
+      publishCodexUpdateState({ storeResult: result, storeInstalledVersion: installed.version || '' });
+      if (result.ok && ['Completed', 'NoUpdates'].includes(String(result.overallState || ''))
+        && installed.installed && comparePackageVersions(installed.version, state.latestVersion) >= 0) {
+        return publishCodexUpdateState({
+          ...installed,
+          status: 'completed', phase: 'completed', percent: 100,
+          updateAvailable: false, packageReady: true, updated: true,
+          error: '',
+        });
       }
-      const installed = readInstalledCodexPackageState();
-      if (!installed.installed || comparePackageVersions(installed.version, state.latestVersion) < 0) {
-        throw new Error(`Windows completed the official update request, but Codex is still v${installed.version || 'unknown'}.`);
+      const packageResponse = await autoUpdater.netSession.fetch(state.packageUrl, { method: 'HEAD', cache: 'no-store' });
+      if (!packageResponse.ok) {
+        const storeStatus = result.overallState || result.hresult || 'failed';
+        const chinese = String(locale || '').toLowerCase().startsWith('zh');
+        throw new Error(chinese
+          ? `Windows Store 更新失败（${storeStatus}）；Codex 仍为 v${installed.version || '未知'}，官方直包暂不可用（HTTP ${packageResponse.status}）。`
+          : `Windows Store update failed (${storeStatus}); Codex remains v${installed.version || 'unknown'}, and the official direct package is unavailable (HTTP ${packageResponse.status}).`);
       }
-      return publishCodexUpdateState({
-        ...installed,
-        status: 'completed', phase: 'completed', percent: 100,
-        updateAvailable: false, packageReady: true, updated: true,
-        error: '',
-      });
+      state = publishCodexUpdateState({ updateSource: 'msix', packageReady: true });
     }
     publishCodexUpdateState({ status: 'downloading', phase: 'downloading', percent: 1, error: '' });
     const download = await downloadCodexPackage(state);
@@ -831,7 +848,7 @@ async function installCodexWindowsUpdate({ locale = 'en-US' } = {}) {
     const metadata = validateCodexPackageMetadata(await readCodexPackageMetadata(download.path), state.latestVersion);
     publishCodexUpdateState({ status: 'installing', phase: 'installing', percent: 94 });
     await installCodexPackage(download.path);
-    const installed = readInstalledCodexPackageState();
+    const installed = await waitForInstalledCodexVersion(state.latestVersion);
     if (!installed.installed || comparePackageVersions(installed.version, state.latestVersion) < 0) {
       throw new Error(`Windows completed deployment, but Codex is still v${installed.version || 'unknown'}.`);
     }

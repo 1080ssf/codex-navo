@@ -103,8 +103,7 @@ test('版本入口进入应用设置更新卡片且官方授权结束后验证�
   assert.match(html, /id="navo-settings-update-action"/);
   assert.match(html, /id="codex-update-action"/);
   assert.match(html, /id="codex-update-progress"/);
-  assert.match(html, /id="codex-release-notes"/);
-  assert.match(html, /https:\/\/learn\.chatgpt\.com\/docs\/changelog/);
+  assert.doesNotMatch(html, /id="codex-release-notes"/);
   assert.match(client, /store-installing/);
   assert.match(html, /https:\/\/t\.me\/\+4VH9hBsRu7phNjg1/);
   assert.match(html, /https:\/\/qm\.qq\.com\/q\/f92ySNuLss/);
@@ -870,4 +869,28 @@ test('temporary account health uses temporary credential wording', () => {
   assert.match(server, /label: '临时凭证正常'/);
   assert.doesNotMatch(server, /label: '反代凭证正常'/);
   assert.match(client, /\['临时凭证正常', 'Temporary credential ready'\]/);
+});
+
+test('plan expiration is automatically read from the signed-in ChatGPT account', () => {
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  const protocol = fs.readFileSync(path.join(__dirname, '..', 'lib', 'protocol-login.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.doesNotMatch(client, /data-action="plan-expiry"|到期 未设置/);
+  assert.match(client, /到期 自动检测中/);
+  assert.match(server, /refreshAccountPlanExpiry/);
+  assert.match(server, /Promise\.allSettled\(accounts\.map/);
+  assert.match(server, /tokens\.access_token/);
+  assert.match(protocol, /backend-api\/accounts\/check\/v4-2023-04-27/);
+  assert.match(protocol, /entitlement\?\.expires_at/);
+  assert.doesNotMatch(styles, /\.expiry-badge\[type="button"\]/);
+  assert.doesNotMatch(styles, /\.plan-badge\[type="button"\]/);
+});
+
+test('account cards show only the converted dollar balance without a Credits badge', () => {
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.doesNotMatch(client, /function formatCredits|class="credit-badge"/);
+  assert.match(client, /`\$\$\{amount\.toLocaleString/);
+  assert.doesNotMatch(styles, /\.credit-badge\s*\{/);
 });

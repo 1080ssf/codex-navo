@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { acquireLease, cleanExpiredLeases, isWithin, normalizeOperator, validateAccountId } = require('../lib/core');
-const { normalizeRateLimits, windowLabel } = require('../lib/codex-quota');
+const { hasSpendableCredits, normalizeRateLimits, windowLabel } = require('../lib/codex-quota');
 const { CodexUsageTracker, estimateCost, selectedDayKeys, tokenSnapshot } = require('../lib/codex-usage');
 
 test('同一个账号不能被另一位操作员占用', () => {
@@ -50,7 +50,7 @@ test('额度窗口会转换为可用百分比并优先显示周额度', () => {
     credits: { hasCredits: true, unlimited: false, balance: '12.50' },
     primary: { usedPercent: 35, resetsAt: 1000, windowDurationMins: 300 },
     secondary: { usedPercent: 12, resetsAt: 2000, windowDurationMins: 10080 },
-  } });
+  }, rateLimitResetCredits: { availableCount: 3, details: [{ expiresAt: '2026-08-23T00:00:00.000Z' }] } });
   assert.equal(quota.windows[0].label, '周额度');
   assert.equal(quota.windows[0].remainingPercent, 88);
   assert.equal(quota.windows[1].remainingPercent, 65);
@@ -62,7 +62,14 @@ test('额度窗口会转换为可用百分比并优先显示周额度', () => {
     usdBalance: '0.48',
     usdPerCredit: 0.04,
   });
+  assert.deepEqual(quota.resetCredits, { availableCount: 3, expiresAt: '2026-08-23T00:00:00.000Z' });
   assert.equal(windowLabel({ windowDurationMins: 300 }), '5 小时额度');
+});
+
+test('套餐额度耗尽后仍可使用余额，零余额账号才会退出候选池', () => {
+  assert.equal(hasSpendableCredits({ hasCredits: true, rawBalance: 0.25, quantity: 0 }), true);
+  assert.equal(hasSpendableCredits({ unlimited: true, rawBalance: 0 }), true);
+  assert.equal(hasSpendableCredits({ hasCredits: true, rawBalance: 0 }), false);
 });
 
 test('Codex 本地 token_count 会拆分输入、缓存、输出并按公开单价估算', () => {
@@ -145,6 +152,50 @@ test('共享 Codex 历史会按 Navo 启动区间回填到正确账号', () => {
     });
     tracker.sync(true);
     assert.equal(tracker.summary('today').accounts['account-history'].requests, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('子智能体复制的父任务 token_count 不会重复计入本机用量', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-navo-subagent-usage-'));
+  try {
+    const folder = path.join(root, 'shared', 'sessions', '2026', '08', '19');
+    fs.mkdirSync(folder, { recursive: true });
+    const parentId = '00000000-0000-4000-8000-000000000101';
+    const childId = '00000000-0000-4000-8000-000000000102';
+    const now = new Date();
+    const parentUsage = { input_tokens: 1000, cached_input_tokens: 900, output_tokens: 100 };
+    const childUsage = { input_tokens: 2000, cached_input_tokens: 1800, output_tokens: 200 };
+    const token = (usage, timestamp = now.toISOString()) => ({
+      timestamp, type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: usage } },
+    });
+    const parent = path.join(folder, `rollout-parent-${parentId}.jsonl`);
+    const child = path.join(folder, `rollout-child-${childId}.jsonl`);
+    fs.writeFileSync(parent, `${[
+      { timestamp: now.toISOString(), type: 'session_meta', payload: { id: parentId } },
+      { timestamp: now.toISOString(), type: 'turn_context', payload: { model: 'gpt-5.6-luna' } },
+      token(parentUsage),
+    ].map(JSON.stringify).join('\n')}\n`);
+    fs.writeFileSync(child, `${[
+      { timestamp: now.toISOString(), type: 'session_meta', payload: { id: childId, source: { subagent: { thread_spawn: { parent_thread_id: parentId } } } } },
+      { timestamp: now.toISOString(), type: 'session_meta', payload: { id: parentId } },
+      token(parentUsage, new Date(now.getTime() + 60_000).toISOString()),
+      { timestamp: new Date(now.getTime() + 61_000).toISOString(), type: 'turn_context', payload: { model: 'gpt-5.6-luna' } },
+      token(childUsage, new Date(now.getTime() + 62_000).toISOString()),
+    ].map(JSON.stringify).join('\n')}\n`);
+    const tracker = new CodexUsageTracker({
+      storeFile: path.join(root, 'usage.json'),
+      sharedCodexHome: path.join(root, 'shared'),
+      getAccounts: () => [],
+      getAccountHome: () => '',
+      getActiveAccountId: () => 'account-test',
+      getSharedIntervals: () => [{ accountId: 'account-test', startMs: now.getTime() - 1000, endMs: now.getTime() + 120_000 }],
+    });
+    tracker.sync(true);
+    const totals = tracker.summary('today').totals;
+    assert.equal(totals.requests, 2);
+    assert.equal(totals.inputTokens, 3000);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

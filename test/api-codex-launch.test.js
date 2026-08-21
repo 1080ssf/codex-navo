@@ -142,7 +142,9 @@ test('managed launches persist a process fingerprint instead of trusting PID alo
   assert.match(server, /launchId: crypto\.randomUUID\(\)/);
   assert.match(server, /recordSharedCodexProcess\(account\.id, detectCodexDesktopSnapshot/);
   assert.match(server, /result\.lease\.processIdentity = readActiveCodexAuth\(\)\?\.processIdentity/);
-  assert.match(server, /process-identity-changed/);
+  assert.match(server, /MANAGED_CODEX_EXIT_GRACE_MS/);
+  assert.doesNotMatch(server, /result: 'process-identity-changed'/);
+  assert.match(server, /lease\.process-reconciled/);
 });
 
 test('API lifecycle follows ChatGPT and Codex Store process replacements without restoring live credentials', () => {
@@ -151,7 +153,8 @@ test('API lifecycle follows ChatGPT and Codex Store process replacements without
   const reconcileEnd = server.indexOf('async function launchApiKeyCodex', reconcileStart);
   const reconcile = server.slice(reconcileStart, reconcileEnd);
   assert.match(server, /Name = 'ChatGPT\.exe' OR Name = 'codex\.exe'/);
-  assert.match(server, /Get-Process -Name ChatGPT,codex/);
+  assert.match(server, /Get-Process -Name ChatGPT/);
+  assert.match(server, /app-server\|login\|exec\|resume/);
   assert.match(reconcile, /codexProcessIdentityMatches\(active\.processIdentity, snapshot\)/);
   assert.match(reconcile, /replacementMatchesInstall/);
   assert.match(reconcile, /active\.status === 'running' && snapshot\.pid && \(replacementMatchesExecutable \|\| replacementMatchesInstall\)/);
@@ -268,11 +271,22 @@ test('API Codex launch owns auth transaction and rebinds Store root process repl
   assert.match(prepare, /copyFileAtomic\(SHARED_CODEX_AUTH_FILE, API_SHARED_AUTH_BACKUP_FILE\)/);
   assert.match(prepare, /authManaged: true/);
   assert.match(prepare, /writeJsonAtomic\(SHARED_CODEX_AUTH_FILE, \{ OPENAI_API_KEY: secret \}\)/);
-  assert.match(prepare, /activateAutomationScope\(/);
-  assert.match(server, /deactivateAutomationScope\(/);
-  assert.match(server, /attemptLegacyAutomationQuarantine/);
+  assert.doesNotMatch(prepare, /activateAutomationScope\(/);
+  assert.match(prepare, /Scheduled tasks and their run history are device state/);
+  assert.doesNotMatch(server, /deactivateAutomationScope\(/);
+  assert.doesNotMatch(server, /attemptLegacyAutomationQuarantine/);
   assert.match(server, /api\.codex\.process-rebound/);
   assert.match(server, /active\.status === 'running' && snapshot\.pid && \(replacementMatchesExecutable \|\| replacementMatchesInstall\)/);
+});
+
+test('launch catalog restores a stopped prior view before reading projects and sessions', () => {
+  const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
+  const apiLaunch = server.slice(server.indexOf('async function launchApiKeyCodex'), server.indexOf('async function stopApiKeyCodex'));
+  const accountLaunch = server.slice(server.indexOf('async function launchCodexDesktop'), server.indexOf('function stopManagedCodexDesktop'));
+  for (const source of [apiLaunch, accountLaunch]) {
+    assert.ok(source.indexOf('restoreStoppedLaunchStateBeforeCatalog()') < source.indexOf('repairSharedCodexPreferences()'));
+  }
+  assert.match(server, /请先退出当前 Codex，再选择下一次加载的项目和会话/);
 });
 
 test('running API Codex proxy switches validate the new route before keeping it', () => {

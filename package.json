@@ -2,7 +2,7 @@
   "name": "codex-navo",
   "productName": "Codex Navo",
   "private": true,
-  "version": "1.2.120",
+  "version": "1.2.125",
   "description": "Open-source Windows workspace for Codex multi-account isolation, quota and token tracking, API pooling and failover, per-account proxies, sessions, notifications, and floating status.",
   "main": "desktop-src/main.js",
   "author": "1080ssf",

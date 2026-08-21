@@ -188,17 +188,6 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .update-product-body > .primary-button { margin-top: 18px; }
 .codex-update-state > p { min-height: 48px; margin: 0; color: #52677f; font-size: 11px; line-height: 1.6; }
 .codex-update-progress { margin: 0 0 14px; }
-.codex-release-notes { margin: 0 0 14px; padding: 11px 12px; border: 1px solid #dce5ef; border-radius: 10px; background: #f8fafc; }
-.codex-release-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 7px; }
-.codex-release-heading strong { color: #2c4666; font-size: 9px; letter-spacing: .04em; }
-.codex-release-heading a { color: #4774a8; font-size: 8px; text-decoration: none; }
-.codex-release-list { display: grid; gap: 5px; }
-.codex-release-item { border-top: 1px solid #e1e8f0; }
-.codex-release-item:first-child { border-top: 0; }
-.codex-release-item summary { display: grid; grid-template-columns: 68px minmax(0,1fr); gap: 8px; padding: 7px 0; color: #294361; font-size: 9px; cursor: pointer; list-style: none; }
-.codex-release-item summary::-webkit-details-marker { display: none; }
-.codex-release-item time { color: #8090a3; font: 600 8px/1.4 "Cascadia Code", monospace; }
-.codex-release-item p { max-height: 104px; margin: 0 0 8px 76px; overflow-y: auto; color: #687b91; font-size: 8px; line-height: 1.55; }
 .codex-update-state dl { display: grid; gap: 1px; overflow: hidden; margin: 14px 0 18px; border: 1px solid #dce4ee; border-radius: 9px; background: #dce4ee; }
 .codex-update-state dl div { display: flex; justify-content: space-between; gap: 16px; padding: 11px 12px; background: #f8fafc; }
 .codex-update-state dt { color: #75869a; font-size: 10px; }
@@ -438,8 +427,8 @@ h1 { font-size: clamp(30px, 3vw, 38px); line-height: 1; letter-spacing: -.035em;
 .plan-badge.plan-pro { color: #4f46a5; border-color: #c7c3ef; background: #f0efff; }
 .plan-badge.plan-team, .plan-badge.plan-business, .plan-badge.plan-enterprise { color: #2459a9; border-color: #bfd2ee; background: #edf5ff; }
 .plan-badge.plan-free { color: #65758a; border-color: #d4dce6; background: #f3f5f8; }
-.credit-badge { flex: 0 0 auto; padding: 3px 8px; border: 1px solid #bfd4ee; border-radius: 999px; color: #245a9f; background: #eef6ff; font: 700 10px/1 "Cascadia Code", monospace; }
 .balance-badge { flex: 0 0 auto; padding: 3px 8px; border: 1px solid #c8d5e7; border-radius: 999px; color: #334e73; background: #f5f8fc; font: 700 10px/1 "Cascadia Code", monospace; }
+.expiry-badge, .reset-credit-badge { flex: 0 0 auto; padding: 3px 8px; border: 1px solid #bfd0ea; border-radius: 999px; color: #35557f; background: #f7faff; font-size: 10px; font-weight: 700; white-space: nowrap; }
 .session-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border: 1px solid #d9c39c; border-radius: 999px; color: #8a5b16; background: #fff9ee; font-size: 10px; font-weight: 650; }
 .session-badge i { width: 5px; height: 5px; border-radius: 50%; background: #d99a2b; box-shadow: 0 0 0 3px rgba(217,154,43,.12); }
 .health-badge { display: inline-flex; align-items: center; padding: 3px 8px; border: 1px solid #e1bd83; border-radius: 999px; color: #87591a; background: #fff8ec; font-size: 10px; font-weight: 650; }
@@ -1211,7 +1200,7 @@ html[data-theme="dark"] .usage-heading-line h2 { color: #edf3fb; }
 html[data-theme="dark"] .usage-primary > div + div { border-color: #34465c; background: #1a2738; }
 html[data-theme="dark"] .usage-primary .usage-cost strong { color: #71d8b3; }
 html[data-theme="dark"] .token-scale-note { color: #a6b9ce; border-color: #3b4e64; background: #192637; }
-html[data-theme="dark"] :is(.usage-primary,.usage-metric,.usage-card,.account-usage,.account-detail,.codex-login-panel,.launch-project,.launch-project-head,.launch-thread-list,.launch-optimize,.language-settings-main,.language-status,.language-select-wrap,.update-product-body,.codex-update-state,.codex-release-notes,.codex-update-state dl div,.community-link,.api-account-group,.api-account-option,.account-route-group,.account-route-group summary,.account-network-preview,.account-network-empty,.network-import-panel,.network-source-sidebar,.network-node-head,.network-node,.api-docs-connect > div,.api-endpoint-grid article,.api-docs-example,.wake-toggle) { color: #d9e4f1; border-color: #2e4055; background: #131f2e; }
+html[data-theme="dark"] :is(.usage-primary,.usage-metric,.usage-card,.account-usage,.account-detail,.codex-login-panel,.launch-project,.launch-project-head,.launch-thread-list,.launch-optimize,.language-settings-main,.language-status,.language-select-wrap,.update-product-body,.codex-update-state,.codex-update-state dl div,.community-link,.api-account-group,.api-account-option,.account-route-group,.account-route-group summary,.account-network-preview,.account-network-empty,.network-import-panel,.network-source-sidebar,.network-node-head,.network-node,.api-docs-connect > div,.api-endpoint-grid article,.api-docs-example,.wake-toggle) { color: #d9e4f1; border-color: #2e4055; background: #131f2e; }
 html[data-theme="dark"] :is(.usage-primary > div + div,.session-category + .session-category,.session-row,.api-account-option,.account-route-group > div,.network-source-sidebar) { border-color: #2a3b4f; }
 html[data-theme="dark"] :is(.account-group-head,.session-project-head,.update-product-title) { background: linear-gradient(115deg,#142338,#111c2b); }
 html[data-theme="dark"] :is(.account-group-head:hover,.community-link:hover,.account-route-option:hover,.session-row:hover) { background: #19283b; }
