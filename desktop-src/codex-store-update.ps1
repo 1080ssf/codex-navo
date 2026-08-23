@@ -2,7 +2,9 @@ param(
   [ValidateSet('check', 'install')]
   [string]$Mode = 'check',
   [Parameter(Mandatory = $true)]
-  [string]$OutputPath
+  [string]$OutputPath,
+  [Parameter(Mandatory = $true)]
+  [string]$ProgressPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,16 +33,68 @@ function Await-Operation($Operation, [Type]$ResultType) {
 }
 
 function Await-ProgressOperation($Operation, [Type]$ResultType, [Type]$ProgressType) {
+  if (-not ('CodexNavo.FileProgress`1' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Globalization;
+using System.IO;
+using System.Reflection;
+
+namespace CodexNavo {
+  public sealed class FileProgress<T> : IProgress<T> {
+    private readonly string path;
+    public FileProgress(string path) { this.path = path; }
+
+    private static object Read(object value, string name) {
+      if (value == null) return null;
+      Type type = value.GetType();
+      PropertyInfo property = type.GetProperty(name);
+      if (property != null) return property.GetValue(value, null);
+      FieldInfo field = type.GetField(name);
+      return field == null ? null : field.GetValue(value);
+    }
+
+    private static string Number(object value) {
+      if (value == null) return "0";
+      return Convert.ToDouble(value, CultureInfo.InvariantCulture).ToString("R", CultureInfo.InvariantCulture);
+    }
+
+    private static string Text(object value) {
+      string text = value == null ? "" : Convert.ToString(value, CultureInfo.InvariantCulture);
+      return text.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n");
+    }
+
+    public void Report(T value) {
+      object boxed = value;
+      string json = "{" +
+        "\"packageFamilyName\":\"" + Text(Read(boxed, "PackageFamilyName")) + "\"," +
+        "\"packageUpdateState\":\"" + Text(Read(boxed, "PackageUpdateState")) + "\"," +
+        "\"packageDownloadProgress\":" + Number(Read(boxed, "PackageDownloadProgress")) + "," +
+        "\"totalDownloadProgress\":" + Number(Read(boxed, "TotalDownloadProgress")) + "," +
+        "\"packageBytesDownloaded\":" + Number(Read(boxed, "PackageBytesDownloaded")) + "," +
+        "\"packageDownloadSizeInBytes\":" + Number(Read(boxed, "PackageDownloadSizeInBytes")) + "," +
+        "\"updatedAt\":\"" + DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture) + "\"}";
+      string directory = Path.GetDirectoryName(path);
+      if (!String.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+      File.WriteAllText(path, json);
+    }
+  }
+}
+'@
+  }
   $method = [System.WindowsRuntimeSystemExtensions].GetMethods() |
     Where-Object {
       $_.Name -eq 'AsTask' -and
       $_.IsGenericMethodDefinition -and
       $_.GetGenericArguments().Count -eq 2 -and
-      $_.GetParameters().Count -eq 1
+      $_.GetParameters().Count -eq 2 -and
+      $_.GetParameters()[1].ParameterType.Name -eq 'IProgress`1'
     } |
     Select-Object -First 1
   if (-not $method) { throw 'Windows Runtime progress task adapter is unavailable.' }
-  $task = $method.MakeGenericMethod($ResultType, $ProgressType).Invoke($null, @($Operation))
+  $writerType = [CodexNavo.FileProgress`1].MakeGenericType($ProgressType)
+  $writer = [Activator]::CreateInstance($writerType, @($ProgressPath))
+  $task = $method.MakeGenericMethod($ResultType, $ProgressType).Invoke($null, @($Operation, $writer))
   $task.Wait()
   return $task.Result
 }

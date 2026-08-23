@@ -23,12 +23,16 @@ test('Store 版 Codex 被 Windows 拒绝直接执行时提供系统激活回退'
 
 test('固定账号启动会等待稳定 Codex 进程并在引导进程切换时保留目标授权', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-  assert.match(source, /waitForCodexDesktop\(timeoutMs = 8_000, stableMs = 1_200\)/);
+  assert.match(source, /CODEX_DESKTOP_START_TIMEOUT_MS = 45_000/);
+  assert.match(source, /waitForCodexDesktop\(timeoutMs = CODEX_DESKTOP_START_TIMEOUT_MS, stableMs = 1_200\)/);
   assert.match(source, /Date\.now\(\) - candidateSince >= stableMs/);
   assert.match(source, /const desktopArgs = accountNetwork/);
   assert.match(source, /--proxy-server=http:\/\/127\.0\.0\.1:\$\{accountNetwork\.mixedPort\}/);
   assert.match(source, /--proxy-bypass-list=<local>;localhost;\*\.localhost;127\.0\.0\.1;\[::1\]/);
   assert.match(source, /spawnDetached\(installation\.executable, desktopArgs/);
+  assert.match(source, /Codex 启动较慢，正在继续等待/);
+  assert.match(source, /codex\.desktop\.delayed-start-recovered/);
+  assert.match(source, /codex\.desktop\.locale-failed/);
   assert.match(source, /lease\.process-reconciled/);
   assert.match(source, /lease\.launchType === 'codex' && !lease\.processPid/);
   assert.match(source, /activeProcessMissing && !launchPending/);
@@ -134,10 +138,15 @@ test('应用设置在 Navo 内通过 OpenAI 官方清单直接更新 Codex 桌�
   const storeHelper = fs.readFileSync(path.join(root, 'desktop-src', 'codex-store-update.ps1'), 'utf8');
   assert.match(storeHelper, /CanSilentlyDownloadStorePackageUpdates/);
   assert.match(storeHelper, /TrySilentDownloadAndInstallStorePackageUpdatesAsync/);
+  assert.match(storeHelper, /PackageDownloadProgress/);
+  assert.match(storeHelper, /PackageBytesDownloaded/);
+  assert.match(storeHelper, /FileProgress/);
   assert.doesNotMatch(storeHelper, /\$context\.RequestDownloadAndInstallStorePackageUpdatesAsync/);
   assert.match(storeHelper, /List\[Windows\.Services\.Store\.StorePackageUpdate\]/);
   assert.doesNotMatch(storeHelper, /\$updates\s*=\s*@\(Await-Operation/);
-  assert.match(fs.readFileSync(path.join(root, 'desktop-src', 'codex-store-update.vbs'), 'utf8'), /shell\.Run\(commandLine, 0, True\)/);
+  const storeWrapper = fs.readFileSync(path.join(root, 'desktop-src', 'codex-store-update.vbs'), 'utf8');
+  assert.match(storeWrapper, /shell\.Run\(commandLine, 0, True\)/);
+  assert.match(storeWrapper, /progressPath/);
   assert.match(fs.readFileSync(path.join(root, 'package.json'), 'utf8'), /asarUnpack[\s\S]*codex-store-update\.ps1[\s\S]*codex-store-update\.vbs/);
   assert.match(main, /ForceApplicationShutdown/);
   assert.match(main, /showMessageBox/);
@@ -145,6 +154,8 @@ test('应用设置在 Navo 内通过 OpenAI 官方清单直接更新 Codex 桌�
   assert.match(main, /updateAvailable/);
   assert.match(main, /codex-updates:install/);
   assert.match(main, /codex-updates:state/);
+  assert.match(main, /storeBytesDownloaded/);
+  assert.match(main, /store-downloading/);
   assert.doesNotMatch(main, /winget\.exe/);
   assert.doesNotMatch(main, /ms-windows-store:/);
   assert.match(preload, /getCodexState/);

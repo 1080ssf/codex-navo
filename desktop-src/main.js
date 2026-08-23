@@ -554,13 +554,14 @@ async function runCodexStoreHelper(mode, { targetVersion = '', timeoutMs = 20 * 
   const outputDirectory = path.join(USER_DATA_ROOT, 'updates', 'codex-store');
   fs.mkdirSync(outputDirectory, { recursive: true });
   const outputPath = path.join(outputDirectory, `${mode}-${crypto.randomUUID()}.json`);
+  const progressPath = `${outputPath}.progress`;
   const command = [
-    "$arguments = '\"' + $env:CODEX_NAVO_STORE_WRAPPER + '\" \"' + $env:CODEX_NAVO_STORE_HELPER + '\" \"' + $env:CODEX_NAVO_STORE_MODE + '\" \"' + $env:CODEX_NAVO_STORE_OUTPUT + '\"'",
+    "$arguments = '\"' + $env:CODEX_NAVO_STORE_WRAPPER + '\" \"' + $env:CODEX_NAVO_STORE_HELPER + '\" \"' + $env:CODEX_NAVO_STORE_MODE + '\" \"' + $env:CODEX_NAVO_STORE_OUTPUT + '\" \"' + $env:CODEX_NAVO_STORE_PROGRESS + '\"'",
     "Invoke-CommandInDesktopPackage -PackageFamilyName $env:CODEX_NAVO_STORE_FAMILY -AppId App -Command 'C:\\Windows\\System32\\wscript.exe' -Args $arguments -PreventBreakaway -ErrorAction Stop",
   ].join('; ');
   let invokeError = null;
-  try {
-    const result = await runHiddenProcess('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], timeoutMs, {
+  let invokeFinished = false;
+  const invocation = runHiddenProcess('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], timeoutMs, {
       env: {
         ...directChildEnvironment(process.env),
         CODEX_NAVO_STORE_FAMILY: installed.packageFamilyName,
@@ -568,35 +569,62 @@ async function runCodexStoreHelper(mode, { targetVersion = '', timeoutMs = 20 * 
         CODEX_NAVO_STORE_WRAPPER: wrapper,
         CODEX_NAVO_STORE_MODE: mode,
         CODEX_NAVO_STORE_OUTPUT: outputPath,
+        CODEX_NAVO_STORE_PROGRESS: progressPath,
       },
-    });
-    if (result.code !== 0) invokeError = new Error('Windows could not start the Codex Store update service.');
-  } catch (error) { invokeError = error; }
+    }).then((result) => {
+      if (result.code !== 0) invokeError = new Error('Windows could not complete the Codex Store update service.');
+    }).catch((error) => { invokeError = error; }).finally(() => { invokeFinished = true; });
 
   const deadline = Date.now() + Math.max(5_000, timeoutMs);
   let nextVersionCheckAt = 0;
-  while (Date.now() < deadline) {
-    if (fs.existsSync(outputPath)) {
-      try {
-        const result = JSON.parse(fs.readFileSync(outputPath, 'utf8').replace(/^\uFEFF/, ''));
-        fs.rmSync(outputPath, { force: true });
-        return result;
-      } catch (error) {
-        fs.rmSync(outputPath, { force: true });
-        throw new Error(`Windows returned an invalid Codex Store update result: ${error.message}`);
+  let lastProgressAt = 0;
+  try {
+    while (Date.now() < deadline) {
+      if (fs.existsSync(outputPath)) {
+        try {
+          const result = JSON.parse(fs.readFileSync(outputPath, 'utf8').replace(/^\uFEFF/, ''));
+          fs.rmSync(outputPath, { force: true });
+          return result;
+        } catch (error) {
+          fs.rmSync(outputPath, { force: true });
+          throw new Error(`Windows returned an invalid Codex Store update result: ${error.message}`);
+        }
       }
-    }
-    if (mode === 'install' && targetVersion && Date.now() >= nextVersionCheckAt) {
-      nextVersionCheckAt = Date.now() + 2_000;
-      const current = readInstalledCodexPackageState();
-      if (current.installed && comparePackageVersions(current.version, targetVersion) >= 0) {
-        return { ok: true, hasUpdate: true, overallState: 'Completed', inferredFromInstalledVersion: true };
+      if (mode === 'install' && fs.existsSync(progressPath)) {
+        try {
+          const stat = fs.statSync(progressPath);
+          if (stat.mtimeMs > lastProgressAt) {
+            lastProgressAt = stat.mtimeMs;
+            const progress = JSON.parse(fs.readFileSync(progressPath, 'utf8').replace(/^\uFEFF/, ''));
+            const fraction = Math.max(0, Math.min(1, Number(progress.packageDownloadProgress) || 0));
+            publishCodexUpdateState({
+              status: 'store-installing',
+              phase: fraction >= 0.8 ? 'store-installing' : 'store-downloading',
+              percent: Math.round(fraction * 100),
+              storeBytesDownloaded: Number(progress.packageBytesDownloaded) || 0,
+              storeDownloadSize: Number(progress.packageDownloadSizeInBytes) || 0,
+              storePackageState: String(progress.packageUpdateState || ''),
+              storeProgressAt: progress.updatedAt || new Date().toISOString(),
+            });
+          }
+        } catch {}
       }
+      if (mode === 'install' && targetVersion && Date.now() >= nextVersionCheckAt) {
+        nextVersionCheckAt = Date.now() + 2_000;
+        const current = readInstalledCodexPackageState();
+        if (current.installed && comparePackageVersions(current.version, targetVersion) >= 0) {
+          return { ok: true, hasUpdate: true, overallState: 'Completed', inferredFromInstalledVersion: true };
+        }
+      }
+      if (invokeFinished && invokeError) throw invokeError;
+      if (invokeFinished && !fs.existsSync(outputPath)) throw new Error('Windows Store update service exited without returning a result.');
+      await delay(250);
     }
-    if (invokeError) throw invokeError;
-    await delay(250);
+    throw new Error('The Codex Store update timed out.');
+  } finally {
+    fs.rmSync(progressPath, { force: true });
+    void invocation;
   }
-  throw new Error('The Codex Store update timed out.');
 }
 
 async function fetchOfficialCodexUpdateState() {
@@ -815,7 +843,7 @@ async function installCodexWindowsUpdate({ locale = 'en-US' } = {}) {
   let downloadedPath = '';
   try {
     if (state.updateSource === 'store') {
-      publishCodexUpdateState({ status: 'store-installing', phase: 'store-installing', percent: 0, error: '' });
+      publishCodexUpdateState({ status: 'store-installing', phase: 'store-downloading', percent: 0, error: '' });
       const result = await runCodexStoreHelper('install', { targetVersion: state.latestVersion });
       const installed = await waitForInstalledCodexVersion(
         state.latestVersion,

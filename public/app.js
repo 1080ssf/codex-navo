@@ -204,6 +204,7 @@ const englishUi = new Map([
   ['7 天', '7 days'], ['30 天', '30 days'], ['按 API Token 公价估算', 'Estimated at public API token prices'],
   ['集中管理代理订阅与节点，并为每个账号分配独立线路。', 'Manage proxy subscriptions and nodes, with an independent route for each account.'],
   ['线路名称', 'Route name'], ['可选', 'Optional'], ['节点或订阅', 'Node or subscription'], ['添加线路', 'Add route'],
+  ['例如：美国 VPS', 'For example: US VPS'], ['粘贴订阅链接或节点配置', 'Paste a subscription URL or node configuration'],
   ['代理核心将在首次添加节点时自动准备', 'The proxy core will be prepared when the first node is added'], ['还没有节点或订阅', 'No nodes or subscriptions yet'],
   ['检查账号授权状态，或通过授权包迁移 Codex 与可用的网页会话。', 'Check account authorization or migrate Codex and available web sessions with an authorization package.'],
   ['账号健康', 'Account health'], ['检查全部', 'Check all'], ['账号授权包', 'Account authorization package'], ['导出授权', 'Export authorization'],
@@ -378,6 +379,8 @@ const englishUi = new Map([
   ['正在连接…', 'Connecting…'], ['正在启动 Codex', 'Launching Codex'], ['正在启动该账号的独立登录流程。', 'Starting this account’s isolated sign-in flow.'],
   ['正在识别…', 'Identifying…'], ['正在识别并导入临时账号…', 'Identifying and importing temporary accounts…'],
   ['正在通过 Windows 官方更新服务下载并安装 Codex，请保持 Navo 运行…', 'Downloading and installing Codex through the official Windows update service. Keep Navo running…'],
+  ['正在通过 Windows 官方更新服务下载 Codex…', 'Downloading Codex through the official Windows update service…'],
+  ['正在通过 Windows 官方更新服务安装 Codex…', 'Installing Codex through the official Windows update service…'],
   ['正在通过 Windows 应用部署服务安装 Codex…', 'Installing Codex through Windows App Deployment…'], ['正在通过所选线路连接 ChatGPT…', 'Connecting to ChatGPT through the selected route…'],
   ['正在完成登录与授权', 'Completing sign-in and authorization'], ['正在校验包身份、发布者、版本与架构…', 'Verifying package identity, publisher, version, and architecture…'],
   ['正在写入独立 Chrome 网页会话和 Codex OAuth 凭证，请稍候。', 'Saving the isolated Chrome web session and Codex OAuth credentials…'],
@@ -952,6 +955,7 @@ function renderCodexLaunchProgress(progress = state.launchProgress) {
     '正在初始化 Codex 服务…': 'Initializing Codex services…',
     '正在打开 Codex…': 'Opening Codex…',
     '正在等待 Codex 窗口…': 'Waiting for the Codex window…',
+    'Codex 启动较慢，正在继续等待…': 'Codex is starting slowly. Still waiting…',
     'Codex 已打开': 'Codex is open',
   }[progress.message] || progress.message);
   elements.codexLaunchStatusAccount.textContent = progress.label || 'Codex';
@@ -2663,18 +2667,6 @@ elements.networkSettingsButton.addEventListener('click', () => {
   renderNetworkSources();
 });
 
-elements.networkSourceForm.querySelectorAll('[data-network-input-label]').forEach((label) => {
-  const control = label.querySelector('input, textarea');
-  label.addEventListener('pointerdown', () => {
-    requestAnimationFrame(() => {
-      if (document.activeElement !== control) control.focus({ preventScroll: true });
-    });
-  });
-  label.addEventListener('click', () => {
-    if (document.activeElement !== control) control.focus({ preventScroll: true });
-  });
-});
-
 elements.networkSourceForm.addEventListener('submit', async (event) => {
   if (event.submitter?.value === 'cancel') return;
   event.preventDefault();
@@ -3040,7 +3032,9 @@ function renderCodexDesktopUpdate() {
       : `OpenAI 已公布 Codex v${info.latestVersion}，官方安装包仍在分发中，请稍后重新检查。`,
     propagating: `OpenAI 已公布 Codex v${info.latestVersion}，官方安装包仍在分发中，请稍后重新检查。`,
     closing: '正在关闭 Codex，请稍候…',
-    'store-installing': '正在通过 Windows 官方更新服务下载并安装 Codex，请保持 Navo 运行…',
+    'store-installing': info.phase === 'store-downloading'
+      ? '正在通过 Windows 官方更新服务下载 Codex…'
+      : '正在通过 Windows 官方更新服务安装 Codex…',
     downloading: `正在下载 OpenAI 官方 Codex 安装包… ${percent}%`,
     verifying: '正在校验包身份、发布者、版本与架构…',
     installing: '正在通过 Windows 应用部署服务安装 Codex…',
@@ -3055,7 +3049,9 @@ function renderCodexDesktopUpdate() {
       : `OpenAI has announced Codex v${info.latestVersion}; the official package is still propagating. Check again shortly.`,
     propagating: `OpenAI has announced Codex v${info.latestVersion}; the official package is still propagating. Check again shortly.`,
     closing: 'Closing Codex…',
-    'store-installing': 'Downloading and installing Codex through the official Windows update service. Keep Navo running…',
+    'store-installing': info.phase === 'store-downloading'
+      ? 'Downloading Codex through the official Windows update service…'
+      : 'Installing Codex through the official Windows update service…',
     downloading: `Downloading the official OpenAI Codex package… ${percent}%`,
     verifying: 'Verifying package identity, publisher, version, and architecture…',
     installing: 'Installing Codex through Windows App Deployment…',
@@ -3065,9 +3061,9 @@ function renderCodexDesktopUpdate() {
   };
   elements.codexUpdateCopy.textContent = copies[info.status] || copies.idle;
   elements.codexUpdateProgress.hidden = !busy;
-  elements.codexUpdateProgress.classList.toggle('indeterminate', info.status === 'store-installing');
-  elements.codexUpdateProgressBar.style.width = info.status === 'store-installing' ? '32%' : `${percent}%`;
-  elements.codexUpdateProgressLabel.textContent = info.status === 'store-installing' ? '…' : `${percent}%`;
+  elements.codexUpdateProgress.classList.toggle('indeterminate', info.status === 'store-installing' && percent === 0);
+  elements.codexUpdateProgressBar.style.width = info.status === 'store-installing' && percent === 0 ? '32%' : `${percent}%`;
+  elements.codexUpdateProgressLabel.textContent = info.status === 'store-installing' && percent === 0 ? '…' : `${percent}%`;
   elements.codexUpdateAction.disabled = busy;
   if (busy) elements.codexUpdateAction.textContent = chinese ? '正在处理…' : 'Working…';
   else if (info.updateAvailable && info.packageReady) elements.codexUpdateAction.textContent = info.installed

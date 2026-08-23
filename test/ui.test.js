@@ -510,9 +510,9 @@ test('网络线路使用单行添加布局，并在账号线路选择中展示�
   assert.match(client, /node\.protocol}  ·  \$\{nodeRouteText\(node\)}/);
   assert.match(styles, /\.network-import-panel \{[^}]*grid-template-columns: 190px minmax\(0, 1fr\) 108px/s);
   assert.match(styles, /\.network-import-panel textarea \{[^}]*white-space: nowrap/s);
-  assert.match(html, /data-network-input-label/);
-  assert.match(client, /querySelectorAll\('\[data-network-input-label\]'\)/);
-  assert.match(client, /control\.focus\(\{ preventScroll: true \}\)/);
+  assert.doesNotMatch(html, /data-network-input-label/);
+  assert.doesNotMatch(client, /querySelectorAll\('\[data-network-input-label\]'\)/);
+  assert.doesNotMatch(client, /control\.focus\(\{ preventScroll: true \}\)/);
   assert.match(styles, /\.network-import-panel input, \.network-import-panel textarea \{[^}]*pointer-events:\s*auto[^}]*user-select:\s*text/s);
 });
 
@@ -739,11 +739,17 @@ test('notification message is user-authored and sound rows keep aligned controls
   assert.match(styles, /\.notification-channel \.compact-switch input \{[^}]*width: 1px[^}]*height: 1px/s);
 });
 
-test('language, network, and wake fields avoid mixed-language preset text', () => {
+test('network inputs keep native editing behavior and localized hints', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
-  assert.doesNotMatch(html, /placeholder="例如：工作线路"|placeholder="粘贴订阅链接|placeholder="hi">hi/);
+  assert.match(html, /name="name"[^>]*placeholder="例如：美国 VPS"/);
+  assert.match(html, /name="input"[^>]*placeholder="粘贴订阅链接或节点配置"/);
+  assert.match(client, /\['例如：美国 VPS', 'For example: US VPS'\]/);
+  assert.match(client, /\['粘贴订阅链接或节点配置', 'Paste a subscription URL or node configuration'\]/);
+  assert.doesNotMatch(client, /querySelectorAll\('\[data-network-input-label\]'\)/);
+  assert.match(styles, /\.network-field-title \{[^}]*pointer-events: none/s);
+  assert.match(styles, /\.network-import-panel input:focus[^}]*border-color:/s);
   assert.match(client, /function localizedReasoningLabel/);
   assert.match(client, /characterData: true/);
   assert.match(styles, /\.language-settings-layout \{[^}]*width: 100%[^}]*max-width: none/s);

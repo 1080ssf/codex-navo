@@ -258,6 +258,50 @@ db.commit(); db.close()
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('launch catalog keeps the latest scheduled-task execution state when switching accounts', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-launch-automations-'));
+  const home = path.join(root, 'home');
+  const backup = path.join(root, 'backup');
+  const sqliteDir = path.join(home, 'sqlite');
+  fs.mkdirSync(sqliteDir, { recursive: true });
+  const catalogDb = path.join(sqliteDir, 'codex-dev.db');
+  python(`
+import sqlite3, sys
+db=sqlite3.connect(sys.argv[1])
+db.execute('CREATE TABLE local_thread_catalog(host_id TEXT NOT NULL, thread_id TEXT NOT NULL, display_title TEXT, model_provider TEXT, PRIMARY KEY(host_id, thread_id))')
+db.execute('CREATE TABLE local_thread_catalog_metadata(id INTEGER PRIMARY KEY, catalog_revision INTEGER NOT NULL)')
+db.execute('CREATE TABLE automations(id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL, next_run_at INTEGER, last_run_at INTEGER, updated_at INTEGER NOT NULL)')
+db.execute('CREATE TABLE automation_runs(thread_id TEXT PRIMARY KEY, automation_id TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)')
+db.execute('INSERT INTO local_thread_catalog_metadata VALUES(1, 0)')
+db.execute('INSERT INTO local_thread_catalog VALUES(?,?,?,?)', ('local','t1','one','openai'))
+db.execute('INSERT INTO automations VALUES(?,?,?,?,?,?)', ('daily','Daily task','ACTIVE',200,100,100))
+db.commit(); db.close()
+`, [catalogDb]);
+  const record = prepareLaunchView(home, backup, {
+    language: 'zh-CN', projectIds: [], threadIds: ['t1'],
+  }, { modelProvider: 'openai' });
+  python(`
+import sqlite3, sys
+db=sqlite3.connect(sys.argv[1])
+db.execute("UPDATE automations SET next_run_at=300, last_run_at=200, updated_at=200 WHERE id='daily'")
+db.execute("INSERT INTO automation_runs VALUES('run-1','daily','COMPLETED',200,200)")
+db.commit(); db.close()
+`, [catalogDb]);
+  restoreLaunchView(record);
+  const after = JSON.parse(python(`
+import json, sqlite3, sys
+db=sqlite3.connect(sys.argv[1])
+print(json.dumps({
+ 'automation': db.execute("SELECT next_run_at,last_run_at,updated_at FROM automations WHERE id='daily'").fetchone(),
+ 'runs': db.execute("SELECT thread_id,automation_id,status FROM automation_runs ORDER BY thread_id").fetchall()
+}))
+db.close()
+`, [catalogDb]));
+  assert.deepEqual(after.automation, [300, 200, 200]);
+  assert.deepEqual(after.runs, [['run-1', 'daily', 'COMPLETED']]);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('launch transaction maps mixed providers for the active mode and restores each original provider', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-launch-provider-'));
   const home = path.join(root, 'home');

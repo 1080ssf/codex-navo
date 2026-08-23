@@ -131,8 +131,8 @@
           <div class="feature-page-head"><p class="eyebrow">NETWORK ROUTING</p><h1>网络代理</h1><p>集中管理代理订阅与节点，并为每个账号分配独立线路。</p></div>
           <form id="network-source-form" class="feature-surface network-page-form">
             <section class="network-import-panel">
-              <label class="network-source-name" data-network-input-label><span class="network-field-title">线路名称 <small>可选</small></span><input name="name" maxlength="60" autocomplete="off"></label>
-              <label class="network-source-input" data-network-input-label><span class="network-field-title">节点或订阅</span><textarea name="input" required rows="1" spellcheck="false" wrap="off" autocomplete="off" title="支持订阅链接及 SS / SSR / VMess / VLESS / Trojan / Hysteria2 / TUIC / WireGuard / HTTP / SOCKS5"></textarea></label>
+              <label class="network-source-name"><span class="network-field-title">线路名称 <small>可选</small></span><input name="name" maxlength="60" autocomplete="off" placeholder="例如：美国 VPS"></label>
+              <label class="network-source-input"><span class="network-field-title">节点或订阅</span><textarea name="input" required rows="1" spellcheck="false" wrap="off" autocomplete="off" placeholder="粘贴订阅链接或节点配置" title="支持订阅链接及 SS / SSR / VMess / VLESS / Trojan / Hysteria2 / TUIC / WireGuard / HTTP / SOCKS5"></textarea></label>
               <button class="network-add-button" id="add-network-source" type="submit"><span>＋</span>添加线路</button>
             </section>
             <div class="network-core-state" id="network-core-state"><i></i><span>代理核心将在首次添加节点时自动准备</span></div>

@@ -851,10 +851,12 @@ dialog textarea { resize: vertical; line-height: 1.55; }
 .network-page-form .network-workspace { height: 352px; min-height: 352px; }
 .network-import-panel { position: relative; isolation: isolate; display: grid; grid-template-columns: 190px minmax(0, 1fr) 108px; align-items: end; gap: 12px; margin-top: 16px; padding: 14px 15px 15px; border: 1px solid #d6e0eb; border-radius: 10px; background: #f7f9fc; font-family: "Segoe UI Variable Text", "Microsoft YaHei UI", "Segoe UI", sans-serif; }
 .network-import-panel label { position: relative; z-index: 1; display: grid; gap: 7px; margin: 0; cursor: text; -webkit-app-region: no-drag; }
-.network-field-title { display: flex; min-height: 16px; align-items: center; gap: 6px; color: #293d56; font-size: 11px; font-weight: 700; line-height: 16px; }
+.network-field-title { display: flex; min-height: 16px; align-items: center; gap: 6px; color: #293d56; font-size: 11px; font-weight: 700; line-height: 16px; pointer-events: none; }
 .network-field-title small { color: #8b99aa; font-size: 9px; font-weight: 500; }
 .network-import-panel input, .network-import-panel textarea { position: relative; z-index: 2; width: 100%; padding: 10px 11px; border: 1px solid #cdd9e7; border-radius: 9px; color: var(--ink); background: #fff; font: 500 11px/20px "Segoe UI Variable Text", "Microsoft YaHei UI", "Segoe UI", sans-serif; outline: none; pointer-events: auto; user-select: text; -webkit-user-select: text; -webkit-app-region: no-drag; }
 .network-import-panel input, .network-import-panel textarea { height: 42px; min-height: 42px; line-height: 20px; }
+.network-import-panel input:focus, .network-import-panel textarea:focus { z-index: 4; border-color: #6f9ae8; box-shadow: 0 0 0 3px rgba(47,102,219,.1); }
+.network-import-panel input::placeholder, .network-import-panel textarea::placeholder { color: #99a6b6; font-weight: 400; opacity: 1; }
 .network-import-panel textarea { overflow-x: auto; overflow-y: hidden; resize: none; white-space: nowrap; }
 .network-import-panel .network-source-input { grid-column: 2; }
 .network-add-button { display: inline-flex; height: 42px; align-items: center; justify-content: center; gap: 4px; margin-top: 23px; padding: 0 12px; border: 1px solid #9eb5d8; border-radius: 8px; color: #1c55ad; background: #fff; font-size: 11px; font-weight: 700; white-space: nowrap; }

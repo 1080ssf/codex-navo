@@ -2134,7 +2134,9 @@ function spawnDetached(executable, args, options) {
   });
 }
 
-async function waitForCodexDesktop(timeoutMs = 8_000, stableMs = 1_200) {
+const CODEX_DESKTOP_START_TIMEOUT_MS = 45_000;
+
+async function waitForCodexDesktop(timeoutMs = CODEX_DESKTOP_START_TIMEOUT_MS, stableMs = 1_200) {
   const deadline = Date.now() + timeoutMs;
   let candidatePid = null;
   let candidateSince = 0;
@@ -2265,6 +2267,22 @@ async function launchCodexDesktop(account, launchOptions = null) {
       : [`--lang=${selection.language}`, ...localeArgs];
     delete environment.CODEX_ELECTRON_USER_DATA_PATH;
     delete environment.CODEX_SQLITE_HOME;
+    const finishDetectedLaunch = async (processPid, result) => {
+      if (localeDebugPort) {
+        try {
+          await applyDesktopLocaleBridge(localeDebugPort, selection.language);
+          audit('codex.desktop.locale-applied', { accountId: account.id, result: selection.language });
+        } catch (error) {
+          // Locale injection is optional. A DevTools connection error must not
+          // turn an already detected Codex window into a launch failure.
+          audit('codex.desktop.locale-failed', { accountId: account.id, result: String(error.code || error.message) });
+        }
+      }
+      recordSharedCodexProcess(account.id, detectCodexDesktopSnapshot({ preferCache: false }));
+      audit('codex.desktop.started', { accountId: account.id, result: `${result}:${processPid}` });
+      closeTransaction();
+      return processPid;
+    };
     try {
       setCodexLaunchProgress({ stage: 'starting', message: '正在打开 Codex…', percent: 78 });
       const spawnedPid = await spawnDetached(installation.executable, desktopArgs, {
@@ -2277,20 +2295,24 @@ async function launchCodexDesktop(account, launchOptions = null) {
       // startup. Track the stable root process instead of the short-lived PID so
       // lease cleanup does not restore the previous auth while Codex is opening.
       setCodexLaunchProgress({ stage: 'waiting', message: '正在等待 Codex 窗口…', percent: 90 });
-      const processPid = await waitForCodexDesktop(10_000);
-      if (!processPid) throw new Error(`Codex 启动进程 ${spawnedPid} 已退出，但没有检测到桌面端窗口`);
-      if (localeDebugPort) {
-        await applyDesktopLocaleBridge(localeDebugPort, selection.language);
-        audit('codex.desktop.locale-applied', { accountId: account.id, result: selection.language });
+      const processPid = await waitForCodexDesktop();
+      if (!processPid) {
+        const detectionError = new Error(`Codex 启动进程 ${spawnedPid} 已退出，但没有检测到桌面端窗口`);
+        detectionError.code = 'CODEX_DESKTOP_NOT_DETECTED';
+        throw detectionError;
       }
-      recordSharedCodexProcess(account.id, detectCodexDesktopSnapshot({ preferCache: false }));
-      audit('codex.desktop.started', {
-        accountId: account.id,
-        result: accountNetwork ? `direct-spawn:proxy:${processPid}` : `direct-spawn:${processPid}`,
-      });
-      closeTransaction();
-      return processPid;
+      return await finishDetectedLaunch(processPid, accountNetwork ? 'direct-spawn:proxy' : 'direct-spawn');
     } catch (error) {
+      // Windows Store apps can report a bootstrap launch error even though the
+      // packaged application continues opening. Confirm the real process during
+      // a grace period before restoring auth or reporting a false failure.
+      setCodexLaunchProgress({ stage: 'waiting', message: 'Codex 启动较慢，正在继续等待…', percent: 92 });
+      const graceMs = error.code === 'CODEX_DESKTOP_NOT_DETECTED' ? 15_000 : CODEX_DESKTOP_START_TIMEOUT_MS;
+      const delayedPid = await waitForCodexDesktop(graceMs);
+      if (delayedPid) {
+        audit('codex.desktop.delayed-start-recovered', { accountId: account.id, result: String(error.code || error.message) });
+        return await finishDetectedLaunch(delayedPid, accountNetwork ? 'delayed-spawn:proxy' : 'delayed-spawn');
+      }
       if (!['EPERM', 'EACCES'].includes(error.code) || !installation.appUserModelId) {
         restoreSharedCodexAuth(account.id);
         throw new Error(`Windows 无法启动 Codex（${error.code || '启动失败'}）。请确认 Codex 已正确安装，并检查安全软件的拦截记录。`);
