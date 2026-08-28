@@ -94,7 +94,7 @@ function saveFloatingSettings() {
 function defaultFloatingBounds() {
   const display = screen.getPrimaryDisplay();
   const { x, y, width, height } = display.workArea;
-  return { x: x + width - 420, y: y + height - 446, width: 400, height: 426 };
+  return { x: x + width - 420, y: y + height - 478, width: 400, height: 458 };
 }
 
 function floatingBounds() {
@@ -133,8 +133,8 @@ async function createFloatingWindow() {
     ...floatingBounds(),
     minWidth: 400,
     maxWidth: 400,
-    minHeight: 426,
-    maxHeight: 566,
+    minHeight: 458,
+    maxHeight: 598,
     show: false,
     frame: false,
     transparent: true,
@@ -545,6 +545,8 @@ function codexStoreWrapperPath() {
     : path.join(__dirname, 'codex-store-update.vbs');
 }
 
+const CODEX_STORE_RESULT_GRACE_MS = 5_000;
+
 async function runCodexStoreHelper(mode, { targetVersion = '', timeoutMs = 20 * 60 * 1000 } = {}) {
   const installed = readInstalledCodexPackageState();
   if (!installed.installed || !installed.packageFamilyName) return { ok: false, hasUpdate: false, unavailable: true };
@@ -561,6 +563,7 @@ async function runCodexStoreHelper(mode, { targetVersion = '', timeoutMs = 20 * 
   ].join('; ');
   let invokeError = null;
   let invokeFinished = false;
+  let invokeFinishedAt = 0;
   const invocation = runHiddenProcess('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], timeoutMs, {
       env: {
         ...directChildEnvironment(process.env),
@@ -573,7 +576,10 @@ async function runCodexStoreHelper(mode, { targetVersion = '', timeoutMs = 20 * 
       },
     }).then((result) => {
       if (result.code !== 0) invokeError = new Error('Windows could not complete the Codex Store update service.');
-    }).catch((error) => { invokeError = error; }).finally(() => { invokeFinished = true; });
+    }).catch((error) => { invokeError = error; }).finally(() => {
+      invokeFinished = true;
+      invokeFinishedAt = Date.now();
+    });
 
   const deadline = Date.now() + Math.max(5_000, timeoutMs);
   let nextVersionCheckAt = 0;
@@ -616,8 +622,14 @@ async function runCodexStoreHelper(mode, { targetVersion = '', timeoutMs = 20 * 
           return { ok: true, hasUpdate: true, overallState: 'Completed', inferredFromInstalledVersion: true };
         }
       }
-      if (invokeFinished && invokeError) throw invokeError;
-      if (invokeFinished && !fs.existsSync(outputPath)) throw new Error('Windows Store update service exited without returning a result.');
+      // Invoke-CommandInDesktopPackage can report that its wrapper exited a few
+      // milliseconds before the packaged helper result becomes visible outside
+      // the app container. Keep polling briefly and consume the result as soon
+      // as it appears instead of reporting a false Store check failure.
+      if (invokeFinished && Date.now() - invokeFinishedAt >= CODEX_STORE_RESULT_GRACE_MS) {
+        if (invokeError) throw invokeError;
+        throw new Error('Windows Store update service exited without returning a result.');
+      }
       await delay(250);
     }
     throw new Error('The Codex Store update timed out.');
@@ -641,21 +653,36 @@ async function fetchOfficialCodexUpdateState() {
     const packageUrl = buildCodexPackageUrl(manifest.buildVersion);
     const [packageResponse, storeUpdate] = await Promise.all([
       updaterSession.fetch(packageUrl, { method: 'HEAD', cache: 'no-store' }),
-      installed.installed ? runCodexStoreHelper('check', { timeoutMs: 60_000 }).catch(() => ({ ok: false, hasUpdate: false })) : Promise.resolve({ ok: false, hasUpdate: false }),
+      installed.installed
+        ? runCodexStoreHelper('check', { timeoutMs: 60_000 }).catch((error) => ({ ok: false, hasUpdate: false, error: String(error.message || error) }))
+        : Promise.resolve({ ok: false, hasUpdate: false, unavailable: true }),
     ]);
     const updateAvailable = !installed.installed || comparePackageVersions(manifest.buildVersion, installed.version) > 0;
     const updateSource = storeUpdate.ok && storeUpdate.hasUpdate ? 'store' : packageResponse.ok ? 'msix' : 'propagating';
+    const packageReady = updateSource !== 'propagating';
+    const storeCheckStatus = !installed.installed
+      ? 'not-installed'
+      : storeUpdate.ok
+        ? (storeUpdate.hasUpdate ? 'available' : 'none')
+        : 'error';
+    const availabilityStatus = updateAvailable ? (packageReady ? 'available' : 'propagating') : 'current';
     return publishCodexUpdateState({
       ...installed,
-      status: updateAvailable ? 'available' : 'current',
+      status: availabilityStatus,
       latestVersion: manifest.buildVersion,
       updateAvailable,
-      packageReady: updateSource !== 'propagating',
+      packageReady,
       updateSource,
+      storeCheckStatus,
+      storeUpdateCount: Number(storeUpdate.updateCount) || 0,
+      storeCanSilent: storeUpdate.canSilent !== false,
+      storeCheckError: String(storeUpdate.error || ''),
+      directPackageStatus: Number(packageResponse.status) || 0,
       packageUrl,
       networkRoute: route.nodeName || '',
       percent: updateAvailable ? 0 : 100,
-      phase: updateAvailable ? 'available' : 'current',
+      phase: availabilityStatus,
+      checkedAt: new Date().toISOString(),
       error: '',
     });
   } catch (error) {
@@ -843,6 +870,7 @@ async function installCodexWindowsUpdate({ locale = 'en-US' } = {}) {
   let downloadedPath = '';
   try {
     if (state.updateSource === 'store') {
+      const versionBeforeStoreUpdate = state.version;
       publishCodexUpdateState({ status: 'store-installing', phase: 'store-downloading', percent: 0, error: '' });
       const result = await runCodexStoreHelper('install', { targetVersion: state.latestVersion });
       const installed = await waitForInstalledCodexVersion(
@@ -861,6 +889,17 @@ async function installCodexWindowsUpdate({ locale = 'en-US' } = {}) {
       }
       const packageResponse = await autoUpdater.netSession.fetch(state.packageUrl, { method: 'HEAD', cache: 'no-store' });
       if (!packageResponse.ok) {
+        if (result.ok && ['Completed', 'NoUpdates'].includes(String(result.overallState || '')) && installed.installed) {
+          return publishCodexUpdateState({
+            ...installed,
+            status: 'propagating', phase: 'propagating', percent: 0,
+            updateAvailable: comparePackageVersions(installed.version, state.latestVersion) < 0,
+            packageReady: false, updateSource: 'propagating',
+            storeCheckStatus: 'none', directPackageStatus: Number(packageResponse.status) || 0,
+            storeUpdatedIntermediate: comparePackageVersions(installed.version, versionBeforeStoreUpdate) > 0,
+            storeResult: result, error: '',
+          });
+        }
         const storeStatus = result.overallState || result.hresult || 'failed';
         const chinese = String(locale || '').toLowerCase().startsWith('zh');
         throw new Error(chinese
@@ -971,7 +1010,7 @@ function registerUpdaterIpc() {
   });
   ipcMain.handle('floating:set-expanded', (_event, expanded) => {
     if (!floatingWindow || floatingWindow.isDestroyed()) return false;
-    const targetHeight = expanded ? 566 : 426;
+    const targetHeight = expanded ? 598 : 458;
     const bounds = floatingWindow.getBounds();
     const area = screen.getDisplayMatching(bounds).workArea;
     const y = Math.min(bounds.y, area.y + area.height - targetHeight);

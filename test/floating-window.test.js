@@ -21,8 +21,8 @@ test('desktop creates a persisted transparent always-on-top floating window', ()
   assert.match(main, /setAlwaysOnTop\(floatingSettings\.pinned, 'floating'\)/);
   assert.match(main, /setOpacity\(floatingSettings\.opacity \/ 100\)/);
   assert.match(main, /floatingWindow\.getPosition\(\)/);
-  assert.match(main, /width: 400, height: 426/);
-  assert.match(main, /expanded \? 566 : 426/);
+  assert.match(main, /width: 400, height: 458/);
+  assert.match(main, /expanded \? 598 : 458/);
   assert.match(main, /floatingSettings\.enabled \? '\u9690\u85cf\u60ac\u6d6e\u7a97' : '\u663e\u793a\u60ac\u6d6e\u7a97'/);
   assert.match(main, /function toggleFloatingWindow\(\)/);
   assert.match(main, /globalShortcut\.register\('CommandOrControl\+Alt\+N'/);
@@ -45,7 +45,7 @@ test('floating window renders account, quota, usage, task progress, and task usa
   const client = fs.readFileSync(path.join(root, 'public', 'floating.js'), 'utf8');
   const styles = fs.readFileSync(path.join(root, 'public', 'floating.css'), 'utf8');
   const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
-  for (const id of ['account-name', 'quota-bar', 'quota-refresh', 'usage-input', 'usage-cache', 'usage-cache-rate', 'usage-output', 'task-title', 'task-activity', 'task-progress', 'task-input', 'task-cache', 'task-output', 'opacity-input', 'pin-toggle']) {
+  for (const id of ['account-name', 'quota-windows', 'quota-refresh', 'usage-input', 'usage-cache', 'usage-cache-rate', 'usage-output', 'task-title', 'task-activity', 'task-progress', 'task-input', 'task-cache', 'task-output', 'opacity-input', 'pin-toggle']) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(client, /fetch\('\/api\/floating-status'/);
@@ -64,11 +64,18 @@ test('floating window renders account, quota, usage, task progress, and task usa
   assert.match(client, /updateSettings\(\{ opacity:/);
   assert.match(client, /Number\(usage\.cachedInput\) \/ Number\(usage\.input\) \* 100/);
   assert.match(client, /fetch\('\/api\/floating-status\/refresh'/);
+  assert.match(client, /function renderQuotaWindows\(windows = \[\]\)/);
+  assert.match(client, /<progress class="quota-track" value="\$\{remaining\}" max="100"/);
+  assert.match(client, /codex-navo-quota-refreshed-at/);
   assert.match(styles, /body\[data-theme="midnight"\]/);
   assert.match(styles, /body\[data-theme="paper"\]/);
   assert.match(styles, /-webkit-app-region: drag/);
   assert.match(styles, /animation: task-running/);
+  assert.match(styles, /\.quota-track::\-webkit-progress-value/);
   assert.match(server, /function floatingWindowState\(\)/);
+  assert.match(server, /function combinedFloatingQuotaWindows\(pool = \[\]\)/);
+  assert.match(server, /setInterval\(runQuotaRefreshTimer, 5_000\)/);
+  assert.match(server, /const interval = isActive \? 60_000 : 5 \* 60_000/);
   assert.match(server, /activeKey \? usageForLocalDate\(activeKey\)/);
   assert.match(server, /url\.pathname === '\/api\/floating-status'/);
   assert.match(server, /url\.pathname === '\/api\/floating-status\/refresh'/);

@@ -156,6 +156,12 @@ test('应用设置在 Navo 内通过 OpenAI 官方清单直接更新 Codex 桌�
   assert.match(main, /codex-updates:state/);
   assert.match(main, /storeBytesDownloaded/);
   assert.match(main, /store-downloading/);
+  assert.match(main, /storeCheckStatus/);
+  assert.match(main, /directPackageStatus/);
+  assert.match(main, /availabilityStatus/);
+  assert.match(main, /versionBeforeStoreUpdate/);
+  assert.match(main, /CODEX_STORE_RESULT_GRACE_MS = 5_000/);
+  assert.match(main, /Date\.now\(\) - invokeFinishedAt >= CODEX_STORE_RESULT_GRACE_MS/);
   assert.doesNotMatch(main, /winget\.exe/);
   assert.doesNotMatch(main, /ms-windows-store:/);
   assert.match(preload, /getCodexState/);

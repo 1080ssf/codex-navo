@@ -138,6 +138,32 @@ test('project removed while Codex is open stays removed after launch state resto
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('project renamed while Codex is open keeps its latest name after switching accounts', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-launch-project-rename-'));
+  const home = path.join(root, 'home');
+  const backup = path.join(root, 'backup');
+  fs.mkdirSync(home, { recursive: true });
+  const stateFile = path.join(home, '.codex-global-state.json');
+  fs.writeFileSync(stateFile, JSON.stringify({
+    'local-projects': {
+      p1: { name: 'Old project name', rootPaths: ['C:/one'] },
+      p2: { name: 'Unloaded project', rootPaths: ['C:/two'] },
+    },
+    'project-order': ['p1', 'p2'],
+    'pinned-project-ids': ['p1'],
+  }));
+  const record = prepareLaunchView(home, backup, { language: 'zh-CN', projectIds: ['p1'], threadIds: [] });
+  const live = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+  live['local-projects'].p1 = { name: 'Renamed project', rootPaths: ['C:/one', 'C:/one-extra'] };
+  fs.writeFileSync(stateFile, JSON.stringify(live));
+  restoreLaunchView(record);
+  const restored = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+  assert.deepEqual(restored['local-projects'].p1, { name: 'Renamed project', rootPaths: ['C:/one', 'C:/one-extra'] });
+  assert.deepEqual(restored['local-projects'].p2, { name: 'Unloaded project', rootPaths: ['C:/two'] });
+  assert.deepEqual(restored['project-order'], ['p2', 'p1']);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('missing project folders are pruned from Codex sidebar state', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-missing-project-'));
   const existing = path.join(root, 'existing');

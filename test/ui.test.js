@@ -105,6 +105,9 @@ test('版本入口进入应用设置更新卡片且官方授权结束后验证�
   assert.match(html, /id="codex-update-progress"/);
   assert.doesNotMatch(html, /id="codex-release-notes"/);
   assert.match(client, /store-installing/);
+  assert.match(client, /Windows Store 尚未向本机提供该版本/);
+  assert.match(client, /官方直装包当前返回 HTTP/);
+  assert.doesNotMatch(client, /官方安装包仍在分发中/);
   assert.match(html, /https:\/\/t\.me\/\+4VH9hBsRu7phNjg1/);
   assert.match(html, /https:\/\/qm\.qq\.com\/q\/f92ySNuLss/);
   assert.match(html, /https:\/\/github\.com\/1080ssf\/codex-navo/);

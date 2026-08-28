@@ -21,8 +21,8 @@
 
     <section class="account-panel">
       <div class="account-line"><div><small data-i18n="currentAccount">Current account</small><strong id="account-name" data-i18n="loading">Loading...</strong></div><em id="account-type">&mdash;</em></div>
-      <div class="quota-line"><span data-i18n="availableQuota">Available quota</span><div><strong id="quota-value">&mdash;</strong><button id="quota-refresh" type="button" title="Refresh quota" aria-label="Refresh quota"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8a7 7 0 0 0-12-2L5 8m0-4v4h4M5 16a7 7 0 0 0 12 2l2-2m0 4v-4h-4"/></svg></button></div></div>
-      <div class="quota-track"><i id="quota-bar"></i></div>
+      <div class="quota-heading"><span data-i18n="availableQuota">Available quota</span><button id="quota-refresh" type="button" title="Refresh quota" aria-label="Refresh quota"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8a7 7 0 0 0-12-2L5 8m0-4v4h4M5 16a7 7 0 0 0 12 2l2-2m0 4v-4h-4"/></svg></button></div>
+      <div class="quota-windows" id="quota-windows"></div>
       <div class="metric-row account-metrics">
         <div><span data-i18n="input">Input</span><strong id="usage-input">&mdash;</strong></div>
         <div><span data-i18n="cache">Cache</span><strong id="usage-cache">&mdash;</strong></div>

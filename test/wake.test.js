@@ -28,20 +28,31 @@ test('每日策略在指定时间后每天只触发一次', () => {
   assert.equal(shouldWakeAccount(settings, account, new Date(2026, 7, 8, 18, 0)), false);
 });
 
-test('额度重置策略只选择持续时间最长的 Weekly 窗口', () => {
+test('额度重置策略优先监控 5 小时窗口', () => {
   const quota = { windows: [
     { windowDurationMins: 300, resetsAt: 100, remainingPercent: 90 },
     { windowDurationMins: 10080, resetsAt: 200, remainingPercent: 40 },
   ] };
-  assert.equal(primaryQuotaWindow(quota).resetsAt, 200);
-  assert.equal(quotaObservation(quota).remainingPercent, 40);
+  assert.equal(primaryQuotaWindow(quota).resetsAt, 100);
+  assert.equal(quotaObservation(quota).remainingPercent, 90);
+  assert.equal(quotaObservation(quota).windowDurationMins, 300);
 });
 
-test('预计时间到达、周期时间前移和额度突然恢复都能识别为重置', () => {
-  const previous = { resetsAt: 100, remainingPercent: 38 };
-  assert.equal(detectQuotaReset(previous, { resetsAt: 100, remainingPercent: 38 }, new Date(101_000)).reason, 'scheduled-time-reached');
-  assert.equal(detectQuotaReset(previous, { resetsAt: 200, remainingPercent: 100 }, new Date(50_000)).reason, 'reset-time-advanced');
-  assert.equal(detectQuotaReset(previous, { resetsAt: 100, remainingPercent: 100 }, new Date(50_000)).reason, 'quota-restored');
+test('5 小时窗口到点和额度恢复可识别，切换监控窗口不会误唤醒', () => {
+  const previous = { windowDurationMins: 300, resetsAt: 100, remainingPercent: 38 };
+  assert.equal(detectQuotaReset(previous, { windowDurationMins: 300, resetsAt: 100, remainingPercent: 38 }, new Date(101_000)).reason, 'scheduled-time-reached');
+  assert.equal(detectQuotaReset(previous, { windowDurationMins: 300, resetsAt: 200, remainingPercent: 100 }, new Date(50_000)).reason, 'quota-restored');
+  assert.equal(detectQuotaReset(
+    { windowDurationMins: 10080, resetsAt: 200, remainingPercent: 84 },
+    { windowDurationMins: 300, resetsAt: 100, remainingPercent: 99 },
+    new Date(50_000),
+  ), null);
+});
+
+test('仅重置时间向后漂移而额度未恢复不会触发自动唤醒', () => {
+  const previous = { windowDurationMins: 300, resetsAt: 100, remainingPercent: 70 };
+  const current = { windowDurationMins: 300, resetsAt: 200, remainingPercent: 69 };
+  assert.equal(detectQuotaReset(previous, current, new Date(50_000)), null);
 });
 
 test('额度重置事件进入待处理状态后只触发一次', () => {

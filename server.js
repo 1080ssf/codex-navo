@@ -1825,9 +1825,13 @@ function floatingWindowState() {
   const usage = activeKey ? usageForLocalDate(activeKey) : usageSummary.accounts[activeAccountId] || {
     inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
   };
-  const quotaValues = (activeAccount?.quota?.windows || [])
-    .map((item) => Number(item.remainingPercent))
-    .filter(Number.isFinite);
+  const activePool = activeKey
+    ? accounts.filter((account) => account.enabled !== false && isCodexAuthenticated(account)
+      && account.quotaErrorCode !== 'auth_expired'
+      && (!activeKey.accountIds?.length || activeKey.accountIds.includes(account.id)))
+    : activeAccount ? [activeAccount] : [];
+  const quotaWindows = combinedFloatingQuotaWindows(activePool);
+  const quotaValues = quotaWindows.map((item) => Number(item.remainingPercent)).filter(Number.isFinite);
   const quotaRemaining = activeKey
     ? Number(activeKey.quota?.remainingPercent)
     : quotaValues.length ? Math.min(...quotaValues) : null;
@@ -1844,6 +1848,7 @@ function floatingWindowState() {
       label: activeKey?.name || activeAccount?.label || (codexSnapshot.pid ? 'External Codex' : 'Codex not running'),
       type: activeKey ? 'api' : activeAccount ? 'account' : codexSnapshot.pid ? 'external' : 'none',
       quotaRemaining: Number.isFinite(quotaRemaining) ? Math.max(0, Math.min(100, quotaRemaining)) : null,
+      quotaWindows,
     },
     usage: {
       input: Number(usage.inputTokens || 0),
@@ -1865,6 +1870,32 @@ function floatingWindowState() {
     } : null,
     updatedAt: new Date().toISOString(),
   };
+}
+
+function combinedFloatingQuotaWindows(pool = []) {
+  const grouped = new Map();
+  for (const account of pool) {
+    for (const window of account.quota?.windows || []) {
+      const duration = Number(window.windowDurationMins);
+      const remaining = Number(window.remainingPercent);
+      if (!Number.isFinite(duration) || !Number.isFinite(remaining)) continue;
+      if (!grouped.has(duration)) grouped.set(duration, []);
+      grouped.get(duration).push(window);
+    }
+  }
+  return [...grouped.entries()]
+    .sort(([left], [right]) => left - right)
+    .slice(0, 2)
+    .map(([windowDurationMins, windows]) => {
+      const remainingPercent = windows.reduce((sum, window) => sum + Number(window.remainingPercent), 0) / windows.length;
+      const resetValues = windows.map((window) => Number(window.resetsAt)).filter(Number.isFinite);
+      return {
+        windowDurationMins,
+        label: windowDurationMins >= 6 * 24 * 60 ? 'Weekly' : '5 hour quota',
+        remainingPercent: Math.round(Math.max(0, Math.min(100, remainingPercent)) * 10) / 10,
+        resetsAt: resetValues.length ? Math.min(...resetValues) : null,
+      };
+    });
 }
 
 async function refreshFloatingWindowQuota() {
@@ -1898,7 +1929,8 @@ async function refreshFloatingWindowQuota() {
   if (!account) throw new Error('当前没有可刷新的账号额度');
   try {
     const { codexHomeDir } = accountPaths(account);
-    account.quota = await readCodexQuota(findCodexCli(), codexHomeDir, 15_000, await backgroundTaskEnvironment(process.env));
+    await prepareAccountNetwork(account);
+    account.quota = await readCodexQuota(findCodexCli(), codexHomeDir, 15_000, codexEnvironment(process.env, account));
     account.quotaError = '';
     account.quotaErrorCode = '';
     account.quotaCheckedAt = account.quota.refreshedAt;
@@ -1910,6 +1942,63 @@ async function refreshFloatingWindowQuota() {
     saveAccounts([...accounts]);
     throw error;
   }
+}
+
+let scheduledQuotaRefreshRun = null;
+
+async function refreshScheduledAccountQuota(account, environment) {
+  try {
+    const { codexHomeDir } = accountPaths(account);
+    account.quota = await readCodexQuota(findCodexCli(), codexHomeDir, 15_000, environment);
+    account.quotaError = '';
+    account.quotaErrorCode = '';
+    account.quotaCheckedAt = account.quota.refreshedAt;
+    audit('quota.background-refresh', { accountId: account.id, result: 'success' });
+  } catch (error) {
+    const authExpired = /401|unauthorized|token_revoked|invalidated oauth/i.test(error.message);
+    account.quotaError = authExpired ? '登录已失效，请重新授权' : '额度读取失败，请稍后重试';
+    account.quotaErrorCode = authExpired ? 'auth_expired' : 'fetch_failed';
+    account.quotaCheckedAt = new Date().toISOString();
+    audit('quota.background-refresh', { accountId: account.id, result: error.message });
+  }
+}
+
+async function refreshDueAccountQuotas() {
+  if (scheduledQuotaRefreshRun) return scheduledQuotaRefreshRun;
+  scheduledQuotaRefreshRun = (async () => {
+    const codexSnapshot = detectCodexDesktopSnapshot();
+    const apiState = publicApiServiceState();
+    const activeKey = apiServiceManager.keys.find((key) => key.id === apiState.activeKeyId) || null;
+    const activeAccountId = activeKey ? '' : activeCodexAccountId(codexSnapshot);
+    const activePoolIds = new Set(activeKey?.accountIds?.length
+      ? activeKey.accountIds
+      : activeKey ? accounts.filter((account) => account.enabled !== false).map((account) => account.id) : []);
+    const now = Date.now();
+    const due = accounts.filter((account) => {
+      if (!isCodexAuthenticated(account) || account.quotaErrorCode === 'auth_expired') return false;
+      const isActive = account.id === activeAccountId || activePoolIds.has(account.id);
+      const interval = isActive ? 60_000 : 5 * 60_000;
+      const lastChecked = Math.max(
+        Date.parse(account.quota?.refreshedAt || '') || 0,
+        Date.parse(account.quotaCheckedAt || '') || 0,
+      );
+      return !Number.isFinite(lastChecked) || lastChecked <= now - interval;
+    });
+    if (!due.length) return;
+    let sharedApiEnvironment = null;
+    if (activeKey && due.some((account) => activePoolIds.has(account.id))) {
+      sharedApiEnvironment = await apiKeyTaskEnvironment(activeKey.id, process.env);
+    }
+    await Promise.allSettled(due.map(async (account) => {
+      if (activePoolIds.has(account.id) && sharedApiEnvironment) {
+        return refreshScheduledAccountQuota(account, sharedApiEnvironment);
+      }
+      await prepareAccountNetwork(account);
+      return refreshScheduledAccountQuota(account, codexEnvironment(process.env, account));
+    }));
+    saveAccounts([...accounts]);
+  })().finally(() => { scheduledQuotaRefreshRun = null; });
+  return scheduledQuotaRefreshRun;
 }
 
 function reserveLoopbackPort() {
@@ -3626,7 +3715,8 @@ async function importRelayAccounts(value, operator) {
       for (const account of imported) {
         try {
           const { codexHomeDir } = accountPaths(account);
-          account.quota = await readCodexQuota(findCodexCli(), codexHomeDir, 15_000, await backgroundTaskEnvironment(process.env));
+          await prepareAccountNetwork(account);
+          account.quota = await readCodexQuota(findCodexCli(), codexHomeDir, 15_000, codexEnvironment(process.env, account));
           account.quotaError = '';
           account.quotaErrorCode = '';
           account.quotaCheckedAt = account.quota.refreshedAt;
@@ -4633,6 +4723,16 @@ protocolLoginTimer.unref?.();
 
 const planExpiryTimer = setInterval(refreshStaleAccountPlanExpiries, 10 * 60_000);
 planExpiryTimer.unref?.();
+
+// Quota refresh belongs to the local service rather than the renderer. This
+// keeps the active account on a one-minute cadence when Navo is minimized or
+// another input/window has focus; inactive accounts remain on five minutes.
+function runQuotaRefreshTimer() {
+  refreshDueAccountQuotas().catch((error) => audit('quota.background-refresh.failed', { result: error.message }));
+}
+setTimeout(runQuotaRefreshTimer, 5_000).unref?.();
+const quotaRefreshTimer = setInterval(runQuotaRefreshTimer, 5_000);
+quotaRefreshTimer.unref?.();
 
 // Restore the normal Codex configuration as soon as an API-launched desktop
 // exits. This is independent of UI polling, so closing the window is enough to

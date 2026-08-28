@@ -1,4 +1,4 @@
-const state = { accounts: [], csrfToken: '', timer: null, sessionTimer: null, notificationTimer: null, notificationPolling: false, launchProgressTimer: null, launchProgress: null, launchProgressDismissed: false, launchProgressStartedAt: '', launchProgressCompleteKey: '', quotaRefreshing: false, wakeSettings: {}, wakeModelOptions: [], networkSettings: { core: {}, sources: [], assignments: {} }, apiService: { config: {}, providers: [], keys: [], baseUrl: '' }, sessions: { connected: false, tasks: [], counts: {} }, sessionFilter: 'all', sessionCollapsed: new Set(), sessionAllSeenGroups: new Set(), notificationSettings: {}, notificationEventId: 0, networkSourceId: '', accountNetworkId: '', usage: null, importPackageText: '', accountImportPackageText: '', relayImportPackageText: '', protocolDialogAccountId: '', protocolDialogPromptKind: '', localeCatalog: null };
+const state = { accounts: [], csrfToken: '', timer: null, sessionTimer: null, notificationTimer: null, notificationPolling: false, launchProgressTimer: null, launchProgress: null, launchProgressDismissed: false, launchProgressStartedAt: '', launchProgressCompleteKey: '', wakeSettings: {}, wakeModelOptions: [], networkSettings: { core: {}, sources: [], assignments: {} }, apiService: { config: {}, providers: [], keys: [], baseUrl: '' }, sessions: { connected: false, tasks: [], counts: {} }, sessionFilter: 'all', sessionCollapsed: new Set(), sessionAllSeenGroups: new Set(), notificationSettings: {}, notificationEventId: 0, networkSourceId: '', accountNetworkId: '', usage: null, importPackageText: '', accountImportPackageText: '', relayImportPackageText: '', protocolDialogAccountId: '', protocolDialogPromptKind: '', localeCatalog: null };
 let toolsStatusTimer = null;
 const elements = {
   accounts: document.querySelector('#accounts'),
@@ -269,7 +269,7 @@ const englishUi = new Map([
   ['暂无账号', 'No accounts yet'], ['点击右上角“添加账号”创建第一个独立登录环境。', 'Use Add Account in the upper-right to create the first isolated sign-in environment.'],
   ['重试', 'Retry'], ['刷新失败，当前显示上次数据', 'Refresh failed; showing previous data'], ['重新授权后会自动读取额度', 'Quota loads automatically after authorization'],
   ['在独立浏览器完成官方流程后会自动入池', 'Complete the official flow in the isolated browser to add this account'], ['已入池账号会自动刷新', 'Authorized accounts refresh automatically'],
-  ['本机用户', 'Local user'], ['重置时间未知', 'Reset time unknown'], ['未知项目', 'Unknown project'], ['未命名会话', 'Untitled session'], ['默认模型', 'Default model'], ['等待新任务', 'Waiting for a new task'],
+  ['本机用户', 'Local user'], ['重置时间未知', 'Reset time unknown'], ['未知', 'Unknown'], ['未知项目', 'Unknown project'], ['未命名会话', 'Untitled session'], ['默认模型', 'Default model'], ['等待新任务', 'Waiting for a new task'],
   ['项目与会话', 'Projects and conversations'], ['当前会话', 'Current conversations'], ['已归档', 'Archived'], ['归档', 'Archive'], ['归档会话', 'Archive conversation'], ['删除会话', 'Delete conversation'],
   ['清空失败项', 'Clear failed'], ['清空失败或中断会话', 'Clear failed or interrupted conversations'], ['清空方式', 'Clear mode'], ['仅清空列表（保留本地数据）', 'Clear list only (keep local data)'], ['清空列表和本地数据', 'Clear list and local data'], ['确认清空', 'Clear'],
   ['显示悬浮窗', 'Show floating window'], ['隐藏悬浮窗', 'Hide floating window'],
@@ -451,7 +451,11 @@ const englishUiPatterns = [
   [/^下载 (\d+)%$/, 'Download $1%'], [/^正在下载 OpenAI 官方 Codex 安装包… (\d+)%$/, 'Downloading the official OpenAI Codex installer… $1%'],
   [/^余额 (.+)$/, 'Balance $1'], [/^Codex 更新失败：(.+)$/, 'Codex update failed: $1'], [/^Codex 默认（当前 (.+)）$/, 'Codex default (current: $1)'],
   [/^Codex 授权已导入；网页会话验证失败，需要重新登录网页端：(.+)$/, 'Codex authorization imported; web-session verification failed and requires sign-in: $1'],
-  [/^Codex 已更新到 v(.+)。$/, 'Codex updated to v$1.'], [/^OpenAI 已公布 Codex v(.+)，官方安装包仍在分发中，请稍后重新检查。$/, 'OpenAI announced Codex v$1, but the official installer is still rolling out. Check again later.'],
+  [/^Codex 已更新到 v(.+)。$/, 'Codex updated to v$1.'],
+  [/^OpenAI 官方清单已公布 Codex v(.+)；Windows Store 检测失败，官方直装包当前返回 HTTP (.+)。请重新检查。$/, 'The official OpenAI manifest lists Codex v$1; the Windows Store check failed, and the direct package currently returns HTTP $2. Check again.'],
+  [/^OpenAI 官方清单已公布 Codex v(.+)；Windows Store 尚未向本机提供该版本，官方直装包当前返回 HTTP (.+)。请稍后重新检查。$/, 'The official OpenAI manifest lists Codex v$1; Windows Store has not offered it to this device, and the direct package currently returns HTTP $2. Check again later.'],
+  [/^Windows Store 已向本机提供 Codex v(.+)，可直接在 Navo 中更新。$/, 'Windows Store is offering Codex v$1 to this device. It can be updated directly in Navo.'],
+  [/^OpenAI 官方直装包 v(.+) 已可用，可直接在 Navo 中更新。$/, 'The official Codex v$1 direct package is available and can be updated in Navo.'],
   [/^v(.+) 可更新$/, 'v$1 available'],
   [/^账号顺序：(.+)$/, 'Account order: $1'], [/^请求 (.+) · Token (.+)$/, 'Requests $1 · Tokens $2'],
   [/^仅用于 API 反代，将于 (.+) 到期$/, 'Used only for API relay; expires at $1'],
@@ -1995,41 +1999,10 @@ async function refresh(options = {}) {
         ? '登录与授权已完成。ChatGPT 网页已打开，确认后可自行关闭浏览器窗口。'
         : 'Codex 授权已完成。网页端仍需登录时，可在该账号的独立 Chrome 中继续。');
     }
-    refreshStaleQuotas({ background });
   } catch (error) {
     if (showProtocolDialogConnectionError(error.message)) return;
     elements.accounts.innerHTML = `<div class="empty-state"><strong>无法读取本地状态</strong><p>${escapeHtml(error.message)}。请确认启动窗口仍在运行，然后刷新页面。</p></div>`;
     showToast(error.message, true);
-  }
-}
-
-async function refreshStaleQuotas(options = {}) {
-  if (options.background && editingSurfaceActive()) return;
-  if (state.quotaRefreshing) return;
-  const now = Date.now();
-  const due = state.accounts.filter((account) => {
-    if (!account.codexInitialized) return false;
-    if (!account.quota?.credits || creditQuantity(account.quota.credits) == null) return true;
-    const interval = account.codexActive ? 60_000 : 5 * 60_000;
-    const lastChecked = account.quota?.refreshedAt || account.quotaCheckedAt;
-    return !lastChecked || Date.parse(lastChecked) <= now - interval;
-  });
-  if (!due.length) return;
-  state.quotaRefreshing = true;
-  try {
-    for (const account of due) {
-      try {
-        await api(`/api/accounts/${account.id}/quota`, {
-          method: 'POST',
-          body: JSON.stringify({ operator: operator() }),
-        });
-      } catch {}
-    }
-    const data = await api('/api/bootstrap');
-    Object.assign(state, data);
-    if (!options.background || !editingSurfaceActive()) render();
-  } finally {
-    state.quotaRefreshing = false;
   }
 }
 
@@ -3024,13 +2997,26 @@ function renderCodexDesktopUpdate() {
   elements.codexCurrentVersion.textContent = info.installed
     ? `v${info.version}${info.updateAvailable && info.latestVersion ? ` → v${info.latestVersion}` : ''}`
     : info.latestVersion ? (chinese ? '未安装' : 'Not installed') : '—';
+  const directStatus = Number(info.directPackageStatus) || 0;
+  const unavailableCopy = chinese
+    ? info.storeCheckStatus === 'error'
+      ? `OpenAI 官方清单已公布 Codex v${info.latestVersion}；Windows Store 检测失败，官方直装包当前返回 HTTP ${directStatus || '未知'}。请重新检查。`
+      : `OpenAI 官方清单已公布 Codex v${info.latestVersion}；Windows Store 尚未向本机提供该版本，官方直装包当前返回 HTTP ${directStatus || '未知'}。请稍后重新检查。`
+    : info.storeCheckStatus === 'error'
+      ? `The official OpenAI manifest lists Codex v${info.latestVersion}; the Windows Store check failed, and the direct package currently returns HTTP ${directStatus || 'unknown'}. Check again.`
+      : `The official OpenAI manifest lists Codex v${info.latestVersion}; Windows Store has not offered it to this device, and the direct package currently returns HTTP ${directStatus || 'unknown'}. Check again later.`;
+  const readyCopy = chinese
+    ? info.updateSource === 'store'
+      ? `Windows Store 已向本机提供 Codex v${info.latestVersion}，可直接在 Navo 中更新。`
+      : `OpenAI 官方直装包 v${info.latestVersion} 已可用，可直接在 Navo 中更新。`
+    : info.updateSource === 'store'
+      ? `Windows Store is offering Codex v${info.latestVersion} to this device. It can be updated directly in Navo.`
+      : `The official Codex v${info.latestVersion} direct package is available and can be updated in Navo.`;
   const copies = chinese ? {
     idle: '正在读取官方版本信息。',
     checking: '正在检查 OpenAI 官方版本与安装包状态…',
-    available: info.packageReady
-      ? `发现 Codex v${info.latestVersion}，可直接在 Navo 中更新。`
-      : `OpenAI 已公布 Codex v${info.latestVersion}，官方安装包仍在分发中，请稍后重新检查。`,
-    propagating: `OpenAI 已公布 Codex v${info.latestVersion}，官方安装包仍在分发中，请稍后重新检查。`,
+    available: info.packageReady ? readyCopy : unavailableCopy,
+    propagating: unavailableCopy,
     closing: '正在关闭 Codex，请稍候…',
     'store-installing': info.phase === 'store-downloading'
       ? '正在通过 Windows 官方更新服务下载 Codex…'
@@ -3044,10 +3030,8 @@ function renderCodexDesktopUpdate() {
   } : {
     idle: 'Loading official version information.',
     checking: 'Checking the official OpenAI version and package availability…',
-    available: info.packageReady
-      ? `Codex v${info.latestVersion} is ready to update directly in Navo.`
-      : `OpenAI has announced Codex v${info.latestVersion}; the official package is still propagating. Check again shortly.`,
-    propagating: `OpenAI has announced Codex v${info.latestVersion}; the official package is still propagating. Check again shortly.`,
+    available: info.packageReady ? readyCopy : unavailableCopy,
+    propagating: unavailableCopy,
     closing: 'Closing Codex…',
     'store-installing': info.phase === 'store-downloading'
       ? 'Downloading Codex through the official Windows update service…'
@@ -3538,8 +3522,11 @@ loadNotificationSettings();
 refreshSessions();
 refresh();
 state.timer = setInterval(() => {
-  if (!editingSurfaceActive() && document.visibilityState === 'visible') refresh({ background: true });
+  if (!editingSurfaceActive()) refresh({ background: true });
 }, 5_000);
+window.addEventListener('storage', (event) => {
+  if (event.key === 'codex-navo-quota-refreshed-at') refresh({ background: true });
+});
 state.sessionTimer = setInterval(() => refreshSessions(), 2_000);
 state.notificationTimer = setInterval(() => pollNotificationEvents(), 1_000);
 state.launchProgressTimer = setInterval(() => pollCodexLaunchProgress(), 450);

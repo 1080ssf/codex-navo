@@ -44,16 +44,17 @@ test('操作员与账号 ID 输入会被限制', () => {
   assert.equal(validateAccountId('../secret'), false);
 });
 
-test('额度窗口会转换为可用百分比并优先显示周额度', () => {
+test('额度窗口会转换为可用百分比并优先显示 5 小时额度', () => {
   const quota = normalizeRateLimits({ rateLimits: {
     planType: 'plus',
     credits: { hasCredits: true, unlimited: false, balance: '12.50' },
     primary: { usedPercent: 35, resetsAt: 1000, windowDurationMins: 300 },
     secondary: { usedPercent: 12, resetsAt: 2000, windowDurationMins: 10080 },
   }, rateLimitResetCredits: { availableCount: 3, details: [{ expiresAt: '2026-08-23T00:00:00.000Z' }] } });
-  assert.equal(quota.windows[0].label, '周额度');
-  assert.equal(quota.windows[0].remainingPercent, 88);
-  assert.equal(quota.windows[1].remainingPercent, 65);
+  assert.equal(quota.windows[0].label, '5 小时额度');
+  assert.equal(quota.windows[0].remainingPercent, 65);
+  assert.equal(quota.windows[1].label, '周额度');
+  assert.equal(quota.windows[1].remainingPercent, 88);
   assert.deepEqual(quota.credits, {
     hasCredits: true,
     unlimited: false,
