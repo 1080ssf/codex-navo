@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { detectQuotaReset, normalizeWakeSettings, primaryQuotaWindow, quotaObservation, shouldWakeAccount } = require('../lib/wake');
+const { detectQuotaReset, isQuotaWindowActive, normalizeWakeSettings, primaryQuotaWindow, quotaObservation, shouldWakeAccount } = require('../lib/wake');
 const { readModelCatalog } = require('../lib/model-catalog');
 
 test('唤醒设置默认关闭并限制非法输入', () => {
@@ -62,4 +62,23 @@ test('额度重置事件进入待处理状态后只触发一次', () => {
   assert.equal(shouldWakeAccount(settings, account), true);
   settings.accountStates[account.id].lastHandledResetEventKey = 'cycle:100:200';
   assert.equal(shouldWakeAccount(settings, account), false);
+});
+
+test('5 小时额度窗口只在额度已消耗或重置时间固定后视为已激活', () => {
+  const now = new Date('2026-09-02T10:00:30.000Z');
+  assert.equal(isQuotaWindowActive(
+    { windowDurationMins: 300, remainingPercent: 99, resetsAt: 1788361200 },
+    { windowDurationMins: 300, remainingPercent: 99, resetsAt: 1788361200 },
+    now,
+  ), true);
+  assert.equal(isQuotaWindowActive(
+    { windowDurationMins: 300, remainingPercent: 100, resetsAt: 1788361200 },
+    { windowDurationMins: 300, remainingPercent: 100, resetsAt: 1788361200 },
+    now,
+  ), true);
+  assert.equal(isQuotaWindowActive(
+    { windowDurationMins: 300, remainingPercent: 100, resetsAt: 1788361200 },
+    { windowDurationMins: 300, remainingPercent: 100, resetsAt: 1788361215 },
+    now,
+  ), false);
 });

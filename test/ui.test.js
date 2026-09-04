@@ -14,6 +14,7 @@ test('添加账号弹窗的关闭按钮不会触发必填校验', () => {
 test('添加账号可以在首次登录授权前选择独立网络线路', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.match(html, /id="account-create-route"/);
   assert.match(client, /populateAccountRouteSelect\(elements\.accountCreateRoute\)/);
@@ -203,6 +204,7 @@ test('新增账号在界面和服务端都默认使用 Chrome', () => {
 test('账号唤醒具备真实 Codex 调用、单账号入口、批量入口与自动策略设置', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.match(html, /id="wake-all"/);
   assert.match(html, /data-app-page="wake"/);
@@ -213,6 +215,17 @@ test('账号唤醒具备真实 Codex 调用、单账号入口、批量入口与�
   assert.match(client, /data-action="wake"/);
   assert.match(client, /\/api\/wake-all/);
   assert.match(server, /'exec', '--ephemeral'/);
+  assert.match(server, /'--json'/);
+  assert.match(server, /parseWakeJsonl/);
+  assert.match(server, /WAKE_ACTIVATION_PROMPT/);
+  assert.match(server, /verifyWakeWindow/);
+  assert.match(server, /quotaWindowActive: true/);
+  assert.match(server, /accountTaskEnvironment\(account/);
+  assert.match(server, /Date\.now\(\) - lastProbe < 60_000/);
+  assert.match(server, /Date\.now\(\) - lastAttempt < 5 \* 60_000/);
+  assert.match(client, /5 小时额度窗口已开始计时/);
+  assert.doesNotMatch(client, /class="wake-proof-badge"/);
+  assert.doesNotMatch(styles, /\.wake-proof-badge/);
   assert.match(server, /CODEX_HOME: codexHomeDir/);
   assert.match(server, /model_reasoning_effort=/);
   assert.match(server, /\/api\/wake-settings/);
@@ -301,6 +314,15 @@ test('Codex 启动过程提供右下角分阶段进度并阻止重复启动', ()
   assert.match(client, /1800 - \(Date\.now\(\) - completedAt\)/);
 });
 
+test('超大历史会话安全优化默认关闭并清楚标记安全边界', () => {
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  assert.match(client, /name="optimizeOversized"><span><strong>启动前安全优化超大历史会话/);
+  assert.doesNotMatch(client, /name="optimizeOversized" checked/);
+  assert.match(client, /仅处理含有效恢复检查点的会话/);
+  assert.match(client, /data-launch-backups/);
+  assert.match(client, /\/api\/codex-rollout-backups\/restore/);
+});
+
 test('批量节点检测随完成结果实时刷新并继续后台检测', () => {
   const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
@@ -354,7 +376,17 @@ test('再次打开账号网页端时恢复各自上次关闭的 Chrome 窗口', 
   assert.match(server, /--restore-last-session/);
   assert.match(server, /--disable-background-mode/);
   assert.match(server, /restoreLastSession: true/);
+  assert.match(server, /repairVisibleBrowserProfile\(browserDir\)/);
+  assert.match(server, /--disable-session-crashed-bubble/);
+  assert.match(server, /if \(existingPort\) \{[\s\S]*focusAccountBrowser\(existingPort\)/);
+  assert.match(server, /lease\.launchType === 'browser'[\s\S]*readLiveChromeDebugPort/);
   assert.match(server, /launchAccountBrowser\(account, CHATGPT_LOGIN_URL, \{ returnSession: true, initialUrls: \[CHATGPT_LOGIN_URL\] \}\)/);
+});
+
+test('网页端运行时按钮保持禁用，释放后才可再次启动', () => {
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  assert.match(client, /const browserDisabled = browserOccupied \? 'disabled' : ''/);
+  assert.match(client, /const browserTitle = browserOccupied \? '请先释放账号后再重新打开网页端' : ''/);
 });
 
 test('首次创建账号先登录 ChatGPT 并在同一浏览器自动继续官方 OAuth', () => {

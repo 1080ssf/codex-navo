@@ -6,11 +6,15 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const {
   filterGlobalState,
+  listRolloutBackups,
   listCodexLaunchOptions,
+  normalizeLaunchSelection,
   optimizeRolloutFile,
   prepareLaunchView,
   pruneMissingLocalProjects,
   restoreLaunchView,
+  restoreRolloutBackup,
+  syncSessionIndexNames,
   withDesktopLocale,
 } = require('../lib/codex-launch-view');
 
@@ -87,6 +91,32 @@ db.commit(); db.close()
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('session index names are synchronized into both Codex SQLite title stores before launch', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-launch-title-sync-'));
+  fs.mkdirSync(path.join(root, 'sqlite'), { recursive: true });
+  python(`
+import sqlite3, sys
+state=sqlite3.connect(sys.argv[1])
+state.execute('CREATE TABLE threads(id TEXT PRIMARY KEY, name TEXT, title TEXT)')
+state.execute('INSERT INTO threads VALUES(?,?,?)', ('thread-1',None,'Raw first prompt'))
+state.commit(); state.close()
+catalog=sqlite3.connect(sys.argv[2])
+catalog.execute('CREATE TABLE local_thread_catalog(host_id TEXT, thread_id TEXT, display_title TEXT)')
+catalog.execute('CREATE TABLE local_thread_catalog_metadata(id INTEGER PRIMARY KEY, catalog_revision INTEGER)')
+catalog.execute('INSERT INTO local_thread_catalog VALUES(?,?,?)', ('local','thread-1','Raw first prompt'))
+catalog.execute('INSERT INTO local_thread_catalog_metadata VALUES(1,1)')
+catalog.commit(); catalog.close()
+`, [path.join(root, 'state_5.sqlite'), path.join(root, 'sqlite', 'codex-dev.db')]);
+  fs.writeFileSync(path.join(root, 'session_index.jsonl'), [
+    JSON.stringify({ id: 'thread-1', thread_name: 'Initial generated name' }),
+    JSON.stringify({ id: 'thread-1', thread_name: 'Final visible name' }),
+  ].join('\n'));
+  assert.deepEqual(syncSessionIndexNames(root), { state: 1, catalog: 1 });
+  assert.equal(python("import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); print(db.execute('SELECT name FROM threads WHERE id=?',('thread-1',)).fetchone()[0]); db.close()", [path.join(root, 'state_5.sqlite')]), 'Final visible name');
+  assert.equal(python("import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); print(db.execute('SELECT display_title FROM local_thread_catalog WHERE thread_id=?',('thread-1',)).fetchone()[0]); db.close()", [path.join(root, 'sqlite', 'codex-dev.db')]), 'Final visible name');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('implicit cwd grouping only uses a project primary root', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-launch-primary-root-'));
   const db = path.join(root, 'state_5.sqlite');
@@ -111,6 +141,12 @@ db.commit(); db.close()
   assert.deepEqual(catalog.projects.find((item) => item.id === 'p1').threads.map((item) => item.id), ['explicit-secondary']);
   assert.deepEqual(catalog.projects.find((item) => item.id === '__unassigned__').threads.map((item) => item.id), ['implicit-secondary']);
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('oversized rollout optimization is opt-in', () => {
+  const catalog = { defaultLanguage: 'zh-CN', projects: [{ id: 'p1', threads: [{ id: 't1' }] }] };
+  assert.equal(normalizeLaunchSelection({}, catalog).optimizeOversized, false);
+  assert.equal(normalizeLaunchSelection({ optimizeOversized: true }, catalog).optimizeOversized, true);
 });
 
 test('project removed while Codex is open stays removed after launch state restoration', () => {
@@ -399,23 +435,77 @@ db.close()
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('oversized rollout cleanup keeps normal records and only the newest compacted checkpoint', async () => {
+test('oversized rollout cleanup keeps the active turn checkpoint and later records', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-rollout-optimize-'));
   const file = path.join(root, 'rollout-test.jsonl');
   const backupRoot = path.join(root, 'backups');
-  const large = 'x'.repeat(55 * 1024 * 1024);
+  const large = 'x'.repeat(512 * 1024);
   fs.writeFileSync(file, [
     JSON.stringify({ type: 'session_meta', payload: { id: 'thread' } }),
     JSON.stringify({ type: 'compacted', payload: { replacement_history: [large] } }),
-    JSON.stringify({ type: 'response_item', payload: { type: 'message', text: 'kept' } }),
+    JSON.stringify({ type: 'response_item', payload: { type: 'message', text: large } }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-2' } }),
+    JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-test' } }),
     JSON.stringify({ type: 'compacted', payload: { replacement_history: [large] } }),
+    JSON.stringify({ type: 'response_item', payload: { type: 'message', text: 'kept' } }),
   ].join('\n') + '\n');
-  const result = await optimizeRolloutFile(file, backupRoot);
+  const result = await optimizeRolloutFile(file, backupRoot, { minimumBytes: 1, minimumSavingsRatio: 0.2 });
   assert.ok(result);
   assert.equal(result.removedCompactions, 1);
   const lines = fs.readFileSync(file, 'utf8').trim().split('\n').map(JSON.parse);
   assert.equal(lines.filter((item) => item.type === 'compacted').length, 1);
   assert.equal(lines.some((item) => item.payload?.text === 'kept'), true);
+  assert.equal(lines.some((item) => item.payload?.type === 'task_started'), true);
+  assert.equal(lines.some((item) => item.type === 'turn_context'), true);
   assert.equal(fs.existsSync(result.backup), true);
+  assert.equal(fs.existsSync(`${result.backup}.json`), true);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('oversized rollout cleanup skips legacy checkpoints and post-checkpoint rollback', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-rollout-skip-'));
+  const backupRoot = path.join(root, 'backups');
+  const legacy = path.join(root, 'legacy.jsonl');
+  fs.writeFileSync(legacy, `${JSON.stringify({ type: 'compacted', payload: { message: 'legacy' } })}\n`);
+  assert.equal(await optimizeRolloutFile(legacy, backupRoot, { minimumBytes: 1, minimumSavingsRatio: 0 }), null);
+
+  const rolledBack = path.join(root, 'rollback.jsonl');
+  fs.writeFileSync(rolledBack, [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'thread' } }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-1' } }),
+    JSON.stringify({ type: 'compacted', payload: { replacement_history: [{ type: 'message' }] } }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'thread_rolled_back', num_turns: 1 } }),
+  ].join('\n') + '\n');
+  assert.equal(await optimizeRolloutFile(rolledBack, backupRoot, { minimumBytes: 1, minimumSavingsRatio: 0 }), null);
+  assert.equal(fs.existsSync(backupRoot), false);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('rollout backups are listed and restored with a pre-restore safety copy', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-rollout-restore-'));
+  const home = path.join(root, '.codex');
+  const sessions = path.join(home, 'sessions');
+  const backupRoot = path.join(home, 'navo-rollout-backups');
+  const file = path.join(sessions, 'rollout-test.jsonl');
+  fs.mkdirSync(sessions, { recursive: true });
+  const large = 'x'.repeat(512 * 1024);
+  const original = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'thread' } }),
+    JSON.stringify({ type: 'response_item', payload: { text: large } }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-1' } }),
+    JSON.stringify({ type: 'compacted', payload: { replacement_history: [{ type: 'message', text: 'summary' }] } }),
+    JSON.stringify({ type: 'response_item', payload: { text: 'latest' } }),
+  ].join('\n') + '\n';
+  fs.writeFileSync(file, original);
+  const optimized = await optimizeRolloutFile(file, backupRoot, { minimumBytes: 1, minimumSavingsRatio: 0.2 });
+  assert.ok(optimized);
+  const backups = listRolloutBackups(backupRoot);
+  assert.equal(backups.length, 1);
+  assert.equal(backups[0].id, path.basename(optimized.backup));
+  fs.appendFileSync(file, `${JSON.stringify({ type: 'response_item', payload: { text: 'after optimization' } })}\n`);
+  const restored = await restoreRolloutBackup(home, backupRoot, backups[0].id);
+  assert.equal(restored.restored, path.resolve(file));
+  assert.equal(fs.readFileSync(file, 'utf8'), original);
+  assert.equal(listRolloutBackups(backupRoot).some((item) => item.kind === 'pre-restore'), true);
   fs.rmSync(root, { recursive: true, force: true });
 });

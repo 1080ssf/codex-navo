@@ -18,7 +18,8 @@ const {
 const { hasSpendableCredits, readCodexModels, readCodexQuota, warmCodexAppServer } = require('./lib/codex-quota');
 const { CodexUsageTracker } = require('./lib/codex-usage');
 const { readModelCatalog } = require('./lib/model-catalog');
-const { detectQuotaReset, localDateKey, normalizeWakeSettings, quotaObservation, shouldWakeAccount } = require('./lib/wake');
+const { detectQuotaReset, isQuotaWindowActive, localDateKey, normalizeWakeSettings, quotaObservation, shouldWakeAccount } = require('./lib/wake');
+const { isModelCompatibilityError, parseWakeJsonl, wakeFailureMessage } = require('./lib/wake-command');
 const { authIdentity, createAuthPackage, isNonRefreshableWebSessionAuth, readAuthPackage, validateAuthPayload } = require('./lib/auth-package');
 const {
   injectProtocolCookies,
@@ -56,12 +57,15 @@ const {
   releaseCodexConfigLock,
 } = require('./lib/codex-runtime-state');
 const {
+  listRolloutBackups,
   listCodexLaunchOptions,
   normalizeLaunchSelection,
   optimizeSelectedRollouts,
   prepareLaunchView,
   pruneMissingLocalProjects,
   restoreLaunchView,
+  restoreRolloutBackup,
+  syncSessionIndexNames,
   withDesktopLocale,
 } = require('./lib/codex-launch-view');
 const { applyDesktopLocaleBridge } = require('./lib/codex-desktop-locale');
@@ -307,6 +311,12 @@ async function backgroundTaskRuntime() {
 async function backgroundTaskEnvironment(environment = process.env) {
   const runtime = await backgroundTaskRuntime();
   return networkManager.environmentForRuntime(runtime, { ...environment });
+}
+
+async function accountTaskEnvironment(account, environment = process.env) {
+  const runtime = await networkManager.ensureAccount(account.id);
+  const directEnvironment = applyProxyEnvironment(environment, { enabled: false });
+  return networkManager.environmentForRuntime(runtime, directEnvironment);
 }
 
 function getAccessToken() {
@@ -1432,13 +1442,14 @@ function updateWakeState(accountId, patch) {
   });
 }
 
-function recordWakeAttempt(account, trigger, status, error = '') {
+function recordWakeAttempt(account, trigger, status, { error = '', evidence = null } = {}) {
   const previous = wakeState(account.id);
   const next = {
     ...previous,
     lastWakeAt: new Date().toISOString(),
     lastWakeStatus: status,
     lastWakeError: String(error || '').slice(0, 500),
+    lastWakeEvidence: evidence,
   };
   if (trigger === 'daily') next.lastDailyDate = localDateKey();
   if (trigger === 'after-reset') {
@@ -1457,82 +1468,163 @@ function recordWakeAttempt(account, trigger, status, error = '') {
   });
 }
 
-async function runWakeCommand(account, environmentOverride = null) {
+async function runWakeCommand(account, environmentOverride = null, options = {}) {
   if (!isCodexAuthenticated(account) || account.quotaErrorCode === 'auth_expired') {
     throw new Error('该账号尚未完成 Codex 授权，无法唤醒');
   }
   if (wakeRuns.has(account.id)) throw new Error('该账号正在唤醒，请稍候');
-  if (settings.mockLaunch) return Promise.resolve({ output: 'mock wake success' });
+  if (settings.mockLaunch) return Promise.resolve({
+    verified: true,
+    model: (options.model ?? wakeSettings.model) || 'account-default',
+    fallbackUsed: false,
+    durationMs: 0,
+    agentMessageReceived: true,
+    usage: { inputTokens: 1, cachedInputTokens: 0, outputTokens: 1, reasoningOutputTokens: 0, totalTokens: 2 },
+  });
 
   const baseEnvironment = {
     ...process.env, CODEX_HOME: accountPaths(account).codexHomeDir, NO_COLOR: '1', TERM: 'dumb',
   };
-  const taskEnvironment = environmentOverride || await backgroundTaskEnvironment(baseEnvironment);
+  const taskEnvironment = environmentOverride || await accountTaskEnvironment(account, baseEnvironment);
+  const selectedModel = options.model ?? wakeSettings.model;
+  const selectedPrompt = String(options.prompt || wakeSettings.prompt).trim();
 
   const executable = findCodexCli();
   const { codexDir, codexHomeDir } = accountPaths(account);
   const workspace = path.join(codexDir, 'wake-workspace');
   fs.mkdirSync(workspace, { recursive: true });
   ensureCodexProfileConfig(codexHomeDir);
-  const args = [
+  const baseArgs = [
     'exec', '--ephemeral', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check',
-    '--sandbox', 'read-only', '--color', 'never', '-C', workspace,
+    '--sandbox', 'read-only', '--color', 'never', '--json', '-C', workspace,
   ];
-  if (wakeSettings.model) args.push('--model', wakeSettings.model);
-  if (wakeSettings.reasoningEffort) args.push('--config', `model_reasoning_effort="${wakeSettings.reasoningEffort}"`);
-  args.push(wakeSettings.prompt);
 
-  return new Promise((resolve, reject) => {
-    let output = '';
+  const execute = (model, fallbackUsed = false) => new Promise((resolve, reject) => {
+    const args = [...baseArgs];
+    if (model) args.push('--model', model);
+    if (wakeSettings.reasoningEffort) args.push('--config', `model_reasoning_effort="${wakeSettings.reasoningEffort}"`);
+    args.push(selectedPrompt);
+    let stdout = '';
+    let stderr = '';
     let settled = false;
+    let timeout = null;
+    const startedAt = Date.now();
     const child = spawn(executable, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
       env: taskEnvironment,
     });
     wakeRuns.set(account.id, child);
-    const consume = (chunk) => { output = `${output}${chunk}`.slice(-12_000); };
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
-    child.stdout.on('data', consume);
-    child.stderr.on('data', consume);
+    child.stdout.on('data', (chunk) => { stdout = `${stdout}${chunk}`.slice(-48_000); });
+    child.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk}`.slice(-12_000); });
     const finish = (error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
       wakeRuns.delete(account.id);
-      if (error) reject(error);
-      else resolve({ output });
+      if (error) return reject(error);
+      const parsed = parseWakeJsonl(stdout);
+      if (!parsed.verified) {
+        const failure = new Error(wakeFailureMessage({ code: 0, parsed, stderr }));
+        failure.wakeOutput = `${parsed.errors.join('\n')}\n${stderr}`;
+        return reject(failure);
+      }
+      return resolve({
+        verified: true,
+        model: model || 'account-default',
+        fallbackUsed,
+        durationMs: Date.now() - startedAt,
+        threadId: parsed.threadId,
+        agentMessageReceived: parsed.agentMessageReceived,
+        usage: parsed.usage,
+      });
     };
     child.on('error', (error) => finish(new Error(`无法启动 Codex 唤醒请求：${error.message}`)));
-    child.on('exit', (code) => finish(code === 0
-      ? null
-      : new Error(`Codex 唤醒请求失败（退出码 ${code}）：${output.trim().slice(-600) || '没有返回错误详情'}`)));
-    const timeout = setTimeout(() => {
+    child.on('close', (code) => {
+      if (code === 0) return finish();
+      const parsed = parseWakeJsonl(stdout);
+      const failure = new Error(wakeFailureMessage({ code, parsed, stderr }));
+      failure.wakeOutput = `${parsed.errors.join('\n')}\n${stderr}`;
+      return finish(failure);
+    });
+    timeout = setTimeout(() => {
       try { child.kill(); } catch {}
       finish(new Error('Codex 唤醒请求超时，请检查网络或账号状态'));
     }, 120_000);
   });
+
+  try {
+    return await execute(selectedModel);
+  } catch (error) {
+    if (!selectedModel || !isModelCompatibilityError(`${error.message}\n${error.wakeOutput || ''}`)) throw error;
+    return execute('', true);
+  }
 }
+
+async function refreshWakeQuota(account, environmentOverride = null) {
+  const { codexHomeDir } = accountPaths(account);
+  const quotaEnvironment = environmentOverride || await accountTaskEnvironment(account, process.env);
+  account.quota = await readCodexQuota(findCodexCli(), codexHomeDir, 15_000, quotaEnvironment);
+  account.quotaError = '';
+  account.quotaErrorCode = '';
+  account.quotaCheckedAt = account.quota.refreshedAt;
+  saveAccounts([...accounts]);
+  return quotaObservation(account.quota);
+}
+
+async function verifyWakeWindow(account, environmentOverride = null) {
+  const first = await refreshWakeQuota(account, environmentOverride);
+  if (Number(first?.remainingPercent) < 99.9) return { active: true, first, second: first };
+  if (!settings.mockLaunch) await new Promise((resolve) => setTimeout(resolve, 12_000));
+  const second = await refreshWakeQuota(account, environmentOverride);
+  return { active: isQuotaWindowActive(first, second), first, second };
+}
+
+const WAKE_ACTIVATION_PROMPT = 'This is a quota-window activation check. Return a numbered list from 1 through 120. Each item must contain one distinct short English sentence of at least 8 words. Do not use tools and do not omit any item.';
 
 async function wakeAccount(account, trigger = 'manual', operator = '本机用户', environmentOverride = null) {
   try {
-    await runWakeCommand(account, environmentOverride);
-    recordWakeAttempt(account, trigger, 'success');
-    audit('account.wake', { accountId: account.id, operator, result: trigger });
-    try {
-      if (settings.mockLaunch) return accountView(account);
-      const { codexHomeDir } = accountPaths(account);
-      account.quota = await readCodexQuota(findCodexCli(), codexHomeDir, 15_000, environmentOverride || await backgroundTaskEnvironment(process.env));
-      account.quotaError = '';
-      account.quotaErrorCode = '';
-      account.quotaCheckedAt = account.quota.refreshedAt;
-      saveAccounts([...accounts]);
-      if (trigger === 'after-reset') updateWakeState(account.id, { quotaObservation: quotaObservation(account.quota) });
-    } catch {}
+    const quotaBefore = quotaObservation(account.quota);
+    let commandEvidence = await runWakeCommand(account, environmentOverride);
+    let verification = settings.mockLaunch
+      ? { active: true, first: quotaBefore, second: quotaBefore }
+      : await verifyWakeWindow(account, environmentOverride);
+    let activationRetry = false;
+    if (!verification.active) {
+      activationRetry = true;
+      const activationEvidence = await runWakeCommand(account, environmentOverride, {
+        model: 'gpt-5.6-sol',
+        prompt: WAKE_ACTIVATION_PROMPT,
+      });
+      commandEvidence = {
+        ...activationEvidence,
+        initialUsage: commandEvidence.usage,
+      };
+      verification = await verifyWakeWindow(account, environmentOverride);
+    }
+    if (!verification.active) {
+      throw new Error('Codex 请求已完成，但 5 小时额度窗口仍未开始计时，请稍后重试');
+    }
+    const quotaAfter = verification.second || verification.first || quotaObservation(account.quota);
+    const evidence = {
+      ...commandEvidence,
+      quotaRefreshed: true,
+      quotaRefreshError: '',
+      quotaBefore: quotaBefore?.remainingPercent ?? null,
+      quotaAfter: quotaAfter?.remainingPercent ?? null,
+      quotaChanged: quotaBefore?.remainingPercent !== quotaAfter?.remainingPercent,
+      quotaWindowActive: true,
+      activationRetry,
+      resetAt: quotaAfter?.resetsAt || null,
+    };
+    recordWakeAttempt(account, trigger, 'success', { evidence });
+    audit('account.wake', { accountId: account.id, operator, result: `${trigger}:5-hour-window-active` });
+    if (trigger === 'after-reset') updateWakeState(account.id, { quotaObservation: quotaAfter });
     return accountView(account);
   } catch (error) {
-    recordWakeAttempt(account, trigger, 'failed', error.message);
+    recordWakeAttempt(account, trigger, 'failed', { error: error.message });
     audit('account.wake.failed', { accountId: account.id, operator, result: error.message });
     throw error;
   }
@@ -1541,11 +1633,11 @@ async function wakeAccount(account, trigger = 'manual', operator = '本机用户
 async function refreshQuotaForResetDetection(account) {
   const state = wakeState(account.id);
   const lastProbe = Date.parse(state.lastQuotaProbeAt || '');
-  if (Number.isFinite(lastProbe) && Date.now() - lastProbe < 5 * 60_000) return;
+  if (Number.isFinite(lastProbe) && Date.now() - lastProbe < 60_000) return;
   updateWakeState(account.id, { lastQuotaProbeAt: new Date().toISOString() });
   try {
     const { codexHomeDir } = accountPaths(account);
-    account.quota = await readCodexQuota(findCodexCli(), codexHomeDir, 15_000, await backgroundTaskEnvironment(process.env));
+    account.quota = await readCodexQuota(findCodexCli(), codexHomeDir, 15_000, await accountTaskEnvironment(account, process.env));
     account.quotaError = '';
     account.quotaErrorCode = '';
     account.quotaCheckedAt = account.quota.refreshedAt;
@@ -1580,7 +1672,7 @@ async function runScheduledWakes() {
       if (wakeSettings.mode === 'after-reset') await detectResetForAccount(account);
       if (!shouldWakeAccount(wakeSettings, account)) continue;
       const lastAttempt = Date.parse(wakeState(account.id).lastResetAttemptAt || '');
-      if (wakeSettings.mode === 'after-reset' && Number.isFinite(lastAttempt) && Date.now() - lastAttempt < 30 * 60_000) continue;
+      if (wakeSettings.mode === 'after-reset' && Number.isFinite(lastAttempt) && Date.now() - lastAttempt < 5 * 60_000) continue;
       try { await wakeAccount(account, wakeSettings.mode, '自动唤醒'); } catch {}
     }
   } finally {
@@ -1740,13 +1832,122 @@ function hasRestorableBrowserSession(browserDir) {
   return ['Last Session', 'Last Tabs'].some((name) => fs.existsSync(path.join(browserDir, 'Default', name)));
 }
 
+function browserPlacementIsVisible(placement) {
+  if (!placement || typeof placement !== 'object') return true;
+  const values = [
+    placement.left, placement.right, placement.top, placement.bottom,
+    placement.work_area_left, placement.work_area_right, placement.work_area_top, placement.work_area_bottom,
+  ].map(Number);
+  if (!values.every(Number.isFinite)) return true;
+  const [left, right, top, bottom, workLeft, workRight, workTop, workBottom] = values;
+  const visibleWidth = Math.max(0, Math.min(right, workRight) - Math.max(left, workLeft));
+  const visibleHeight = Math.max(0, Math.min(bottom, workBottom) - Math.max(top, workTop));
+  return visibleWidth >= 240 && visibleHeight >= 160;
+}
+
+function repairVisibleBrowserProfile(browserDir) {
+  const preferencesFile = path.join(browserDir, 'Default', 'Preferences');
+  if (!fs.existsSync(preferencesFile)) return false;
+  let preferences;
+  try { preferences = JSON.parse(fs.readFileSync(preferencesFile, 'utf8')); }
+  catch { return false; }
+  let changed = false;
+  preferences.profile ||= {};
+  if (preferences.profile.exit_type !== 'Normal') {
+    preferences.profile.exit_type = 'Normal';
+    changed = true;
+  }
+  if (preferences.profile.exited_cleanly !== true) {
+    preferences.profile.exited_cleanly = true;
+    changed = true;
+  }
+  const placement = preferences.browser?.window_placement;
+  if (placement && !browserPlacementIsVisible(placement)) {
+    const workLeft = Number.isFinite(Number(placement.work_area_left)) ? Number(placement.work_area_left) : 0;
+    const workTop = Number.isFinite(Number(placement.work_area_top)) ? Number(placement.work_area_top) : 0;
+    const workRight = Number.isFinite(Number(placement.work_area_right)) ? Number(placement.work_area_right) : workLeft + 1280;
+    const workBottom = Number.isFinite(Number(placement.work_area_bottom)) ? Number(placement.work_area_bottom) : workTop + 800;
+    preferences.browser.window_placement = {
+      ...placement,
+      left: workLeft + 10,
+      top: workTop + 10,
+      right: Math.min(workRight - 10, workLeft + 1290),
+      bottom: Math.min(workBottom - 10, workTop + 810),
+      maximized: false,
+    };
+    changed = true;
+  }
+  if (changed) writeJsonAtomic(preferencesFile, preferences);
+  return changed;
+}
+
+function chromeDevToolsCommand(socket, method, params = {}, timeoutMs = 5_000) {
+  return new Promise((resolve, reject) => {
+    const id = Math.floor(Math.random() * 2_000_000_000) + 1;
+    const timer = setTimeout(() => {
+      socket.removeEventListener('message', onMessage);
+      reject(new Error(`Chrome command timed out: ${method}`));
+    }, timeoutMs);
+    const onMessage = (event) => {
+      let message;
+      try { message = JSON.parse(String(event.data || '')); } catch { return; }
+      if (message.id !== id) return;
+      clearTimeout(timer);
+      socket.removeEventListener('message', onMessage);
+      if (message.error) reject(new Error(message.error.message || `${method} failed`));
+      else resolve(message.result || {});
+    };
+    socket.addEventListener('message', onMessage);
+    socket.send(JSON.stringify({ id, method, params }));
+  });
+}
+
+async function focusAccountBrowser(port) {
+  if (!port || typeof WebSocket !== 'function') return false;
+  let socket = null;
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(1_500) });
+    if (!response.ok) return false;
+    const targets = await response.json();
+    const target = targets.find((item) => item.type === 'page' && /^https:\/\/chatgpt\.com\//i.test(item.url) && item.webSocketDebuggerUrl)
+      || targets.find((item) => item.type === 'page' && item.webSocketDebuggerUrl);
+    if (!target) return false;
+    socket = await new Promise((resolve, reject) => {
+      const candidate = new WebSocket(target.webSocketDebuggerUrl);
+      const timer = setTimeout(() => reject(new Error('Chrome focus connection timed out')), 3_000);
+      candidate.addEventListener('open', () => { clearTimeout(timer); resolve(candidate); }, { once: true });
+      candidate.addEventListener('error', () => { clearTimeout(timer); reject(new Error('Chrome focus connection failed')); }, { once: true });
+    });
+    const browserWindow = await chromeDevToolsCommand(socket, 'Browser.getWindowForTarget', { targetId: target.id });
+    await chromeDevToolsCommand(socket, 'Browser.setWindowBounds', {
+      windowId: browserWindow.windowId,
+      bounds: { windowState: 'normal' },
+    });
+    await chromeDevToolsCommand(socket, 'Browser.setWindowBounds', {
+      windowId: browserWindow.windowId,
+      bounds: { left: 20, top: 20, width: 1280, height: 780 },
+    });
+    await chromeDevToolsCommand(socket, 'Page.bringToFront');
+    return true;
+  } catch {
+    return false;
+  } finally {
+    try { socket?.close(); } catch {}
+  }
+}
+
 async function launchAccountBrowser(account, url, options = {}) {
   await prepareAccountNetwork(account);
   const { browserDir } = accountPaths(account);
   fs.mkdirSync(browserDir, { recursive: true });
   const activePortFile = path.join(browserDir, 'DevToolsActivePort');
   const existingPort = await readLiveChromeDebugPort(activePortFile);
-  if (!existingPort) fs.rmSync(activePortFile, { force: true });
+  if (existingPort) {
+    await focusAccountBrowser(existingPort);
+    return options.returnSession ? { processPid: 0, port: existingPort, reused: true } : 0;
+  }
+  fs.rmSync(activePortFile, { force: true });
+  repairVisibleBrowserProfile(browserDir);
   // Chrome sets navigator.webdriver=true when --remote-debugging-port=0 is
   // used. OpenAI's login edge then challenges the JSON authorization request.
   // A concrete loopback port keeps CDP/liveness support without marking the
@@ -1757,6 +1958,7 @@ async function launchAccountBrowser(account, url, options = {}) {
     `--user-data-dir=${browserDir}`,
     '--profile-directory=Default',
     '--no-first-run',
+    '--disable-session-crashed-bubble',
     '--disable-background-mode',
     '--remote-debugging-address=127.0.0.1',
     `--remote-debugging-port=${requestedPort}`,
@@ -2092,7 +2294,33 @@ async function waitForChromeDebugPort(port, timeoutMs = 30_000) {
   return 0;
 }
 
-async function launchAccountBrowserForProtocol(account, options = {}) {
+function findAccountChromeProcess(browserDir) {
+  if (process.platform !== 'win32') return null;
+  const encodedDir = Buffer.from(path.normalize(browserDir), 'utf8').toString('base64');
+  const command = "$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); "
+    + `$needle=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedDir}')); `
+    + "Get-CimInstance Win32_Process -Filter \"Name = 'chrome.exe'\" "
+    + "| Where-Object { $_.CommandLine -notmatch '--type=' -and $_.CommandLine -like \"*$needle*\" } "
+    + "| Sort-Object CreationDate "
+    + "| Select-Object -First 1 ProcessId,ParentProcessId,@{n='CreationDate';e={$_.CreationDate.ToUniversalTime().ToString('o')}},ExecutablePath,CommandLine "
+    + '| ConvertTo-Json -Compress';
+  try { return runCodexDesktopProcessQuery(command, 3_000); }
+  catch { return null; }
+}
+
+async function recoverAccountChromeSession(browserDir) {
+  const processInfo = findAccountChromeProcess(browserDir);
+  if (!processInfo) return null;
+  const portMatch = processInfo.commandLine.match(/--remote-debugging-port=(\d+)/i);
+  const port = Number.parseInt(portMatch?.[1] || '', 10);
+  return {
+    processPid: processInfo.pid,
+    port: Number.isInteger(port) ? port : 0,
+    ready: Number.isInteger(port) && await isChromeDebugPortReady(port),
+  };
+}
+
+async function launchAccountBrowserForProtocol(account) {
   await prepareAccountNetwork(account);
   const { browserDir } = accountPaths(account);
   fs.mkdirSync(browserDir, { recursive: true });
@@ -2104,15 +2332,15 @@ async function launchAccountBrowserForProtocol(account, options = {}) {
     `--user-data-dir=${browserDir}`,
     '--profile-directory=Default',
     '--no-first-run',
+    '--disable-session-crashed-bubble',
     '--disable-background-mode',
+    '--headless=new',
     '--window-size=1280,900',
     '--remote-debugging-address=127.0.0.1',
     `--remote-debugging-port=${requestedPort}`,
     ...networkManager.browserArgs(account.id),
     settings.browserStartUrl,
   ];
-  if (options.visibleOffscreen) browserArgs.splice(3, 0, '--window-position=-32000,-32000');
-  else browserArgs.splice(3, 0, '--headless=new');
   const processPid = await spawnDetached(executable, browserArgs, {
     detached: true,
     stdio: 'ignore',
@@ -2121,22 +2349,27 @@ async function launchAccountBrowserForProtocol(account, options = {}) {
   const port = await waitForChromeDebugPort(requestedPort);
   if (port) {
     fs.writeFileSync(activePortFile, `${port}\n`, 'utf8');
-    return { processPid, port };
+    return { processPid, port, browserDir };
   }
+  const launchedProfile = findAccountChromeProcess(browserDir);
+  stopProtocolBrowser({ processPid: launchedProfile?.pid || processPid, browserDir });
+  fs.rmSync(activePortFile, { force: true });
   throw new Error('账号 Chrome 调试通道启动超时，请关闭该账号已有的 Chrome 窗口后重试');
 }
 
 function stopProtocolBrowser(browser) {
   const processPid = Number(browser?.processPid);
-  if (!Number.isInteger(processPid) || processPid <= 0 || !isProcessAlive(processPid)) return;
-  if (process.platform === 'win32') {
+  if (Number.isInteger(processPid) && processPid > 0 && isProcessAlive(processPid) && process.platform === 'win32') {
     spawnSync('taskkill.exe', ['/PID', String(processPid), '/T', '/F'], {
       windowsHide: true,
       stdio: 'ignore',
     });
-    return;
+  } else if (Number.isInteger(processPid) && processPid > 0 && isProcessAlive(processPid)) {
+    try { process.kill(processPid, 'SIGTERM'); } catch {}
   }
-  try { process.kill(processPid, 'SIGTERM'); } catch {}
+  if (browser?.browserDir) {
+    fs.rmSync(path.join(browser.browserDir, 'DevToolsActivePort'), { force: true });
+  }
 }
 
 async function waitForProtocolBrowserExit(browser, timeoutMs = 5_000) {
@@ -2264,8 +2497,23 @@ async function refreshAccountPlanExpiry(account, { force = false } = {}) {
     const accountId = String(tokens.account_id || auth.account_id || authClaims.chatgpt_account_id || claims.chatgpt_account_id || '');
     if (!accessToken || !accountId) throw new Error('Codex OAuth 授权中缺少账号标识');
     if (!port) {
-      browser = await launchAccountBrowserForProtocol(account, { visibleOffscreen: true });
-      port = browser.port;
+      const recovered = await recoverAccountChromeSession(browserDir);
+      const browserLeaseActive = leases[account.id]?.launchType === 'browser';
+      if (recovered?.ready) {
+        port = recovered.port;
+        fs.writeFileSync(activePortFile, `${port}\n`, 'utf8');
+        if (!browserLeaseActive) browser = { ...recovered, browserDir };
+      } else {
+        if (recovered && browserLeaseActive) {
+          throw new Error('账号网页端正在运行，但 Chrome 调试通道暂不可用');
+        }
+        if (recovered) {
+          stopProtocolBrowser({ ...recovered, browserDir });
+          await waitForProtocolBrowserExit(recovered, 2_000);
+        }
+        browser = await launchAccountBrowserForProtocol(account);
+        port = browser.port;
+      }
     }
     const subscription = await readProtocolSubscription({
       port, accessToken, accountId, closeBrowser: Boolean(browser),
@@ -2610,7 +2858,9 @@ function repairSharedCodexPreferences() {
   const catalog = repairSharedCodexThreadCatalog(SHARED_CODEX_HOME);
   if (catalog.changed) audit('codex.thread-catalog.recovered', { result: `${catalog.catalogCount || 0}` });
   else if (catalog.reason === 'repair-failed') audit('codex.thread-catalog.repair-failed', { result: catalog.error || catalog.reason });
-  return { projects, config, catalog, changed: Boolean(projects.changed || config.changed || catalog.changed) };
+  const names = syncSessionIndexNames(SHARED_CODEX_HOME);
+  if (names.state || names.catalog) audit('codex.thread-names.synced', { result: `${names.state}:${names.catalog}` });
+  return { projects, config, catalog, names, changed: Boolean(projects.changed || config.changed || catalog.changed || names.state || names.catalog) };
 }
 
 function restoreStoppedLaunchStateBeforeCatalog() {
@@ -3376,7 +3626,7 @@ async function launchAccount(account, launchType, operator, launchOptions = null
   if (launchType === 'browser') {
     const browserUrl = account.webLoginComplete ? settings.browserStartUrl : CHATGPT_LOGIN_URL;
     const browser = await launchAccountBrowser(account, browserUrl, {
-      returnSession: account.webLoginComplete !== true,
+      returnSession: true,
       restoreLastSession: true,
       initialUrls: [IP_CHECK_URL, browserUrl],
     });
@@ -3560,7 +3810,7 @@ async function importAuthorizationPackage(envelope, operator) {
 
 const MANAGED_CODEX_EXIT_GRACE_MS = 20_000;
 
-function cleanLeases(codexSnapshot = detectCodexDesktopSnapshot()) {
+async function cleanLeases(codexSnapshot = detectCodexDesktopSnapshot()) {
   const result = cleanExpiredLeases(leases);
   let changed = result.changed;
   const next = { ...result.leases };
@@ -3570,6 +3820,18 @@ function cleanLeases(codexSnapshot = detectCodexDesktopSnapshot()) {
       changed = true;
       audit('lease.auto-release', { accountId, operator: lease?.operator, result: 'account-removed' });
       continue;
+    }
+    if (lease.launchType === 'browser') {
+      const account = accounts.find((item) => item.id === accountId);
+      const activePortFile = account ? path.join(accountPaths(account).browserDir, 'DevToolsActivePort') : '';
+      const livePort = activePortFile ? await readLiveChromeDebugPort(activePortFile) : 0;
+      if (livePort) {
+        if (Number(lease.browserPort) !== livePort) {
+          next[accountId] = { ...lease, browserPort: livePort };
+          changed = true;
+        }
+        continue;
+      }
     }
     if (lease.launchType === 'codex' && lease.processIdentity && codexSnapshot.reliable
       && !codexProcessIdentityMatches(lease.processIdentity, codexSnapshot)) {
@@ -3941,7 +4203,7 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === 'GET' && url.pathname === '/api/bootstrap') {
       const codexSnapshot = detectCodexDesktopSnapshot();
-      cleanLeases(codexSnapshot);
+      await cleanLeases(codexSnapshot);
       const apiServiceState = publicApiServiceState();
       const hasActiveApiCodex = Boolean(apiServiceState.activeKeyId);
       const activeAccountId = hasActiveApiCodex ? '' : activeCodexAccountId(codexSnapshot);
@@ -4021,6 +4283,22 @@ const server = http.createServer(async (request, response) => {
         return sendJson(response, 200, { ok: true, data: listCodexLaunchOptions(SHARED_CODEX_HOME) });
       } catch (error) {
         return sendError(response, 500, error.message);
+      }
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/codex-rollout-backups') {
+      return sendJson(response, 200, { ok: true, data: listRolloutBackups(ROLLOUT_BACKUP_ROOT) });
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/codex-rollout-backups/restore') {
+      if (findRunningCodexDesktopPid()) return sendError(response, 409, '请先退出 Codex，再恢复会话备份');
+      try {
+        const body = await readBody(request);
+        const restored = await restoreRolloutBackup(SHARED_CODEX_HOME, ROLLOUT_BACKUP_ROOT, body.id);
+        audit('codex.rollout.restored', { result: `${body.id}:${restored.bytes}` });
+        return sendJson(response, 200, { ok: true, data: restored });
+      } catch (error) {
+        return sendError(response, 400, error.message);
       }
     }
 
@@ -4448,7 +4726,7 @@ const server = http.createServer(async (request, response) => {
       if (!account) return sendError(response, 404, '账号不存在');
       const body = await readBody(request);
       const operator = requireOperator(body.operator);
-      cleanLeases();
+      await cleanLeases();
 
       if (operation === 'health') {
         const health = await checkAccountHealth(account, operator);
@@ -4620,12 +4898,16 @@ const server = http.createServer(async (request, response) => {
       saveLeases(result.leases);
       try {
         if (launchType === 'codex') startCodexLaunchProgress('account', account.label);
-        const processPid = await launchAccount(account, launchType, operator, body.launchOptions || null);
+        const launchResult = await launchAccount(account, launchType, operator, body.launchOptions || null);
+        const processPid = typeof launchResult === 'object' ? Number(launchResult?.processPid) || 0 : Number(launchResult) || 0;
+        if (launchType === 'browser' && launchResult?.port) result.lease.browserPort = launchResult.port;
         if (processPid) {
           result.lease.processPid = processPid;
           if (launchType === 'codex') {
             result.lease.processIdentity = readActiveCodexAuth()?.processIdentity || null;
           }
+          saveLeases({ ...leases, [accountId]: result.lease });
+        } else if (launchType === 'browser' && result.lease.browserPort) {
           saveLeases({ ...leases, [accountId]: result.lease });
         }
       } catch (error) {

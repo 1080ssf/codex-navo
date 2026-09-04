@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.140
+
+- 修复后台读取套餐到期时间时启动离屏可见 Chrome，导致任务栏反复出现无法操作窗口的问题。
+- 后台账号检测改用真正的无界面 Chrome；启动失败、检测完成或发现无租约残留进程时都会回收临时浏览器及调试端口文件。
+- 当账号网页端正在使用时复用其调试连接，不会为后台检测关闭用户正在操作的窗口。
+
 ## 1.2.120
 
 - Fixed the repeated Windows sandbox permission setup caused by API Codex proxy endpoints changing between `18301-18399`. Codex Desktop now uses stable port `18301`, while independent account and API proxy cores continue to use dynamic ports `18302-18399` behind the relay.

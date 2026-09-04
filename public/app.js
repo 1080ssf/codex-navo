@@ -173,8 +173,13 @@ const englishUi = new Map([
   ['Codex Navo 当前固定使用浅色模式。', 'Codex Navo is currently fixed to light mode.'], ['当前固定使用浅色模式。', 'Codex Navo is fixed to light mode.'],
   ['保存语言', 'Save Language'], ['界面语言', 'Interface language'], ['外观设置已保存', 'Appearance saved'], ['取消', 'Cancel'], ['按所选内容启动', 'Launch Selected'],
   ['全选项目和会话', 'Select all projects and sessions'], ['全部展开', 'Expand all'], ['全部折叠', 'Collapse all'],
-  ['启动前优化超大历史会话', 'Optimize oversized conversation history before launch'], ['账号与顺序', 'Accounts & Order'],
+  ['启动前安全优化超大历史会话', 'Safely optimize oversized conversation history before launch'], ['账号与顺序', 'Accounts & Order'],
+  ['会话文件备份与恢复', 'Conversation file backups'], ['查看备份', 'View backups'], ['暂无可恢复备份', 'No restorable backups'],
+  ['当前没有超过 500 MB 的会话。', 'No conversation currently exceeds 500 MB.'],
+  ['恢复', 'Restore'], ['优化前', 'Before'], ['优化后', 'After'], ['· 优化后', '· after'], ['恢复会话备份？当前文件会先自动备份。', 'Restore this conversation backup? The current file will be backed up first.'],
+  ['会话备份已恢复', 'Conversation backup restored'], ['请先退出 Codex，再恢复会话备份', 'Quit Codex before restoring a conversation backup'],
   ['登录 Codex', 'Launch Codex'], ['退出 Codex', 'Quit Codex'], ['网页端', 'Web'], ['柔和提示音', 'Soft chime'],
+  ['请先释放账号后再重新打开网页端', 'Release the account before reopening Web'],
   ['清亮提示音', 'Bright chime'], ['玻璃音', 'Glass'], ['脉冲音', 'Pulse'], ['完成音', 'Success'], ['导入音频', 'Imported audio'], ['静音', 'Silent'],
   ['柔和确认', 'Soft confirmation'], ['明亮确认', 'Bright confirmation'], ['玻璃轻响', 'Glass chime'], ['低音提醒', 'Low notice'],
   ['等待提醒', 'Waiting alert'], ['错误提醒', 'Error alert'], ['弹拨提示', 'Pluck'], ['轻敲提示', 'Tap'],
@@ -318,7 +323,7 @@ const englishUi = new Map([
   ['继续 Codex 授权', 'Continue Codex authorization'], ['检测账号池模型', 'Detect account-pool models'], ['检测中…', 'Testing…'], ['检查中…', 'Checking…'],
   ['检查完成：全部账号授权正常。', 'Check complete: all accounts are authorized.'], ['将这个会话移入“已归档”？', 'Move this conversation to Archived?'],
   ['节点', 'Node'], ['节点来源已删除', 'Node source deleted'],
-  ['仅清理重复压缩快照，并在 .codex/navo-rollout-backups 中保留原文件备份。', 'Only duplicate compacted snapshots are removed; original files are backed up in .codex/navo-rollout-backups.'],
+  ['仅处理 500 MB 以上且含有效恢复检查点的会话；异常、旧格式或含回滚记录时会跳过，并保留原文件备份。', 'Only conversations over 500 MB with a valid recovery checkpoint are processed. Invalid, legacy, or rolled-back histories are skipped and the original file is backed up.'],
   ['仅选此项目', 'Only this project'], ['卡片视图', 'Card view'], ['卡片视图固定显示今日用量', 'Card view always shows today’s usage'], ['可用', 'Available'],
   ['立即安装', 'Install now'], ['立即更新', 'Update now'], ['例如：设计组 01', 'Example: Design Team 01'], ['例如：de***@company.com', 'Example: de***@company.com'],
   ['连接成功，测试消息已发送', 'Connected; test message sent'], ['连接延迟', 'Connection latency'], ['列表视图', 'List view'],
@@ -394,6 +399,7 @@ const englishUi = new Map([
   ['Codex 默认模型', 'Codex default model'], ['Codex 授权已导入，网页会话需要重新登录', 'Codex authorization imported; the web session requires sign-in'],
   ['Codex 授权已导入；该授权包不包含网页会话。', 'Codex authorization imported; this package does not contain a web session.'],
   ['Codex 授权已完成。网页端仍需登录时，可在该账号的独立 Chrome 中继续。', 'Codex authorization is complete. If Web still requires sign-in, continue in this account’s isolated Chrome.'],
+  ['（已回退账号默认模型）', ' (account default model fallback)'],
   ['套餐到期：', 'Plan expires: '], ['到期 自动检测中', 'Expiration: checking'], ['到期 暂未读取', 'Expiration unavailable'],
   ['Codex 返回的可用额度重置卡', 'Available quota reset credits returned by Codex'],
   ['Codex 已退出，账号认证已安全保存', 'Codex exited; account authorization was saved safely'], ['Key 名称', 'Key name'],
@@ -411,6 +417,8 @@ const englishUi = new Map([
 const englishUiPatterns = [
   [/^当前跟随 Windows，正在使用(.+)模式。$/, 'Following Windows; $1 mode is active.'], [/^当前使用(.+)模式。$/, '$1 mode is active.'],
   [/^当前 Codex · /, 'Current Codex · '],
+  [/^(\d+) 个超大会话可检查。$/, '$1 oversized conversations can be checked.'],
+  [/^· 优化后 (.+)$/, '· after $1'],
   [/^(\d+) 个账号/, '$1 accounts'], [/ · (\d+) 个 Navo API/g, ' · $1 Navo API'], [/^(\d+) 使用中$/, '$1 active'],
   [/^更新于 /, 'Updated '], [/ 次待定价$/, ' unpriced calls'], [/^缓存率 /, 'Cache rate '], [/其中推理 /, 'Reasoning '],
   [/^按 (\d+) 个绑定账号的总额度平均计算$/, 'Average of total quota across $1 linked accounts'],
@@ -444,6 +452,7 @@ const englishUiPatterns = [
   [/^将为 (\d+) 个账号各发送一次真实 Codex 请求，会消耗额度。继续吗？$/, 'Send one real Codex request for each of $1 accounts? This consumes quota.'],
   [/^模型默认（(.+)）$/, 'Model default ($1)'], [/^内置 Mihomo (.+) · 随应用更新$/, 'Built-in Mihomo $1 · updated with the app'],
   [/^请求失败（(.+)）$/, 'Request failed ($1)'], [/^上次唤醒失败：(.+)$/, 'Last wake failed: $1'],
+  [/^5 小时额度窗口已开始计时，重置时间：(.+)$/, 'The 5-hour quota window is active; reset: $1'],
   [/^输入 (.+) · 缓存率 (.+) · 输出 (.+)$/, 'Input $1 · cache rate $2 · output $3'],
   [/^为 (.+) 选择独立线路。$/, 'Choose an independent route for $1.'],
   [/^为 (.+) 选择账号池统一线路。绑定到该 Key 的账号发起 API 请求时都会使用这条线路。$/, 'Choose one account-pool route for $1. Accounts linked to this key use it for API requests.'],
@@ -1141,7 +1150,8 @@ async function openCodexLaunchDialog() {
       <label class="launch-language"><span>界面语言</span><div class="launch-language-control"><i>文</i><select name="language">${catalog.languages.map((item) => `<option value="${escapeHtml(item.id)}"${item.id === catalog.defaultLanguage ? ' selected' : ''}>${escapeHtml(item.label)}</option>`).join('')}</select></div></label>
       <div class="launch-select-bar"><label><input type="checkbox" data-launch-all checked><span>全选项目和会话</span></label><div><small data-launch-selected>已选 ${catalog.projects.length} 个项目、${catalog.threadCount} 个会话</small><button type="button" data-launch-collapse-all>全部展开</button></div><progress class="launch-selection-progress" data-launch-progress value="100" max="100">100%</progress></div>
       <div class="launch-projects">${projectMarkup || '<p class="launch-empty">尚未找到可加载的本地项目或会话</p>'}</div>
-      <label class="launch-optimize"><input type="checkbox" name="optimizeOversized" checked><span><strong>启动前优化超大历史会话</strong><small>仅清理重复压缩快照，并在 .codex/navo-rollout-backups 中保留原文件备份。</small></span></label>
+      <div class="launch-optimize"><label><input type="checkbox" name="optimizeOversized"><span><strong>启动前安全优化超大历史会话</strong><small>${catalog.oversizedThreadCount ? `${catalog.oversizedThreadCount} 个超大会话可检查。` : '当前没有超过 500 MB 的会话。'}仅处理含有效恢复检查点的会话；异常、旧格式或含回滚记录时会跳过，并保留原文件备份。</small></span></label><button class="secondary-button launch-backups-button" type="button" data-launch-backups>查看备份</button></div>
+      <section class="launch-backup-panel" data-launch-backup-panel hidden><strong>会话文件备份与恢复</strong><div data-launch-backup-list></div></section>
       <div class="dialog-actions"><button class="secondary-button" type="button" data-launch-cancel>取消</button><button class="primary-button" type="submit">按所选内容启动</button></div>`;
     dialog.appendChild(form);
     document.body.appendChild(dialog);
@@ -1152,6 +1162,16 @@ async function openCodexLaunchDialog() {
     const selectedSummary = form.querySelector('[data-launch-selected]');
     const collapseAll = form.querySelector('[data-launch-collapse-all]');
     const selectionProgress = form.querySelector('[data-launch-progress]');
+    const backupPanel = form.querySelector('[data-launch-backup-panel]');
+    const backupList = form.querySelector('[data-launch-backup-list]');
+    const loadBackups = async () => {
+      const backups = await api('/api/codex-rollout-backups');
+      backupList.innerHTML = backups.length ? backups.map((backup) => `
+        <article class="launch-backup-item">
+          <span><strong>${escapeHtml(backup.conversationFile)}</strong><small>${escapeHtml(new Date(backup.createdAt).toLocaleString())} · 优化前 ${formatLaunchSize(backup.beforeBytes)}${backup.afterBytes ? ` · 优化后 ${formatLaunchSize(backup.afterBytes)}` : ''}</small></span>
+          <button class="secondary-button" type="button" data-restore-rollout="${escapeHtml(backup.id)}">恢复</button>
+        </article>`).join('') : '<p class="launch-empty">暂无可恢复备份</p>';
+    };
     const sync = () => {
       for (const project of projects) {
         const children = threads.filter((thread) => thread.dataset.projectId === project.value);
@@ -1200,6 +1220,25 @@ async function openCodexLaunchDialog() {
       const expand = sections.every((section) => section.classList.contains('collapsed'));
       sections.forEach((section) => setSectionCollapsed(section, !expand));
       syncCollapseAll();
+    });
+    form.querySelector('[data-launch-backups]').addEventListener('click', async () => {
+      backupPanel.hidden = !backupPanel.hidden;
+      if (!backupPanel.hidden) {
+        try { await loadBackups(); } catch (error) { showToast(error.message, true); }
+      }
+    });
+    backupList.addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-restore-rollout]');
+      if (!button || !confirm('恢复会话备份？当前文件会先自动备份。')) return;
+      button.disabled = true;
+      try {
+        await api('/api/codex-rollout-backups/restore', { method: 'POST', body: JSON.stringify({ id: button.dataset.restoreRollout }) });
+        showToast('会话备份已恢复');
+        await loadBackups();
+      } catch (error) {
+        showToast(error.message, true);
+        button.disabled = false;
+      }
     });
     const finish = (value) => {
       if (dialog.open) dialog.close();
@@ -1907,6 +1946,8 @@ function render() {
       ? `<span class="balance-badge" title="按 Codex 官方美国定价 US$0.04/Credit 换算">余额 ${escapeHtml(usdBalance)}</span>`
       : '';
     const browserOccupied = Boolean(account.lease && !account.codexActive && account.lease.launchType === 'browser');
+    const browserDisabled = browserOccupied ? 'disabled' : '';
+    const browserTitle = browserOccupied ? '请先释放账号后再重新打开网页端' : '';
     const sessionBadge = browserOccupied
       ? '<span class="session-badge"><i></i>网页使用中</span>'
       : '';
@@ -1952,7 +1993,7 @@ function render() {
       <div class="account-actions">
         ${relayOnly
           ? '<button class="action-primary action-blocked" type="button" disabled title="反代账号不会创建网页环境">网页端</button>'
-          : `<button class="action-primary ${browserOccupied ? 'action-browser-active' : ''}" data-action="browser">${browserOccupied ? '网页已打开' : account.codexInitialized ? '网页端' : '打开网页登录'}</button>`}
+          : `<button class="action-primary ${browserOccupied ? 'action-browser-active' : ''}" data-action="browser" ${browserDisabled} title="${escapeHtml(browserTitle)}">${browserOccupied ? '网页已打开' : account.codexInitialized ? '网页端' : '打开网页登录'}</button>`}
         ${codexAction}
         <button class="icon-action network-action" data-action="network" data-active="${account.network?.mode === 'proxy'}" title="${escapeHtml(account.network?.label || '配置账号网络')}" aria-label="配置账号网络"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M3.8 12h16.4M12 3.5c2.2 2.3 3.4 5.2 3.4 8.5S14.2 18.2 12 20.5M12 3.5C9.8 5.8 8.6 8.7 8.6 12s1.2 6.2 3.4 8.5"></path></svg></button>
         <button class="icon-action wake-action" data-action="wake" title="${wakeTitle}" aria-label="唤醒账号" ${account.codexInitialized && !account.wake?.running ? '' : 'disabled'}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.2 2.8 5.8 13h5l-1 8.2L18.2 10h-5z"></path></svg></button>
@@ -2093,8 +2134,9 @@ elements.accounts.addEventListener('click', async (event) => {
       await api(`/api/accounts/${card.dataset.id}/quota`, { method: 'POST', body: JSON.stringify({ operator: currentOperator }) });
       showToast('额度已刷新');
     } else if (action === 'wake') {
-      await api(`/api/accounts/${card.dataset.id}/wake`, { method: 'POST', body: JSON.stringify({ operator: currentOperator }) });
-      showToast('账号已唤醒，额度状态已同步');
+      const woken = await api(`/api/accounts/${card.dataset.id}/wake`, { method: 'POST', body: JSON.stringify({ operator: currentOperator }) });
+      const evidence = woken.wake?.lastWakeEvidence || {};
+      showToast(`5 小时额度窗口已开始计时，重置时间：${formatReset(evidence.resetAt)}`);
     } else if (action === 'cancel-authorization') {
       await api(`/api/accounts/${card.dataset.id}/cancel-authorization`, {
         method: 'POST',
