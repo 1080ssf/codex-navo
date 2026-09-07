@@ -1,15 +1,15 @@
 # Code signing policy
 
-Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+Codex Navo installers are currently unsigned. The project does not claim that current release artifacts carry an Authenticode signature.
 
-Codex Navo release installers are built from the public GitHub repository by GitHub Actions on GitHub-hosted Windows runners. The unsigned workflow artifact is submitted through SignPath's GitHub trusted-build integration. SignPath verifies the build origin, and an authorized project approver must manually approve every signing request.
+Release installers are built from the public GitHub repository by GitHub Actions on GitHub-hosted Windows runners. The workflow runs the test suite, builds the Windows installer, records its SHA-256 checksum in the workflow summary, and uploads the resulting artifact. A future code-signing integration will only be enabled after the project has an approved signing provider and valid repository credentials.
 
 ## Roles
 
 - Committer and reviewer: [1080ssf](https://github.com/1080ssf)
-- Signing approver: [1080ssf](https://github.com/1080ssf)
+- Release approver: [1080ssf](https://github.com/1080ssf)
 
-Changes to source code, dependencies, build scripts, GitHub Actions workflows, and this policy are reviewed as security-sensitive release changes. Multi-factor authentication is required for the GitHub and SignPath accounts used to maintain or approve releases.
+Changes to source code, dependencies, build scripts, GitHub Actions workflows, and this policy are reviewed as security-sensitive release changes. Multi-factor authentication is required for the GitHub account used to maintain releases.
 
 ## Privacy
 
@@ -20,7 +20,7 @@ See the [Codex Navo privacy policy](PRIVACY.md).
 Published Windows installers can be verified with PowerShell:
 
 ```powershell
-Get-AuthenticodeSignature -LiteralPath .\Codex-Navo-Setup-*-windows-x64.exe
+Get-FileHash -Algorithm SHA256 -LiteralPath .\Codex-Navo-Setup-*-windows-x64.exe
 ```
 
-Official signed releases must report a valid Authenticode signature issued to SignPath Foundation and must originate from the [Codex Navo releases page](https://github.com/1080ssf/codex-navo/releases).
+Compare the result with the checksum recorded by the corresponding GitHub Actions build. Official releases must originate from the [Codex Navo releases page](https://github.com/1080ssf/codex-navo/releases).

@@ -400,7 +400,7 @@ test('switching a node keeps the running account proxy port and core process', a
     assert.match(requests[0].body, /Singapore/);
     assert.equal(manager.data.assignments['account-demo'].mixedPort, 17896);
   } finally {
-    fs.rmSync(runtimeRoot, { recursive: true, force: true });
+    fs.rmSync(runtimeRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   }
 });
 
@@ -439,7 +439,7 @@ test('switching between sources and direct keeps the live proxy endpoint', async
     assert.equal(child.killed, false);
     assert.equal(manager.environment('account-demo').HTTP_PROXY, 'http://127.0.0.1:17898');
   } finally {
-    fs.rmSync(runtimeRoot, { recursive: true, force: true });
+    fs.rmSync(runtimeRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   }
 });
 

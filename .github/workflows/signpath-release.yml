@@ -1,4 +1,4 @@
-name: Build and sign Windows release
+name: Build Windows release
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  build-and-sign:
+  build-windows:
     runs-on: windows-latest
     timeout-minutes: 90
 
@@ -36,51 +36,51 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Release tag does not match package version $version"
+          }
           "version=$version" >> $env:GITHUB_OUTPUT
           "installer=release/auto-update/Codex-Navo-Setup-$version-windows-x64.exe" >> $env:GITHUB_OUTPUT
 
-      - name: Build unsigned Windows installer
+      - name: Build Windows installer
         run: npm run build:desktop
 
-      - name: Upload unsigned installer for trusted-build verification
-        id: upload-unsigned
+      - name: Verify and summarize installer
+        shell: pwsh
+        run: |
+          $installer = '${{ steps.metadata.outputs.installer }}'
+          if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
+            throw "Windows installer was not produced: $installer"
+          }
+          $file = Get-Item -LiteralPath $installer
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer).Hash
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          @(
+            '## Windows release artifact'
+            ''
+            "- File: ``$($file.Name)``"
+            "- Size: $($file.Length) bytes"
+            "- SHA-256: ``$hash``"
+            "- Authenticode: ``$($signature.Status)`` (code signing is currently disabled)"
+          ) | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+
+      - name: Validate automatic update artifacts
+        run: node scripts/verify-update-artifacts.js
+
+      - name: Upload Windows installer
         uses: actions/upload-artifact@v7
         with:
-          name: codex-navo-unsigned-${{ steps.metadata.outputs.version }}
+          name: Codex-Navo-Setup-${{ steps.metadata.outputs.version }}-windows-x64.exe
           path: ${{ steps.metadata.outputs.installer }}
           archive: false
           if-no-files-found: error
 
-      - name: Submit SignPath signing request
-        id: signpath
-        uses: signpath/github-action-submit-signing-request@v2
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
-          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
-          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
-          wait-for-completion: true
-          wait-for-completion-timeout-in-seconds: 3600
-          output-artifact-directory: release/signed
-          skip-decompress: true
-          parameters: |
-            version: ${{ toJSON(steps.metadata.outputs.version) }}
-
-      - name: Verify Authenticode signature
-        shell: pwsh
-        run: |
-          $file = Get-ChildItem release/signed -Filter '*.exe' -File | Select-Object -First 1
-          if (-not $file) { throw 'SignPath did not return a signed installer.' }
-          $signature = Get-AuthenticodeSignature -LiteralPath $file.FullName
-          if ($signature.Status -ne 'Valid') { throw "Invalid Authenticode signature: $($signature.Status)" }
-          "SIGNED_INSTALLER=$($file.FullName)" >> $env:GITHUB_ENV
-
-      - name: Upload signed installer
+      - name: Upload complete automatic update bundle
         uses: actions/upload-artifact@v7
         with:
-          name: codex-navo-signed-${{ steps.metadata.outputs.version }}
-          path: ${{ env.SIGNED_INSTALLER }}
-          archive: false
+          name: Codex-Navo-auto-update-${{ steps.metadata.outputs.version }}
+          path: |
+            ${{ steps.metadata.outputs.installer }}
+            ${{ steps.metadata.outputs.installer }}.blockmap
+            release/auto-update/latest.yml
           if-no-files-found: error

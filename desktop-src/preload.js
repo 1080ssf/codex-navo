@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('codexUpdater', {
   install: () => ipcRenderer.invoke('updates:install'),
   getCodexState: () => ipcRenderer.invoke('codex-updates:get-state'),
   installCodexUpdate: (options) => ipcRenderer.invoke('codex-updates:install', options),
+  cancelCodexDownload: () => ipcRenderer.invoke('codex-updates:cancel-download'),
   onCodexState: (callback) => {
     const listener = (_event, state) => callback(state);
     ipcRenderer.on('codex-updates:state', listener);

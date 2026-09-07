@@ -1,10 +1,13 @@
-const { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, Notification, screen, shell, Tray } = require('electron');
+const { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, Notification, screen, session, shell, Tray } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { spawn, spawnSync } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
+const { reusablePackage } = require('../lib/update-cache');
+const { createUpdateDiagnostics } = require('../lib/update-diagnostics');
+const { singleFlight, updateErrorState, writeUpdateSnapshot, reusableUpdateCheck, progressReporter, packageAvailability } = require('../lib/update-operation');
 const {
   CODEX_PACKAGE_IDENTITY,
   CODEX_UPDATE_MANIFEST_URL,
@@ -22,6 +25,9 @@ const USER_DATA_ROOT = path.resolve(
 );
 
 app.setPath('userData', USER_DATA_ROOT);
+const recordUpdateDiagnostic = createUpdateDiagnostics(path.join(USER_DATA_ROOT, 'data', 'update-timings.jsonl'), {
+  onError: () => console.warn('Update timing diagnostics could not be written.'),
+});
 app.setAppUserModelId('com.codexswitchboard.app');
 
 let mainWindow = null;
@@ -336,9 +342,13 @@ function requestLocalJson(pathname, timeoutMs = 15_000) {
   });
 }
 
-async function configureUpdaterNetwork() {
+const configuredUpdateRoutes = new WeakMap();
+function codexUpdateSession() { return session.fromPartition('codex-navo-official-updates'); }
+
+async function configureUpdaterNetwork(updaterSession = autoUpdater.netSession) {
   const route = await requestLocalJson('/api/network/background-route');
-  const updaterSession = autoUpdater.netSession;
+  const fingerprint = JSON.stringify([route?.proxyUrl || '', route?.bypass || '']);
+  if (configuredUpdateRoutes.get(updaterSession) === fingerprint) return route;
   if (route?.proxyUrl) {
     await updaterSession.setProxy({
       mode: 'fixed_servers',
@@ -349,6 +359,7 @@ async function configureUpdaterNetwork() {
     await updaterSession.setProxy({ mode: 'direct' });
   }
   await updaterSession.closeAllConnections?.();
+  configuredUpdateRoutes.set(updaterSession, fingerprint);
   return route || { proxyUrl: '', nodeName: '' };
 }
 
@@ -417,13 +428,13 @@ function normalizeReleaseNotes(value) {
 }
 
 function publishUpdateState(patch) {
+  recordUpdateDiagnostic('navo', { ...updateState, ...patch });
   updateState = { ...updateState, ...patch };
   try {
     const diagnosticState = { ...updateState, error: updateState.error ? 'update-check-failed' : '' };
-    fs.mkdirSync(path.join(USER_DATA_ROOT, 'data'), { recursive: true });
-    fs.writeFileSync(
+    writeUpdateSnapshot(
       path.join(USER_DATA_ROOT, 'data', 'update-state.json'),
-      `${JSON.stringify(diagnosticState, null, 2)}\n`,
+      diagnosticState,
     );
   } catch {}
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -452,12 +463,7 @@ async function checkForUpdates(manual = false) {
 }
 
 function publishUpdateError(error) {
-  const message = String(error?.message || error || '');
-  if (/latest\.yml/i.test(message) && /404|not found/i.test(message)) {
-    publishUpdateState({ status: 'current', availableVersion: '', percent: 0, error: '' });
-    return;
-  }
-  publishUpdateState({ status: 'error', error: message });
+  publishUpdateState(updateErrorState(error));
 }
 
 function configureAutoUpdater() {
@@ -485,6 +491,9 @@ function configureAutoUpdater() {
   }));
   autoUpdater.on('download-progress', (progress) => publishUpdateState({
     status: 'downloading',
+    bytesDownloaded: Number(progress.transferred) || 0,
+    totalBytes: Number(progress.total) || 0,
+    bytesPerSecond: Number(progress.bytesPerSecond) || 0,
     percent: Math.max(0, Math.min(100, Math.round(progress.percent || 0))),
     error: '',
   }));
@@ -501,14 +510,14 @@ function configureAutoUpdater() {
   updateTimer = setInterval(() => checkForUpdates(false), UPDATE_INTERVAL_MS);
 }
 
-function readInstalledCodexPackageState() {
-  const query = spawnSync('powershell.exe', [
+async function readInstalledCodexPackageState() {
+  const query = await runHiddenProcess('powershell.exe', [
     '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
     "$package = Get-AppxPackage -Name OpenAI.Codex | Select-Object -First 1; if ($package) { [PSCustomObject]@{ Installed = $true; Version = $package.Version.ToString(); PackageFamilyName = $package.PackageFamilyName; InstallLocation = $package.InstallLocation } | ConvertTo-Json -Compress } else { [PSCustomObject]@{ Installed = $false; Version = ''; PackageFamilyName = ''; InstallLocation = '' } | ConvertTo-Json -Compress }",
-  ], { encoding: 'utf8', windowsHide: true, timeout: 8_000 });
-  if (query.error) throw query.error;
+  ], 8_000);
+  if (query.code !== 0) throw new Error('Failed to query the installed Codex package.');
   try {
-    const value = JSON.parse(String(query.stdout || '').trim());
+    const value = JSON.parse(String(query.output || '').trim());
     return {
       installed: value.Installed === true,
       version: String(value.Version || ''),
@@ -521,12 +530,12 @@ function readInstalledCodexPackageState() {
 }
 
 function publishCodexUpdateState(patch) {
+  recordUpdateDiagnostic('codex', { ...codexUpdateState, ...patch });
   codexUpdateState = { ...codexUpdateState, ...patch };
   try {
-    fs.mkdirSync(path.join(USER_DATA_ROOT, 'data'), { recursive: true });
-    fs.writeFileSync(
+    writeUpdateSnapshot(
       path.join(USER_DATA_ROOT, 'data', 'codex-update-state.json'),
-      `${JSON.stringify({ ...codexUpdateState, installLocation: undefined }, null, 2)}\n`,
+      { ...codexUpdateState, installLocation: undefined },
     );
   } catch {}
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('codex-updates:state', codexUpdateState);
@@ -548,7 +557,7 @@ function codexStoreWrapperPath() {
 const CODEX_STORE_RESULT_GRACE_MS = 5_000;
 
 async function runCodexStoreHelper(mode, { targetVersion = '', timeoutMs = 20 * 60 * 1000 } = {}) {
-  const installed = readInstalledCodexPackageState();
+  const installed = await readInstalledCodexPackageState();
   if (!installed.installed || !installed.packageFamilyName) return { ok: false, hasUpdate: false, unavailable: true };
   const helper = codexStoreHelperPath();
   const wrapper = codexStoreWrapperPath();
@@ -617,7 +626,7 @@ async function runCodexStoreHelper(mode, { targetVersion = '', timeoutMs = 20 * 
       }
       if (mode === 'install' && targetVersion && Date.now() >= nextVersionCheckAt) {
         nextVersionCheckAt = Date.now() + 2_000;
-        const current = readInstalledCodexPackageState();
+        const current = await readInstalledCodexPackageState();
         if (current.installed && comparePackageVersions(current.version, targetVersion) >= 0) {
           return { ok: true, hasUpdate: true, overallState: 'Completed', inferredFromInstalledVersion: true };
         }
@@ -643,29 +652,32 @@ async function fetchOfficialCodexUpdateState() {
   if (['checking', 'closing', 'downloading', 'verifying', 'installing', 'store-installing'].includes(codexUpdateState.status)) return codexUpdateState;
   publishCodexUpdateState({ status: 'checking', phase: 'checking', percent: 0, error: '' });
   try {
-    const route = await configureUpdaterNetwork();
-    const updaterSession = autoUpdater.netSession;
-    const manifestResponse = await updaterSession.fetch(CODEX_UPDATE_MANIFEST_URL, { cache: 'no-store' });
+    const updaterSession = codexUpdateSession();
+    const route = await configureUpdaterNetwork(updaterSession);
+    const manifestResponse = await updaterSession.fetch(CODEX_UPDATE_MANIFEST_URL, { cache: 'no-store', signal: AbortSignal.timeout(15_000) });
     if (!manifestResponse.ok) throw new Error(`The official Codex update manifest returned HTTP ${manifestResponse.status}.`);
     if (new URL(manifestResponse.url || CODEX_UPDATE_MANIFEST_URL).protocol !== 'https:') throw new Error('The official Codex update manifest redirected to an insecure URL.');
     const manifest = validateCodexUpdateManifest(await manifestResponse.json());
-    const installed = readInstalledCodexPackageState();
+    const installed = await readInstalledCodexPackageState();
     const packageUrl = buildCodexPackageUrl(manifest.buildVersion);
-    const [packageResponse, storeUpdate] = await Promise.all([
-      updaterSession.fetch(packageUrl, { method: 'HEAD', cache: 'no-store' }),
-      installed.installed
-        ? runCodexStoreHelper('check', { timeoutMs: 60_000 }).catch((error) => ({ ok: false, hasUpdate: false, error: String(error.message || error) }))
-        : Promise.resolve({ ok: false, hasUpdate: false, unavailable: true }),
-    ]);
+    const packageResponse = await updaterSession.fetch(packageUrl, {
+      method: 'HEAD', cache: 'no-store', signal: AbortSignal.timeout(15_000),
+    }).catch((error) => ({ ok: false, status: 0, probeError: String(error.message || error) }));
+    const storeUpdate = packageResponse.ok
+      ? { ok: false, hasUpdate: false, skipped: true }
+      : installed.installed
+        ? await runCodexStoreHelper('check', { timeoutMs: 60_000 }).catch((error) => ({ ok: false, hasUpdate: false, error: String(error.message || error) }))
+        : { ok: false, hasUpdate: false, unavailable: true };
     const updateAvailable = !installed.installed || comparePackageVersions(manifest.buildVersion, installed.version) > 0;
     const updateSource = storeUpdate.ok && storeUpdate.hasUpdate ? 'store' : packageResponse.ok ? 'msix' : 'propagating';
     const packageReady = updateSource !== 'propagating';
-    const storeCheckStatus = !installed.installed
+    const storeCheckStatus = storeUpdate.skipped ? 'not-needed' : !installed.installed
       ? 'not-installed'
       : storeUpdate.ok
         ? (storeUpdate.hasUpdate ? 'available' : 'none')
         : 'error';
-    const availabilityStatus = updateAvailable ? (packageReady ? 'available' : 'propagating') : 'current';
+    const availability = packageAvailability(updateAvailable, packageResponse, storeUpdate);
+    const availabilityStatus = availability.status;
     return publishCodexUpdateState({
       ...installed,
       status: availabilityStatus,
@@ -678,47 +690,47 @@ async function fetchOfficialCodexUpdateState() {
       storeCanSilent: storeUpdate.canSilent !== false,
       storeCheckError: String(storeUpdate.error || ''),
       directPackageStatus: Number(packageResponse.status) || 0,
+      directPackageError: packageResponse.probeError || '',
       packageUrl,
       networkRoute: route.nodeName || '',
       percent: updateAvailable ? 0 : 100,
       phase: availabilityStatus,
       checkedAt: new Date().toISOString(),
-      error: '',
+      error: availability.error,
     });
   } catch (error) {
     return publishCodexUpdateState({ status: 'error', phase: 'error', error: String(error.message || error) });
   }
 }
 
-function codexDesktopProcessIds() {
-  const result = spawnSync('powershell.exe', [
+async function codexDesktopProcessIds() {
+  const result = await runHiddenProcess('powershell.exe', [
     '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
     "$package = Get-AppxPackage -Name OpenAI.Codex | Select-Object -First 1; if (-not $package) { '[]'; exit 0 }; $root = [IO.Path]::GetFullPath($package.InstallLocation).TrimEnd('\\') + '\\'; $items = @(Get-Process -Name ChatGPT,codex,codex-code-mode-host -ErrorAction SilentlyContinue | Where-Object { try { $_.Path -and [IO.Path]::GetFullPath($_.Path).StartsWith($root, [StringComparison]::OrdinalIgnoreCase) } catch { $false } } | Select-Object -ExpandProperty Id); ConvertTo-Json -Compress -InputObject $items",
-  ], { encoding: 'utf8', windowsHide: true, timeout: 8_000 });
-  if (result.error || result.status !== 0) return [];
+  ], 8_000);
+  if (result.code !== 0) throw new Error('Failed to query running Codex processes.');
   try {
-    const value = JSON.parse(String(result.stdout || '[]').trim() || '[]');
+    const value = JSON.parse(String(result.output || '').trim());
     return (Array.isArray(value) ? value : [value]).map(Number).filter((id) => Number.isInteger(id) && id > 0);
-  } catch { return []; }
+  } catch { throw new Error('Windows returned an invalid Codex process list.'); }
 }
 
-function codexDesktopIsRunning() {
-  return codexDesktopProcessIds().length > 0;
+async function codexDesktopIsRunning() {
+  return (await codexDesktopProcessIds()).length > 0;
 }
 
 async function closeCodexDesktop() {
-  const processIds = codexDesktopProcessIds();
+  const processIds = await codexDesktopProcessIds();
   if (!processIds.length) return;
-  const result = spawnSync('powershell.exe', [
+  const result = await runHiddenProcess('powershell.exe', [
     '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
     "$ids = @($env:CODEX_NAVO_CODEX_PIDS -split ',' | ForEach-Object { [int]$_ }); Get-Process -Id $ids -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction Stop",
-  ], {
-    encoding: 'utf8', windowsHide: true, timeout: 15_000,
+  ], 15_000, {
     env: { ...directChildEnvironment(process.env), CODEX_NAVO_CODEX_PIDS: processIds.join(',') },
   });
-  if (result.error || result.status !== 0) throw new Error('Failed to close the running Codex processes.');
+  if (result.code !== 0) throw new Error('Failed to close the running Codex processes.');
   for (let attempt = 0; attempt < 30; attempt += 1) {
-    if (!codexDesktopIsRunning()) return;
+    if (!await codexDesktopIsRunning()) return;
     await delay(200);
   }
   throw new Error('Codex did not exit before the update timeout.');
@@ -753,48 +765,114 @@ function runHiddenProcess(command, args, timeoutMs = 10 * 60 * 1000, options = {
   });
 }
 
+let codexDownloadController = null;
 async function downloadCodexPackage(state) {
   const updateDirectory = path.join(USER_DATA_ROOT, 'updates', 'codex');
   fs.mkdirSync(updateDirectory, { recursive: true });
   const finalPath = path.join(updateDirectory, `Codex-${state.latestVersion}-${process.arch}.msix`);
+  const cached = await reusablePackage(finalPath, state.packageUrl);
+  if (cached) return cached;
   const partialPath = `${finalPath}.download`;
-  fs.rmSync(partialPath, { force: true });
-  const response = await autoUpdater.netSession.fetch(state.packageUrl, { cache: 'no-store' });
+  let offset = 0;
+  let resumeTag = '';
+  try {
+    const record = JSON.parse(fs.readFileSync(`${partialPath}.json`, 'utf8'));
+    if (record.url === state.packageUrl && /^"[^"\r\n]+"$/.test(record.etag)) {
+      offset = fs.statSync(partialPath).size;
+      resumeTag = record.etag;
+    }
+  } catch {}
+  const downloadController = new AbortController();
+  codexDownloadController = downloadController;
+  let idleTimer;
+  const resetIdle = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => downloadController.abort(new Error('Codex download received no data for 30 seconds. Please retry.')), 30_000);
+  };
+  resetIdle();
+  let response;
+  try {
+    response = await codexUpdateSession().fetch(state.packageUrl, {
+      cache: 'no-store', signal: downloadController.signal,
+      headers: offset > 0 ? { Range: `bytes=${offset}-`, 'If-Range': resumeTag } : {},
+    });
+  } catch (error) { clearTimeout(idleTimer); throw error; }
+  clearTimeout(idleTimer);
+  if (response.status === 416 && offset > 0) {
+    downloadController.abort();
+    fs.rmSync(`${partialPath}.json`, { force: true });
+    throw new Error('The saved download range is no longer available. Retry to download a fresh Codex package.');
+  }
   if (response.status === 404) throw new Error('CODEX_PACKAGE_PROPAGATING');
   if (!response.ok || !response.body) throw new Error(`The official Codex package returned HTTP ${response.status}.`);
   if (new URL(response.url || state.packageUrl).protocol !== 'https:') throw new Error('The official Codex package redirected to an insecure URL.');
-  const total = Number(response.headers.get('content-length')) || 0;
+  let total = Number(response.headers.get('content-length')) || 0;
+  if (response.status === 206) {
+    const range = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(response.headers.get('content-range') || '');
+    if (!offset || !range || Number(range[1]) !== offset || Number(range[2]) + 1 !== Number(range[3])
+      || response.headers.get('etag') !== resumeTag || (total && total !== Number(range[3]) - offset)) {
+      downloadController.abort();
+      fs.rmSync(`${partialPath}.json`, { force: true });
+      throw new Error('Invalid resumed Codex download range; retry to download a fresh package.');
+    }
+    total = Number(range[3]);
+  } else {
+    offset = 0;
+  }
+  const etag = response.headers.get('etag') || '';
+  const canResume = /^"[^"\r\n]+"$/.test(etag);
+  fs.rmSync(`${partialPath}.json`, { force: true });
   const hash = crypto.createHash('sha256');
-  const handle = await fs.promises.open(partialPath, 'w');
-  let received = 0;
+  if (offset) for await (const bytes of fs.createReadStream(partialPath)) hash.update(bytes);
+  const handle = await fs.promises.open(partialPath, offset ? 'a' : 'w');
+  let received = offset;
   let downloadError = null;
+  const startedAt = Date.now();
+  const reportProgress = progressReporter(publishCodexUpdateState);
+  const downloadProgress = () => ({
+    status: 'downloading', phase: 'downloading',
+    percent: total > 0 ? Math.max(1, Math.min(89, Math.round(received / total * 89))) : 1,
+    bytesDownloaded: received, totalBytes: total,
+    bytesPerSecond: Math.round((received - offset) / Math.max(0.001, (Date.now() - startedAt) / 1000)),
+  });
   try {
+    resetIdle();
     for await (const chunk of response.body) {
+      resetIdle();
       const bytes = Buffer.from(chunk);
-      await handle.write(bytes);
+      let written = 0;
+      while (written < bytes.length) {
+        const result = await handle.write(bytes, written, bytes.length - written);
+        if (!result.bytesWritten) throw new Error('Failed to write the Codex update package.');
+        written += result.bytesWritten;
+      }
       hash.update(bytes);
       received += bytes.length;
-      publishCodexUpdateState({
-        status: 'downloading', phase: 'downloading',
-        percent: total > 0 ? Math.max(1, Math.min(89, Math.round(received / total * 89))) : 1,
-      });
+      reportProgress(downloadProgress());
     }
+    if (downloadController.signal.aborted) throw downloadController.signal.reason;
+    reportProgress(downloadProgress(), true);
   } catch (error) {
     downloadError = error;
   } finally {
+    clearTimeout(idleTimer);
     await handle.close();
   }
   if (downloadError) {
-    fs.rmSync(partialPath, { force: true });
+    if (canResume && received > 0) writeUpdateSnapshot(`${partialPath}.json`, { url: state.packageUrl, etag });
+    else fs.rmSync(partialPath, { force: true });
     throw downloadError;
   }
   if (total > 0 && received !== total) {
-    fs.rmSync(partialPath, { force: true });
+    if (canResume && received > 0 && received < total) writeUpdateSnapshot(`${partialPath}.json`, { url: state.packageUrl, etag });
+    else fs.rmSync(partialPath, { force: true });
     throw new Error(`The Codex package download was incomplete (${received}/${total} bytes).`);
   }
   fs.rmSync(finalPath, { force: true });
   fs.renameSync(partialPath, finalPath);
-  return { path: finalPath, bytes: received, sha256: hash.digest('hex') };
+  const result = { path: finalPath, bytes: received, sha256: hash.digest('hex') };
+  writeUpdateSnapshot(`${finalPath}.json`, { url: state.packageUrl, bytes: result.bytes, sha256: result.sha256 });
+  return result;
 }
 
 async function readCodexPackageMetadata(packagePath) {
@@ -831,10 +909,10 @@ async function installCodexPackage(packagePath) {
 
 async function waitForInstalledCodexVersion(targetVersion, timeoutMs = 5 * 60_000) {
   const deadline = Date.now() + timeoutMs;
-  let installed = readInstalledCodexPackageState();
+  let installed = await readInstalledCodexPackageState();
   while ((!installed.installed || comparePackageVersions(installed.version, targetVersion) < 0) && Date.now() < deadline) {
     await delay(500);
-    installed = readInstalledCodexPackageState();
+    installed = await readInstalledCodexPackageState();
   }
   return installed;
 }
@@ -857,25 +935,32 @@ async function confirmCloseCodex(locale, state) {
 }
 
 async function installCodexWindowsUpdate({ locale = 'en-US' } = {}) {
-  let state = await fetchOfficialCodexUpdateState();
+  try {
+  let state = reusableUpdateCheck(codexUpdateState) ? { ...codexUpdateState } : await fetchOfficialCodexUpdateState();
+  if (state.status === 'available') {
+    const installed = await readInstalledCodexPackageState();
+    state = { ...state, ...installed };
+    if (installed.installed && comparePackageVersions(installed.version, state.latestVersion) >= 0) {
+      return publishCodexUpdateState({ ...installed, status: 'current', phase: 'current', updateAvailable: false, percent: 100 });
+    }
+  }
   if (state.status === 'error') return state;
+  if (!['available', 'current', 'propagating'].includes(state.status)) return state;
   if (!state.updateAvailable) return publishCodexUpdateState({ status: 'current', phase: 'current', percent: 100 });
   if (!state.packageReady) return publishCodexUpdateState({ status: 'propagating', phase: 'propagating', percent: 0 });
-  if (codexDesktopIsRunning()) {
+  if (state.updateSource === 'store' && await codexDesktopIsRunning()) {
     const confirmed = await confirmCloseCodex(locale, state);
     if (!confirmed) return publishCodexUpdateState({ status: 'available', phase: 'available', cancelled: true });
     publishCodexUpdateState({ status: 'closing', phase: 'closing', percent: 0, cancelled: false });
     await closeCodexDesktop();
   }
-  let downloadedPath = '';
-  try {
     if (state.updateSource === 'store') {
       const versionBeforeStoreUpdate = state.version;
       publishCodexUpdateState({ status: 'store-installing', phase: 'store-downloading', percent: 0, error: '' });
       const result = await runCodexStoreHelper('install', { targetVersion: state.latestVersion });
       const installed = await waitForInstalledCodexVersion(
         state.latestVersion,
-        result.canSilent === false ? 2_000 : 5 * 60_000,
+        !result.ok || result.canSilent === false || !['Completed', 'NoUpdates'].includes(String(result.overallState || '')) ? 2_000 : 5 * 60_000,
       );
       publishCodexUpdateState({ storeResult: result, storeInstalledVersion: installed.version || '' });
       if (result.ok && ['Completed', 'NoUpdates'].includes(String(result.overallState || ''))
@@ -887,9 +972,9 @@ async function installCodexWindowsUpdate({ locale = 'en-US' } = {}) {
           error: '',
         });
       }
-      const packageResponse = await autoUpdater.netSession.fetch(state.packageUrl, { method: 'HEAD', cache: 'no-store' });
+      const packageResponse = await codexUpdateSession().fetch(state.packageUrl, { method: 'HEAD', cache: 'no-store', signal: AbortSignal.timeout(15_000) });
       if (!packageResponse.ok) {
-        if (result.ok && ['Completed', 'NoUpdates'].includes(String(result.overallState || '')) && installed.installed) {
+        if ([404, 410].includes(packageResponse.status) && result.ok && ['Completed', 'NoUpdates'].includes(String(result.overallState || '')) && installed.installed) {
           return publishCodexUpdateState({
             ...installed,
             status: 'propagating', phase: 'propagating', percent: 0,
@@ -910,9 +995,14 @@ async function installCodexWindowsUpdate({ locale = 'en-US' } = {}) {
     }
     publishCodexUpdateState({ status: 'downloading', phase: 'downloading', percent: 1, error: '' });
     const download = await downloadCodexPackage(state);
-    downloadedPath = download.path;
     publishCodexUpdateState({ status: 'verifying', phase: 'verifying', percent: 90, sha256: download.sha256 });
     const metadata = validateCodexPackageMetadata(await readCodexPackageMetadata(download.path), state.latestVersion);
+    if (await codexDesktopIsRunning()) {
+      const confirmed = await confirmCloseCodex(locale, state);
+      if (!confirmed) return publishCodexUpdateState({ status: 'available', phase: 'available', cancelled: true });
+      publishCodexUpdateState({ status: 'closing', phase: 'closing', percent: 92, cancelled: false });
+      await closeCodexDesktop();
+    }
     publishCodexUpdateState({ status: 'installing', phase: 'installing', percent: 94 });
     await installCodexPackage(download.path);
     const installed = await waitForInstalledCodexVersion(state.latestVersion);
@@ -920,6 +1010,7 @@ async function installCodexWindowsUpdate({ locale = 'en-US' } = {}) {
       throw new Error(`Windows completed deployment, but Codex is still v${installed.version || 'unknown'}.`);
     }
     fs.rmSync(download.path, { force: true });
+    fs.rmSync(`${download.path}.json`, { force: true });
     return publishCodexUpdateState({
       ...installed,
       status: 'completed', phase: 'completed', percent: 100,
@@ -927,7 +1018,11 @@ async function installCodexWindowsUpdate({ locale = 'en-US' } = {}) {
       verifiedPackage: metadata, error: '',
     });
   } catch (error) {
-    if (downloadedPath) fs.rmSync(downloadedPath, { force: true });
+    // Retain the package for retry; cache hash and package identity are checked
+    // again before deployment, which also enforces Windows signature checks.
+    if (codexDownloadController?.signal.reason?.message === 'CODEX_DOWNLOAD_CANCELLED') {
+      return publishCodexUpdateState({ status: 'available', phase: 'available', cancelled: true, error: '', percent: 0 });
+    }
     const propagating = String(error.message || error) === 'CODEX_PACKAGE_PROPAGATING';
     return publishCodexUpdateState({
       status: propagating ? 'propagating' : 'error',
@@ -935,8 +1030,10 @@ async function installCodexWindowsUpdate({ locale = 'en-US' } = {}) {
       percent: 0,
       error: propagating ? '' : String(error.message || error),
     });
-  }
+  } finally { codexDownloadController = null; }
 }
+
+const installCodexWindowsUpdateOnce = singleFlight(installCodexWindowsUpdate);
 
 function registerUpdaterIpc() {
   ipcMain.handle('updates:get-state', () => updateState);
@@ -960,7 +1057,12 @@ function registerUpdaterIpc() {
     return true;
   });
   ipcMain.handle('codex-updates:get-state', () => fetchOfficialCodexUpdateState());
-  ipcMain.handle('codex-updates:install', (_event, options = {}) => installCodexWindowsUpdate(options));
+  ipcMain.handle('codex-updates:install', (_event, options = {}) => installCodexWindowsUpdateOnce(options));
+  ipcMain.handle('codex-updates:cancel-download', () => {
+    if (codexUpdateState.status !== 'downloading' || !codexDownloadController) return false;
+    codexDownloadController.abort(new Error('CODEX_DOWNLOAD_CANCELLED'));
+    return true;
+  });
   ipcMain.handle('notifications:show', (_event, payload = {}) => {
     if (!Notification.isSupported()) return false;
     const title = String(payload.title || 'Codex Navo').trim().slice(0, 120) || 'Codex Navo';

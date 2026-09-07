@@ -217,9 +217,9 @@ test('账号唤醒具备真实 Codex 调用、单账号入口、批量入口与�
   assert.match(server, /'exec', '--ephemeral'/);
   assert.match(server, /'--json'/);
   assert.match(server, /parseWakeJsonl/);
-  assert.match(server, /WAKE_ACTIVATION_PROMPT/);
+  assert.doesNotMatch(server, /WAKE_ACTIVATION_PROMPT/);
   assert.match(server, /verifyWakeWindow/);
-  assert.match(server, /quotaWindowActive: true/);
+  assert.match(server, /quotaWindowActive: verification.active/);
   assert.match(server, /accountTaskEnvironment\(account/);
   assert.match(server, /Date\.now\(\) - lastProbe < 60_000/);
   assert.match(server, /Date\.now\(\) - lastAttempt < 5 \* 60_000/);
@@ -255,7 +255,8 @@ test('账号池支持可记忆的列表与卡片双视图', () => {
   assert.match(client, /classList\.toggle\('account-grid'/);
   assert.match(styles, /\.account-list\.account-grid/);
   assert.match(styles, /repeat\(3, minmax\(0, 1fr\)\)/);
-  assert.match(styles, /grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\) repeat\(4, 38px\)/);
+  assert.match(styles, /\.account-grid \.account-actions \{[^}]*display: grid;[^}]*grid-template-columns: repeat\(auto-fit, minmax\(30px, 1fr\)\);/);
+  assert.match(styles, /\.account-grid \.account-action-label \{ display: none; \}/);
 });
 
 test('账号池展示本机实时用量、历史范围和每账号明细', () => {
@@ -644,7 +645,7 @@ test('Navo API cards are always shown and use a dedicated account-pool proxy rou
   assert.match(server, /function apiKeyNetworkId\(keyId\)/);
   assert.match(server, /apiKeyNetworkMatch/);
   assert.match(server, /accountPoolDispatcher\(keyRecord\)/);
-  assert.match(styles, /\.account-grid \.api-virtual-card \.account-actions \{[^}]*repeat\(3, 38px\)/s);
+  assert.match(styles, /\.account-grid \.api-virtual-card \.account-actions \{[^}]*padding-top: 14px;/s);
 });
 
 test('Codex launch dialog keeps actions visible and omits the redundant language hint', () => {
@@ -749,7 +750,9 @@ test('all-session projects start collapsed and the desktop sidebar stays viewpor
 test('usage labels stay concise without a redundant approximation symbol', () => {
   const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   assert.doesNotMatch(client, /estimatedCostApproximate \? '≈'/);
-  assert.match(client, /const prefix = usage\.unpricedRequests \? '≥' : ''/);
+  const costFormatter = client.slice(client.indexOf('function formatUsageCost('), client.indexOf('\nfunction ', client.indexOf('function formatUsageCost(') + 1));
+  assert.doesNotMatch(costFormatter, /≥|US\$/);
+  assert.match(client, /次待定价/);
   assert.match(client, /输入与输出合计/);
   assert.match(client, /<span>输入<\/span>[\s\S]*<small>缓存率 \$\{formatCacheHitRate\(totals\)\}<\/small>/);
   assert.doesNotMatch(client, /输入（含缓存）|其中缓存/);
@@ -920,7 +923,8 @@ test('plan expiration is automatically read from the signed-in ChatGPT account',
   assert.doesNotMatch(client, /data-action="plan-expiry"|到期 未设置/);
   assert.match(client, /到期 自动检测中/);
   assert.match(server, /refreshAccountPlanExpiry/);
-  assert.match(server, /Promise\.allSettled\(accounts\.map/);
+  assert.match(server, /settledMap\(\[\.\.\.accounts\], 2,/);
+  assert.match(server, /if \(planExpiryRefreshRun\) return planExpiryRefreshRun/);
   assert.match(server, /tokens\.access_token/);
   assert.match(protocol, /backend-api\/accounts\/check\/v4-2023-04-27/);
   assert.match(protocol, /entitlement\?\.expires_at/);

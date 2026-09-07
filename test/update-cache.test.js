@@ -1,0 +1,20 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { hashFile, reusablePackage } = require('../lib/update-cache');
+test('complete package cache requires matching URL, size and digest', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'navo-update-cache-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 3 }));
+  const file = path.join(root, 'package.msix');
+  fs.writeFileSync(file, 'abc');
+  const record = { url: 'https://example.test/package', bytes: 3, sha256: await hashFile(file) };
+  fs.writeFileSync(`${file}.json`, JSON.stringify(record));
+  assert.equal((await reusablePackage(file, record.url)).bytes, 3);
+  assert.equal(await reusablePackage(file, `${record.url}2`), null);
+  fs.writeFileSync(file, 'xyz');
+  assert.equal(await reusablePackage(file, record.url), null);
+  fs.unlinkSync(file);
+  assert.equal(await reusablePackage(file, record.url), null);
+});

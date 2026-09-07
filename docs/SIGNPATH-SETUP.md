@@ -1,6 +1,8 @@
 # SignPath Foundation setup
 
-This document contains the project-side configuration required after SignPath Foundation approves the Codex Navo application.
+> Status: inactive. Codex Navo is currently distributed without code signing. This document is retained only as a future setup reference if a signing application is approved.
+
+This document contains the project-side configuration that would be required after SignPath Foundation approves a future Codex Navo application.
 
 ## SignPath project values
 
@@ -44,7 +46,7 @@ Use a manual-approval release policy connected to the `1080ssf/codex-navo` GitHu
 
 ## Release process
 
-1. Push a version tag such as `v1.2.119`, or run **Build and sign Windows release** manually.
+1. Restore the SignPath steps in the release workflow after approval, then push a version tag or run the workflow manually.
 2. Wait for tests and the unsigned GitHub artifact build to complete.
 3. Review and approve the signing request in SignPath.
 4. Download the `codex-navo-signed-<version>` artifact from the completed GitHub Actions run.

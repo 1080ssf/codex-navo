@@ -63,7 +63,9 @@ test('额度窗口会转换为可用百分比并优先显示 5 小时额度', ()
     usdBalance: '0.48',
     usdPerCredit: 0.04,
   });
-  assert.deepEqual(quota.resetCredits, { availableCount: 3, expiresAt: '2026-08-23T00:00:00.000Z' });
+  assert.equal(quota.resetCredits.availableCount, 3);
+  assert.equal(quota.resetCredits.expiresAt, '2026-08-23T00:00:00.000Z');
+  assert.equal(quota.resetCredits.credits.length, 1);
   assert.equal(windowLabel({ windowDurationMins: 300 }), '5 小时额度');
 });
 
@@ -82,7 +84,8 @@ test('Codex 本地 token_count 会拆分输入、缓存、输出并按公开单�
     reasoning_output_tokens: 4_000,
   });
   assert.deepEqual(usage, { input: 100_000, cachedInput: 80_000, cacheWriteInput: 0, output: 10_000, reasoningOutput: 4_000 });
-  assert.equal(estimateCost('gpt-5.6-sol', usage), 0.44);
+  assert.equal(estimateCost('gpt-5.6-sol', usage), 0.312);
+  assert.equal(estimateCost('gpt-6-astra', usage), 0.78);
 });
 
 test('用量范围支持今日、昨日和滚动天数', () => {
@@ -119,7 +122,7 @@ test('Codex 用量跟踪器只统计基线后新增的真实 JSONL 事件', () =
     assert.equal(summary.totals.requests, 1);
     assert.equal(summary.accounts['account-test'].totalTokens, 22_000);
     assert.equal(summary.accounts['account-test'].reasoningOutputTokens, 800);
-    assert.equal(summary.totals.estimatedCostUsd, 0.06875);
+    assert.equal(summary.totals.estimatedCostUsd, 0.055);
     const archived = path.join(root, 'shared', 'archived_sessions');
     fs.mkdirSync(archived, { recursive: true });
     fs.renameSync(rollout, path.join(archived, path.basename(rollout)));

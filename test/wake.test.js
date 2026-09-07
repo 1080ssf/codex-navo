@@ -3,6 +3,15 @@ const assert = require('node:assert/strict');
 const { detectQuotaReset, isQuotaWindowActive, normalizeWakeSettings, primaryQuotaWindow, quotaObservation, shouldWakeAccount } = require('../lib/wake');
 const { readModelCatalog } = require('../lib/model-catalog');
 
+test('missing quota and repeated observations cannot prove an active window', () => {
+  const now = new Date('2026-09-02T10:00:30Z');
+  const missing = quotaObservation({ windows: [{ windowDurationMins: 300, remainingPercent: null }] });
+  assert.equal(missing.remainingPercent, null);
+  assert.equal(isQuotaWindowActive(missing, missing, now), false);
+  const full = { windowDurationMins: 300, remainingPercent: 100, resetsAt: 1788361200, observedAt: now.toISOString() };
+  assert.equal(isQuotaWindowActive(full, full, now), false);
+});
+
 test('唤醒设置默认关闭并限制非法输入', () => {
   const settings = normalizeWakeSettings({ enabled: true, mode: 'unknown', dailyTime: '25:90', prompt: '  ' });
   assert.equal(settings.enabled, true);
@@ -72,8 +81,8 @@ test('5 小时额度窗口只在额度已消耗或重置时间固定后视为已
     now,
   ), true);
   assert.equal(isQuotaWindowActive(
-    { windowDurationMins: 300, remainingPercent: 100, resetsAt: 1788361200 },
-    { windowDurationMins: 300, remainingPercent: 100, resetsAt: 1788361200 },
+    { windowDurationMins: 300, remainingPercent: 100, resetsAt: 1788361200, observedAt: '2026-09-02T10:00:00Z' },
+    { windowDurationMins: 300, remainingPercent: 100, resetsAt: 1788361200, observedAt: '2026-09-02T10:00:12Z' },
     now,
   ), true);
   assert.equal(isQuotaWindowActive(

@@ -160,6 +160,8 @@ function applyTheme() {
 }
 applyTheme();
 const englishUi = new Map([
+  ['费用估值', 'Cost estimate'], ['费用估值 · 不完整', 'Cost estimate · partial'],
+  ['缺少模型明细的历史记录不会猜算', 'Historical records without model details are not guessed'], ['套餐待识别', 'Unrecognized plan'],
   ['账号管理', 'Accounts'], ['网络代理', 'Network'], ['授权迁移', 'Authorization'], ['会话管理', 'Sessions'],
   ['通知提醒', 'Notifications'], ['API 服务', 'API Service'], ['唤醒设置', 'Wake Settings'], ['语言设置', 'Language'], ['应用设置', 'Application Settings'],
   ['账号池', 'Account Pool'], ['添加账号', 'Add Account'], ['本机用量', 'Local Usage'], ['今日', 'Today'], ['昨日', 'Yesterday'],
@@ -380,6 +382,7 @@ const englishUi = new Map([
   ['这是一个连续的官方流程，完成后会自动入池，无需开启设备代码授权。', 'This is one continuous official flow. The account is added automatically when complete; device-code authorization is not required.'],
   ['正在处理…', 'Processing…'], ['正在导入…', 'Importing…'], ['正在读取官方版本信息。', 'Loading official version information.'], ['正在关闭 Codex，请稍候…', 'Closing Codex…'],
   ['正在后台下载更新，账号数据和登录环境不会被覆盖。', 'Downloading the update in the background. Account data and sign-in environments are preserved.'],
+  ['请求已完成，额度计时尚待确认', 'Request completed; quota window confirmation is pending'],
   ['正在唤醒账号', 'Waking account'], ['正在获取…', 'Loading…'], ['正在检查 OpenAI 官方版本与安装包状态…', 'Checking the official OpenAI version and installer status…'],
   ['正在连接…', 'Connecting…'], ['正在启动 Codex', 'Launching Codex'], ['正在启动该账号的独立登录流程。', 'Starting this account’s isolated sign-in flow.'],
   ['正在识别…', 'Identifying…'], ['正在识别并导入临时账号…', 'Identifying and importing temporary accounts…'],
@@ -618,8 +621,10 @@ function renderApplicationUpdate() {
             : status === 'error'
               ? (applicationUpdate.error || '无法连接更新服务，请稍后重试。')
               : '检查 GitHub Releases 是否有新版本。';
-  elements.updateDialogCopy.textContent = statusCopy;
-  if (elements.navoSettingsUpdateCopy) elements.navoSettingsUpdateCopy.textContent = statusCopy;
+  const transferCopy = status === 'downloading' ? formatUpdateTransfer(applicationUpdate) : '';
+  const detailedCopy = statusCopy + (transferCopy ? ` · ${transferCopy}` : '');
+  elements.updateDialogCopy.textContent = detailedCopy;
+  if (elements.navoSettingsUpdateCopy) elements.navoSettingsUpdateCopy.textContent = detailedCopy;
   if (elements.navoSettingsVersion) elements.navoSettingsVersion.textContent = currentVersion ? `v${currentVersion}` : '读取中';
 
   elements.updateProgress.hidden = status !== 'downloading';
@@ -733,7 +738,7 @@ function formatPlan(planType) {
     edu: 'EDU',
     free: 'FREE',
   };
-  return labels[normalized] || normalized.toUpperCase();
+  return labels[normalized] || (normalized ? '套餐待识别' : '');
 }
 
 function formatUsdBalance(credits) {
@@ -769,8 +774,7 @@ function formatUsageCost(usage) {
   if (!usage || !usage.pricedRequests) return '—';
   const value = Number(usage.estimatedCostUsd) || 0;
   const digits = value < 0.01 ? 4 : 2;
-  const prefix = usage.unpricedRequests ? '≥' : '';
-  return `${prefix}US$${value.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+  return `$${value.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 }
 
 function formatCacheHitRate(usage) {
@@ -796,7 +800,7 @@ function renderUsage() {
   elements.usageLedger.innerHTML = `
     <div class="usage-primary">
       <div><span>总 Token</span>${formatYiTokenNote(totals.totalTokens)}<strong title="${formatTokenCount(totals.totalTokens)}">${formatTokenCount(totals.totalTokens, true)}</strong><small>输入与输出合计</small></div>
-      <div class="usage-cost"><span>Token 估值</span><strong>${formatUsageCost(totals)}</strong><small>${totals.unpricedRequests ? `${formatTokenCount(totals.unpricedRequests)} 次待定价` : '按 API Token 公价估算'}</small></div>
+      <div class="usage-cost"><span>${totals.unpricedRequests ? '费用估值 · 不完整' : '费用估值'}</span><strong>${formatUsageCost(totals)}</strong><small>${totals.unpricedRequests ? `${formatTokenCount(totals.unpricedRequests)} 次待定价` : '按 API Token 公价估算'}</small>${totals.unpricedRequests ? '<small>缺少模型明细的历史记录不会猜算</small>' : ''}</div>
     </div>
     <div class="usage-breakdown">
       <div class="usage-metric"><span>模型调用</span><strong>${formatTokenCount(totals.requests)}</strong><small>${state.usageRange === 'today' ? '近实时记录' : '所选时段'}</small></div>
@@ -1791,7 +1795,7 @@ function formatReset(timestamp) {
 }
 
 function quotaLabel(window) {
-  return Number(window.windowDurationMins) >= 6 * 24 * 60 ? 'Weekly' : window.label;
+  return Number(window.windowDurationMins) >= 6 * 24 * 60 ? '周额度' : window.label;
 }
 
 function renderQuota(account) {
@@ -1932,15 +1936,15 @@ function render() {
       : '';
     const planType = account.quota?.planType;
     const planBadge = planType
-      ? `<span class="plan-badge plan-${escapeHtml(String(planType).toLowerCase())}">${escapeHtml(formatPlan(planType))}</span>`
+      ? `<span class="plan-badge" title="${escapeHtml(planType)}">${escapeHtml(formatPlan(planType))}</span>`
       : '';
     const expiryMs = Date.parse(account.planExpiresAt || '');
     const remainingDays = Number.isFinite(expiryMs) ? Math.max(0, Math.ceil((expiryMs - Date.now()) / 86_400_000)) : null;
-    const expiryBadge = planType
+    const expiryBadge = planType && planType !== 'free'
       ? `<span class="expiry-badge" title="${remainingDays == null ? escapeHtml(account.planExpiryError || '正在自动读取官方套餐到期时间') : `套餐到期：${escapeHtml(new Date(expiryMs).toLocaleDateString())}`}">${remainingDays == null ? (account.planExpiryCheckedAt ? '到期 暂未读取' : '到期 自动检测中') : `剩余 ${remainingDays} 天`}</span>`
       : '';
-    const resetCount = Number(account.quota?.resetCredits?.availableCount);
-    const resetBadge = Number.isFinite(resetCount) ? `<span class="reset-credit-badge" title="Codex 返回的可用额度重置卡">重置卡 ${Math.max(0, Math.floor(resetCount))} 张</span>` : '';
+    const resetCount = account.quota?.resetCredits?.availableCount;
+    const resetBadge = typeof resetCount === 'number' && Number.isFinite(resetCount) ? `<button type="button" data-tool="reset-credits" class="reset-credit-badge" title="Codex 返回的可用额度重置卡">重置卡 ${Math.max(0, Math.floor(resetCount))} 张</button>` : '';
     const usdBalance = formatUsdBalance(account.quota?.credits);
     const balanceBadge = usdBalance
       ? `<span class="balance-badge" title="按 Codex 官方美国定价 US$0.04/Credit 换算">余额 ${escapeHtml(usdBalance)}</span>`
@@ -1976,6 +1980,8 @@ function render() {
     }
     const wakeTitle = account.wake?.running
       ? '正在唤醒账号'
+      : account.wake?.lastWakeStatus === 'pending'
+        ? '请求已完成，额度计时尚待确认'
       : account.wake?.lastWakeStatus === 'failed'
         ? `上次唤醒失败：${escapeHtml(account.wake.lastWakeError || '未知错误')}`
         : '唤醒账号（发送一次真实 Codex 请求）';
@@ -1985,7 +1991,7 @@ function render() {
       <div class="account-overview">
         <div class="account-identity">
           <div class="identity-title"><h3>${escapeHtml(account.label)}</h3></div>
-          ${(planBadge || expiryBadge || resetBadge || balanceBadge || sessionBadge || healthBadge || networkBadge) ? `<div class="identity-badges">${planBadge}${expiryBadge}${resetBadge}${balanceBadge}${sessionBadge}${healthBadge}${networkBadge}</div>` : ''}
+          ${(planBadge || expiryBadge || resetBadge || balanceBadge || sessionBadge || healthBadge || networkBadge) ? `<div class="identity-badges">${planBadge}${expiryBadge}${resetBadge}${balanceBadge}${sessionBadge}${healthBadge}<span class="identity-network-row">${networkBadge}</span></div>` : ''}
           ${secondaryIdentity}
         </div>
       </div>
@@ -2010,6 +2016,7 @@ function render() {
   const groupHead = (kind, label, count) => `<button class="account-group-head" type="button" data-account-group="${kind}" aria-expanded="${!state.accountGroups[kind]}"><span>${escapeHtml(label)}</span><small>${count}</small><span class="fold-icon" aria-hidden="true"><span class="ui-chevron"></span></span></button>`;
   elements.accounts.innerHTML = `${apiAccountCount ? groupHead('api', 'API Codex', apiAccountCount) : ''}${state.accountGroups.api ? '' : apiCards}${relayAccounts.length ? groupHead('relay', '临时账号', relayAccounts.length) : ''}${state.accountGroups.relay ? '' : relayCards}${regularAccounts.length ? groupHead('regular', '普通账号', regularAccounts.length) : ''}${state.accountGroups.regular ? '' : regularCards}`;
   setLaunchControlsDisabled(state.launchProgress?.active === true);
+  window.NavoAccountTools?.decorate();
 }
 
 function editingSurfaceActive() {
@@ -2136,7 +2143,9 @@ elements.accounts.addEventListener('click', async (event) => {
     } else if (action === 'wake') {
       const woken = await api(`/api/accounts/${card.dataset.id}/wake`, { method: 'POST', body: JSON.stringify({ operator: currentOperator }) });
       const evidence = woken.wake?.lastWakeEvidence || {};
-      showToast(`5 小时额度窗口已开始计时，重置时间：${formatReset(evidence.resetAt)}`);
+      showToast(evidence.quotaWindowActive
+        ? `5 小时额度窗口已开始计时，重置时间：${formatReset(evidence.resetAt)}`
+        : '请求已完成，额度计时尚待确认');
     } else if (action === 'cancel-authorization') {
       await api(`/api/accounts/${card.dataset.id}/cancel-authorization`, {
         method: 'POST',
@@ -3086,16 +3095,32 @@ function renderCodexDesktopUpdate() {
     error: `Codex update failed: ${info.error || 'Check the network and try again.'}`,
   };
   elements.codexUpdateCopy.textContent = copies[info.status] || copies.idle;
+  if (info.status === 'downloading' && Number(info.bytesDownloaded) > 0) {
+    elements.codexUpdateCopy.textContent += ` · ${formatUpdateTransfer(info)}`;
+  }
   elements.codexUpdateProgress.hidden = !busy;
   elements.codexUpdateProgress.classList.toggle('indeterminate', info.status === 'store-installing' && percent === 0);
   elements.codexUpdateProgressBar.style.width = info.status === 'store-installing' && percent === 0 ? '32%' : `${percent}%`;
   elements.codexUpdateProgressLabel.textContent = info.status === 'store-installing' && percent === 0 ? '…' : `${percent}%`;
-  elements.codexUpdateAction.disabled = busy;
-  if (busy) elements.codexUpdateAction.textContent = chinese ? '正在处理…' : 'Working…';
+  elements.codexUpdateAction.disabled = busy && info.status !== 'downloading';
+  if (info.status === 'downloading') elements.codexUpdateAction.textContent = chinese ? '取消' : 'Cancel';
+  else if (busy) elements.codexUpdateAction.textContent = chinese ? '正在处理…' : 'Working…';
   else if (info.updateAvailable && info.packageReady) elements.codexUpdateAction.textContent = info.installed
     ? (chinese ? '立即更新' : 'Update now')
     : (chinese ? '立即安装' : 'Install now');
   else elements.codexUpdateAction.textContent = chinese ? '重新检查' : 'Check again';
+}
+
+function formatUpdateTransfer(info) {
+  const valid = (value) => Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : 0;
+  const received = valid(info.bytesDownloaded);
+  if (!received) return '';
+  const total = valid(info.totalBytes);
+  const speed = valid(info.bytesPerSecond);
+  const megabytes = (value) => (value / (1024 * 1024)).toFixed(1);
+  const seconds = total > received && speed > 0 ? Math.ceil((total - received) / speed) : 0;
+  const eta = seconds > 0 ? ` · ETA ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : '';
+  return `${megabytes(received)} MB${total ? ` / ${megabytes(total)} MB` : ''}${speed ? ` · ${megabytes(speed)} MB/s` : ''}${eta}`;
 }
 
 async function refreshCodexUpdateState() {
@@ -3111,6 +3136,10 @@ async function refreshCodexUpdateState() {
 }
 
 async function installCodexUpdate() {
+  if (codexDesktopUpdate.status === 'downloading') {
+    await window.codexUpdater?.cancelCodexDownload?.();
+    return;
+  }
   if (!window.codexUpdater?.installCodexUpdate) return refreshCodexUpdateState();
   if (!(codexDesktopUpdate.updateAvailable && codexDesktopUpdate.packageReady)) return refreshCodexUpdateState();
   try {

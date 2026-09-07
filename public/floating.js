@@ -39,6 +39,16 @@ const messages = {
 
 function t(key) { return messages[locale][key] || messages.en[key] || key; }
 
+function floatingAccountBadge(account) {
+  if (account.type === 'api') return 'API CODEX';
+  if (account.type !== 'account') return t(account.type === 'external' ? 'external' : 'offline');
+  const plan = String(account.planType || '').trim().toLowerCase();
+  const labels = { free: 'FREE', plus: 'Plus', pro: 'Pro', team: 'Team', business: 'Business', enterprise: 'Enterprise', edu: 'Edu' };
+  // Only show a multiplier explicitly present in the returned plan name.
+  const tier = plan.match(/^pro[ _-]?(?:x|×)[ _-]?(5|20)$/);
+  return tier ? `Pro×${tier[1]}` : labels[plan] || t('account');
+}
+
 function applyLocale() {
   document.documentElement.lang = locale;
   document.querySelectorAll('[data-i18n]').forEach((element) => { element.textContent = t(element.dataset.i18n); });
@@ -113,7 +123,7 @@ function render(data = {}) {
   const usage = data.usage || {};
   const accountLabel = account.label === 'External Codex' ? t('externalCodex') : account.label === 'Codex not running' ? t('notRunning') : account.label;
   elements.account_name.textContent = accountLabel || t('notRunning');
-  elements.account_type.textContent = account.type === 'api' ? 'API CODEX' : account.type === 'account' ? t('account') : account.type === 'external' ? t('external') : t('offline');
+  elements.account_type.textContent = floatingAccountBadge(account);
   renderQuotaWindows(account.quotaWindows || []);
   elements.usage_input.textContent = compactNumber(usage.input);
   elements.usage_cache.textContent = compactNumber(usage.cachedInput);

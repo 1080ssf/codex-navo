@@ -1,4 +1,6 @@
 const crypto = require('node:crypto');
+const { settledMap } = require('./lib/bounded-work');
+const { ModelDiagnostics, inspectProbeResponse } = require('./lib/model-diagnostics');
 const fs = require('node:fs');
 const http = require('node:http');
 const net = require('node:net');
@@ -15,8 +17,10 @@ const {
   normalizeOperator,
   validateAccountId,
 } = require('./lib/core');
-const { hasSpendableCredits, readCodexModels, readCodexQuota, warmCodexAppServer } = require('./lib/codex-quota');
+const { hasSpendableCredits, readCodexModels, readCodexQuota, warmCodexAppServer, consumeCodexResetCredit } = require('./lib/codex-quota');
+const { ResetCreditOperations } = require('./lib/reset-credit-operations');
 const { CodexUsageTracker } = require('./lib/codex-usage');
+const { selectNewestCli } = require('./lib/codex-cli-selection');
 const { readModelCatalog } = require('./lib/model-catalog');
 const { detectQuotaReset, isQuotaWindowActive, localDateKey, normalizeWakeSettings, quotaObservation, shouldWakeAccount } = require('./lib/wake');
 const { isModelCompatibilityError, parseWakeJsonl, wakeFailureMessage } = require('./lib/wake-command');
@@ -244,6 +248,7 @@ const accountPoolCooldowns = new Map();
 const accountModelCapabilities = new Map();
 const protocolLoginImports = new Set();
 const wakeRuns = new Map();
+const wakeOperations = new Set();
 let wakeScheduleRunning = false;
 let usageTracker = null;
 const csrfToken = crypto.randomBytes(24).toString('base64url');
@@ -602,7 +607,7 @@ function findCodexCli() {
     'bin',
     'codex.exe',
   );
-  if (fs.existsSync(npmExecutable)) return npmExecutable;
+  const candidates = fs.existsSync(npmExecutable) ? [npmExecutable] : [];
 
   const managedBin = path.join(process.env.LOCALAPPDATA || '', 'OpenAI', 'Codex', 'bin');
   if (fs.existsSync(managedBin)) {
@@ -611,8 +616,10 @@ function findCodexCli() {
       .map((entry) => path.join(managedBin, entry.name, 'codex.exe'))
       .filter((candidate) => fs.existsSync(candidate))
       .sort((left, right) => fs.statSync(right).mtimeMs - fs.statSync(left).mtimeMs);
-    if (managedExecutables.length) return managedExecutables[0];
+    candidates.push(...managedExecutables);
   }
+
+  if (candidates.length) return selectNewestCli(candidates);
 
   throw new Error('没有找到 Codex CLI，无法启动首次设备授权');
 }
@@ -957,7 +964,18 @@ usageTracker = new CodexUsageTracker({
   getAccountHome: (account) => accountPaths(account).codexHomeDir,
   getActiveAccountId: () => readActiveCodexAuth()?.accountId || null,
   getSharedIntervals: codexUsageIntervals,
+  getExtraSources: () => accounts.map((account) => ({ accountId: account.id,
+    file: path.join(DATA_DIR, 'model-diagnostics', `${account.id}.jsonl`) })),
 });
+const apiPricingReconciliation = apiServiceManager.reconcileHistoricalCosts();
+const resetCreditOperations = new ResetCreditOperations(path.join(DATA_DIR, 'reset-credit-operations.json'));
+setImmediate(() => usageTracker.reconcileHistoricalCosts()
+  .then((result) => { if (result) audit('usage.pricing.reconciled', { result }); })
+  .catch((error) => audit('usage.pricing.failed', { result: error.message })));
+const usageRepricingTimer = setInterval(() => usageTracker.reconcileHistoricalCosts()
+  .then((result) => { if (result) audit('usage.pricing.reconciled', { result }); })
+  .catch((error) => audit('usage.pricing.failed', { result: error.message })), 60 * 60_000);
+usageRepricingTimer.unref?.();
 
 function accountAuthFile(account) {
   const { codexDir, codexHomeDir } = accountPaths(account);
@@ -1270,7 +1288,7 @@ async function forwardAccountPoolResponses({ keyRecord, model, body, upstreamHea
       }
       accountPoolLastUsed.set(account.id, Date.now());
       audit('api.pool.routed', { accountId: account.id, result: model });
-      return { upstream, accountId: account.id, cleanup: () => dispatcher?.close().catch(() => {}) };
+      return { upstream, accountId: account.id, attemptedAccountIds: [...failures.map((failure) => failure.accountId), account.id], cleanup: () => dispatcher?.close().catch(() => {}) };
     } catch (error) {
       if (dispatcher) await dispatcher.close().catch(() => {});
       if (signal?.aborted) throw error;
@@ -1454,7 +1472,7 @@ function recordWakeAttempt(account, trigger, status, { error = '', evidence = nu
   if (trigger === 'daily') next.lastDailyDate = localDateKey();
   if (trigger === 'after-reset') {
     const event = previous.pendingResetEvent;
-    if (status === 'success') {
+    if (status === 'success' || status === 'pending') {
       next.lastHandledResetEventKey = event?.key || previous.lastHandledResetEventKey || '';
       next.pendingResetEvent = null;
       next.lastResetAttemptAt = '';
@@ -1576,57 +1594,47 @@ async function refreshWakeQuota(account, environmentOverride = null) {
 
 async function verifyWakeWindow(account, environmentOverride = null) {
   const first = await refreshWakeQuota(account, environmentOverride);
-  if (Number(first?.remainingPercent) < 99.9) return { active: true, first, second: first };
+  if (isQuotaWindowActive(first, first)) return { active: true, first, second: first };
   if (!settings.mockLaunch) await new Promise((resolve) => setTimeout(resolve, 12_000));
   const second = await refreshWakeQuota(account, environmentOverride);
   return { active: isQuotaWindowActive(first, second), first, second };
 }
 
-const WAKE_ACTIVATION_PROMPT = 'This is a quota-window activation check. Return a numbered list from 1 through 120. Each item must contain one distinct short English sentence of at least 8 words. Do not use tools and do not omit any item.';
-
 async function wakeAccount(account, trigger = 'manual', operator = '本机用户', environmentOverride = null) {
+  if (wakeOperations.has(account.id)) throw new Error('该账号正在唤醒，请稍候');
+  wakeOperations.add(account.id);
   try {
     const quotaBefore = quotaObservation(account.quota);
-    let commandEvidence = await runWakeCommand(account, environmentOverride);
-    let verification = settings.mockLaunch
+    const commandEvidence = await runWakeCommand(account, environmentOverride);
+    let quotaRefreshError = '';
+    const verification = settings.mockLaunch
       ? { active: true, first: quotaBefore, second: quotaBefore }
-      : await verifyWakeWindow(account, environmentOverride);
-    let activationRetry = false;
-    if (!verification.active) {
-      activationRetry = true;
-      const activationEvidence = await runWakeCommand(account, environmentOverride, {
-        model: 'gpt-5.6-sol',
-        prompt: WAKE_ACTIVATION_PROMPT,
+      : await verifyWakeWindow(account, environmentOverride).catch((error) => {
+        quotaRefreshError = error.message;
+        return { active: false };
       });
-      commandEvidence = {
-        ...activationEvidence,
-        initialUsage: commandEvidence.usage,
-      };
-      verification = await verifyWakeWindow(account, environmentOverride);
-    }
-    if (!verification.active) {
-      throw new Error('Codex 请求已完成，但 5 小时额度窗口仍未开始计时，请稍后重试');
-    }
     const quotaAfter = verification.second || verification.first || quotaObservation(account.quota);
     const evidence = {
       ...commandEvidence,
-      quotaRefreshed: true,
-      quotaRefreshError: '',
+      quotaRefreshed: !quotaRefreshError,
+      quotaRefreshError,
       quotaBefore: quotaBefore?.remainingPercent ?? null,
       quotaAfter: quotaAfter?.remainingPercent ?? null,
       quotaChanged: quotaBefore?.remainingPercent !== quotaAfter?.remainingPercent,
-      quotaWindowActive: true,
-      activationRetry,
+      quotaWindowActive: verification.active,
+      quotaObservations: { before: quotaBefore, first: verification.first || null, second: verification.second || null },
       resetAt: quotaAfter?.resetsAt || null,
     };
-    recordWakeAttempt(account, trigger, 'success', { evidence });
-    audit('account.wake', { accountId: account.id, operator, result: `${trigger}:5-hour-window-active` });
+    recordWakeAttempt(account, trigger, verification.active ? 'success' : 'pending', { evidence });
+    audit('account.wake', { accountId: account.id, operator, result: `${trigger}:${verification.active ? '5-hour-window-active' : 'request-completed-window-unconfirmed'}` });
     if (trigger === 'after-reset') updateWakeState(account.id, { quotaObservation: quotaAfter });
     return accountView(account);
   } catch (error) {
     recordWakeAttempt(account, trigger, 'failed', { error: error.message });
     audit('account.wake.failed', { accountId: account.id, operator, result: error.message });
     throw error;
+  } finally {
+    wakeOperations.delete(account.id);
   }
 }
 
@@ -1668,7 +1676,7 @@ async function runScheduledWakes() {
   wakeScheduleRunning = true;
   try {
     for (const account of accounts) {
-      if (!isCodexAuthenticated(account) || account.quotaErrorCode === 'auth_expired') continue;
+      if (!isCodexAuthenticated(account) || account.quotaErrorCode === 'auth_expired' || wakeOperations.has(account.id)) continue;
       if (wakeSettings.mode === 'after-reset') await detectResetForAccount(account);
       if (!shouldWakeAccount(wakeSettings, account)) continue;
       const lastAttempt = Date.parse(wakeState(account.id).lastResetAttemptAt || '');
@@ -1831,6 +1839,74 @@ function hasRestorableBrowserSession(browserDir) {
   } catch {}
   return ['Last Session', 'Last Tabs'].some((name) => fs.existsSync(path.join(browserDir, 'Default', name)));
 }
+
+function diagnosticTarget(targetId) {
+  if (String(targetId).startsWith('api-member:')) {
+    const [, keyId, memberId] = String(targetId).split(':');
+    const routeKey = apiServiceManager.keys.find((item) => item.id === keyId);
+    const account = accounts.find((item) => item.id === memberId);
+    if (!account || !routeKey?.accountIds.includes(memberId)) throw new Error('Account is not a member of this API key');
+    return { account, routeKey, members: [account] };
+  }
+  if (String(targetId).startsWith('api-key:')) {
+    const key = apiServiceManager.keys.find((item) => `api-key:${item.id}` === targetId);
+    if (!key) throw new Error('API Key does not exist');
+    return { key, members: accounts.filter((account) => key.accountIds.includes(account.id)) };
+  }
+  const account = accounts.find((item) => item.id === targetId);
+  if (!account) throw new Error('Account does not exist');
+  return { account, members: [account] };
+}
+
+const modelDiagnostics = new ModelDiagnostics(async (item, signal) => {
+  const { account, key, routeKey, members } = diagnosticTarget(item.targetId);
+  const activeApi = readActiveApiCodex();
+  const activePool = activeApi ? apiServiceManager.keys.find((entry) => entry.id === activeApi.keyId)?.accountIds || [] : [];
+  if (!item.allowBusy && members.some((member) => member.id === activeCodexAccountId()
+    || activePool.includes(member.id) || wakeOperations.has(member.id))) return { state: 'busy' };
+  const body = { model: item.model, input: [{ role: 'user', content: [{ type: 'input_text', text: 'Reply only OK.' }] }],
+    instructions: 'This is a connection check. Reply only OK. Do not use tools.', store: false, stream: true };
+  const startedAt = Date.now();
+  let cleanup = null;
+  try {
+    let upstream;
+    let selectedAccountId = account?.id;
+    let attemptedAccountIds = [];
+    if (key) {
+      const result = await apiServiceManager.forwardResponses({ keyRecord: key, body, signal });
+      upstream = result.upstream; cleanup = result.cleanup; selectedAccountId = result.accountId;
+      attemptedAccountIds = result.attemptedAccountIds || [];
+    } else {
+      const runtime = routeKey ? await apiKeyNetworkRuntime(routeKey.id) : await networkManager.ensureAccount(account.id);
+      const dispatcher = runtime ? new ProxyAgent(`http://127.0.0.1:${runtime.mixedPort}`) : null;
+      cleanup = () => dispatcher?.close().catch(() => {});
+      let auth = readAccountAuth(account);
+      if (accessTokenNeedsRefresh(auth) && !isNonRefreshableWebSessionAuth(auth)) auth = await refreshAccountPoolAuth(account, auth, dispatcher);
+      const tokens = auth.tokens || auth;
+      upstream = await fetch(CHATGPT_CODEX_RESPONSES_URL, { method: 'POST', signal,
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream',
+          Authorization: `Bearer ${tokens.access_token}`, 'ChatGPT-Account-ID': accountIdFromAuth(auth),
+          Originator: 'codex_cli_rs', Version: APP_VERSION, 'User-Agent': `codex_cli_rs/${APP_VERSION}` },
+        body: JSON.stringify(body), ...(dispatcher ? { dispatcher } : {}) });
+    }
+    const result = await inspectProbeResponse(upstream, { signal, startedAt, expectedModel: item.model, onUsage: (usage, actualModel) => {
+      if (key || routeKey) apiServiceManager.recordUsage(key || routeKey, extractUsage({ usage }), actualModel, new Date(), { requestId: item.requestId, source: 'model-detection' });
+      else {
+        const file = path.join(DATA_DIR, 'model-diagnostics', `${account.id}.jsonl`);
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.appendFileSync(file, [
+          { type: 'turn_context', payload: { model: actualModel } },
+          { type: 'event_msg', timestamp: new Date().toISOString(), payload: { type: 'token_count', info: { navo_diagnostic_request_id: item.requestId, last_token_usage: {
+            input_tokens: usage.input_tokens, cached_input_tokens: usage.input_tokens_details?.cached_tokens,
+            output_tokens: usage.output_tokens, reasoning_output_tokens: usage.output_tokens_details?.reasoning_tokens,
+          } } } },
+        ].map(JSON.stringify).join('\n') + '\n');
+        usageTracker.sync(true);
+      }
+    } });
+    return { ...result, selectedAccountId, attemptedAccountIds, source: key ? 'api-route' : routeKey ? 'api-member' : 'account' };
+  } finally { await cleanup?.(); }
+});
 
 function browserPlacementIsVisible(placement) {
   if (!placement || typeof placement !== 'object') return true;
@@ -2049,6 +2125,7 @@ function floatingWindowState() {
       id: activeKey?.id || activeAccount?.id || '',
       label: activeKey?.name || activeAccount?.label || (codexSnapshot.pid ? 'External Codex' : 'Codex not running'),
       type: activeKey ? 'api' : activeAccount ? 'account' : codexSnapshot.pid ? 'external' : 'none',
+      planType: activeKey ? null : activeAccount?.quota?.planType || null,
       quotaRemaining: Number.isFinite(quotaRemaining) ? Math.max(0, Math.min(100, quotaRemaining)) : null,
       quotaWindows,
     },
@@ -2191,13 +2268,15 @@ async function refreshDueAccountQuotas() {
     if (activeKey && due.some((account) => activePoolIds.has(account.id))) {
       sharedApiEnvironment = await apiKeyTaskEnvironment(activeKey.id, process.env);
     }
-    await Promise.allSettled(due.map(async (account) => {
+    due.sort((a, b) => Number(b.id === activeAccountId || activePoolIds.has(b.id))
+      - Number(a.id === activeAccountId || activePoolIds.has(a.id)));
+    await settledMap(due, 3, async (account) => {
       if (activePoolIds.has(account.id) && sharedApiEnvironment) {
         return refreshScheduledAccountQuota(account, sharedApiEnvironment);
       }
       await prepareAccountNetwork(account);
       return refreshScheduledAccountQuota(account, codexEnvironment(process.env, account));
-    }));
+    });
     saveAccounts([...accounts]);
   })().finally(() => { scheduledQuotaRefreshRun = null; });
   return scheduledQuotaRefreshRun;
@@ -2478,7 +2557,7 @@ async function waitForCodexDesktop(timeoutMs = CODEX_DESKTOP_START_TIMEOUT_MS, s
 const PLAN_EXPIRY_REFRESH_MS = 12 * 60 * 60_000;
 
 async function refreshAccountPlanExpiry(account, { force = false } = {}) {
-  if (!account || account.accountKind === 'relay' || !isCodexAuthenticated(account)) return null;
+  if (!account || !isCodexAuthenticated(account)) return null;
   const lastChecked = Date.parse(account.planExpiryCheckedAt || '');
   const refreshInterval = account.planExpiryError ? 10 * 60_000 : PLAN_EXPIRY_REFRESH_MS;
   if (!force && Number.isFinite(lastChecked) && Date.now() - lastChecked < refreshInterval) {
@@ -2496,6 +2575,30 @@ async function refreshAccountPlanExpiry(account, { force = false } = {}) {
     const authClaims = claims['https://api.openai.com/auth'] || {};
     const accountId = String(tokens.account_id || auth.account_id || authClaims.chatgpt_account_id || claims.chatgpt_account_id || '');
     if (!accessToken || !accountId) throw new Error('Codex OAuth 授权中缺少账号标识');
+    if (account.accountKind === 'relay') {
+      const runtime = await networkManager.ensureAccount(account.id);
+      const dispatcher = runtime ? new ProxyAgent(`http://127.0.0.1:${runtime.mixedPort}`) : null;
+      try {
+        const response = await fetch('https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27', {
+          headers: { Authorization: `Bearer ${accessToken}`, 'ChatGPT-Account-Id': accountId },
+          signal: AbortSignal.timeout(12_000), ...(dispatcher ? { dispatcher } : {}) });
+        if (!response.ok) {
+          account.planExpiryStatus = [401, 403].includes(response.status) ? 'credential_unavailable' : 'error';
+          throw new Error(`Subscription query HTTP ${response.status}`);
+        }
+        const payload = await response.json();
+        const record = payload?.accounts?.[accountId];
+        if (!record) { account.planExpiryStatus = 'not_returned'; throw new Error('Subscription account identity was not returned'); }
+        const entitlement = record.entitlement || {};
+        const iso = (value) => Number.isFinite(Date.parse(value || '')) ? new Date(value).toISOString() : null;
+        account.planExpiresAt = iso(entitlement.expires_at);
+        account.planRenewsAt = iso(entitlement.renews_at);
+        account.planExpiryStatus = account.planExpiresAt ? 'available' : account.planRenewsAt ? 'renewal' : 'not_returned';
+        account.planExpiryCheckedAt = new Date().toISOString(); account.planExpiryError = '';
+        saveAccounts([...accounts]);
+        return account.planExpiresAt;
+      } finally { await dispatcher?.close().catch(() => {}); }
+    }
     if (!port) {
       const recovered = await recoverAccountChromeSession(browserDir);
       const browserLeaseActive = leases[account.id]?.launchType === 'browser';
@@ -2521,6 +2624,7 @@ async function refreshAccountPlanExpiry(account, { force = false } = {}) {
     account.planExpiryCheckedAt = new Date().toISOString();
     account.planExpiryError = '';
     account.planRenewsAt = subscription.renewsAt;
+    account.planExpiryStatus = subscription.expiresAt ? 'available' : subscription.renewsAt ? 'renewal' : 'not_returned';
     account.planBillingPeriod = subscription.billingPeriod;
     if (subscription.expiresAt) account.planExpiresAt = subscription.expiresAt;
     else delete account.planExpiresAt;
@@ -2530,6 +2634,7 @@ async function refreshAccountPlanExpiry(account, { force = false } = {}) {
   } catch (error) {
     account.planExpiryCheckedAt = new Date().toISOString();
     account.planExpiryError = error.message;
+    if (!['credential_unavailable', 'not_returned'].includes(account.planExpiryStatus)) account.planExpiryStatus = 'error';
     saveAccounts([...accounts]);
     audit('account.plan-expiry.failed', { accountId: account.id, result: error.message });
     return null;
@@ -2538,8 +2643,12 @@ async function refreshAccountPlanExpiry(account, { force = false } = {}) {
   }
 }
 
+let planExpiryRefreshRun = null;
 async function refreshStaleAccountPlanExpiries({ force = false } = {}) {
-  await Promise.allSettled(accounts.map((account) => refreshAccountPlanExpiry(account, { force })));
+  if (planExpiryRefreshRun) return planExpiryRefreshRun;
+  planExpiryRefreshRun = settledMap([...accounts], 2, (account) => refreshAccountPlanExpiry(account, { force }));
+  try { return await planExpiryRefreshRun; }
+  finally { planExpiryRefreshRun = null; }
 }
 
 async function launchCodexDesktop(account, launchOptions = null) {
@@ -3663,6 +3772,8 @@ function accountView(account, context = {}) {
     planExpiresAt: account.planExpiresAt || null,
     planExpiryCheckedAt: account.planExpiryCheckedAt || null,
     planExpiryError: account.planExpiryError || '',
+    planExpiryStatus: account.planExpiryStatus || 'not_checked',
+    planRenewsAt: account.planRenewsAt || null,
     quota: account.quota || null,
     codexActive: activeAccountId === account.id,
     browserInitialized: fs.existsSync(path.join(browserDir, 'Local State')),
@@ -3684,7 +3795,7 @@ function accountView(account, context = {}) {
     health: inspectAccountHealth(account),
     wake: {
       ...wakeState(account.id),
-      running: wakeRuns.has(account.id),
+      running: wakeOperations.has(account.id),
     },
     codexLogin: publicAuthAttempt(account.id),
     lease: leases[account.id] ? {
@@ -4042,7 +4153,7 @@ async function apiGatewayHandler(request, response) {
         const text = (await result.upstream.text()).slice(0, 4096);
         const message = upstreamMessage(result.upstream.status, contentType, text);
         auditUpstreamFailure(result.upstream.status, result.model, body, message);
-        apiServiceManager.recordUsage(keyRecord, {}, result.model);
+        apiServiceManager.recordUsage(keyRecord, {}, result.model, new Date(), { requestId, source: 'api' });
         await result.cleanup?.();
         abortContext.cleanup();
         return sendOpenAiError(response, result.upstream.status, message, 'upstream_error');
@@ -4055,7 +4166,7 @@ async function apiGatewayHandler(request, response) {
         if (Buffer.byteLength(text, 'utf8') > MAX_RESPONSE_BYTES) return sendOpenAiError(response, 502, '上游响应过大', 'upstream_error');
         const payload = responsesSseToJson(text, { maxOutputTokens: body.max_output_tokens });
         if (!payload) return sendOpenAiError(response, 502, '上游没有返回完整 Responses 结果', 'upstream_error');
-        apiServiceManager.recordUsage(keyRecord, extractUsage(payload), result.model);
+        apiServiceManager.recordUsage(keyRecord, extractUsage(payload), result.model, new Date(), { requestId, source: 'api' });
         response.writeHead(200, securityHeaders({ 'Content-Type': 'application/json; charset=utf-8' }));
         response.end(JSON.stringify(payload));
         return;
@@ -4069,13 +4180,13 @@ async function apiGatewayHandler(request, response) {
         let usageRecorded = false;
         if (!result.upstream.body) { abortContext.cleanup(); await result.cleanup?.(); return response.end(); }
         const stream = Readable.fromWeb(result.upstream.body);
-        const usageTap = createUsageTap((usage) => { usageRecorded = true; apiServiceManager.recordUsage(keyRecord, usage, result.model); });
+        const usageTap = createUsageTap((usage) => { usageRecorded = true; apiServiceManager.recordUsage(keyRecord, usage, result.model, new Date(), { requestId, source: 'api' }); });
         const transform = createResponsesSseTransform({ maxOutputTokens: body.max_output_tokens });
         const heartbeat = setInterval(() => { if (!response.writableEnded) response.write(': navo-heartbeat\n\n'); }, 15_000);
         heartbeat.unref?.();
         const cleanup = () => { clearInterval(heartbeat); abortContext.cleanup(); result.cleanup?.(); };
-        stream.once('error', () => { if (!usageRecorded) apiServiceManager.recordUsage(keyRecord, {}, result.model); cleanup(); response.end(); });
-        usageTap.once('end', () => { if (!usageRecorded) apiServiceManager.recordUsage(keyRecord, {}, result.model); cleanup(); });
+        stream.once('error', () => { if (!usageRecorded) apiServiceManager.recordUsage(keyRecord, {}, result.model, new Date(), { requestId, source: 'api' }); cleanup(); response.end(); });
+        usageTap.once('end', () => { if (!usageRecorded) apiServiceManager.recordUsage(keyRecord, {}, result.model, new Date(), { requestId, source: 'api' }); cleanup(); });
         response.once('close', cleanup);
         stream.pipe(usageTap).pipe(transform).pipe(response);
         return;
@@ -4087,7 +4198,7 @@ async function apiGatewayHandler(request, response) {
       let payload;
       try { payload = JSON.parse(buffer.toString('utf8')); }
       catch { return sendOpenAiError(response, 502, '上游没有返回有效 JSON', 'upstream_error'); }
-      apiServiceManager.recordUsage(keyRecord, extractUsage(payload), result.model);
+      apiServiceManager.recordUsage(keyRecord, extractUsage(payload), result.model, new Date(), { requestId, source: 'api' });
       response.writeHead(200, securityHeaders({ 'Content-Type': 'application/json; charset=utf-8' }));
       response.end(JSON.stringify(payload));
       return;
@@ -4115,7 +4226,7 @@ async function apiGatewayHandler(request, response) {
         const text = (await result.upstream.text()).slice(0, 4096);
         const message = upstreamMessage(result.upstream.status, contentType, text);
         auditUpstreamFailure(result.upstream.status, result.model, responsesBody, message);
-        apiServiceManager.recordUsage(keyRecord, {}, result.model);
+        apiServiceManager.recordUsage(keyRecord, {}, result.model, new Date(), { requestId, source: 'api' });
         await result.cleanup?.();
         abortContext.cleanup();
         return sendOpenAiError(response, result.upstream.status, message, 'upstream_error');
@@ -4128,7 +4239,7 @@ async function apiGatewayHandler(request, response) {
         if (Buffer.byteLength(text, 'utf8') > MAX_RESPONSE_BYTES) return sendOpenAiError(response, 502, '上游响应过大', 'upstream_error');
         const payload = responsesSseToJson(text, { maxOutputTokens: responsesBody.max_output_tokens });
         if (!payload) return sendOpenAiError(response, 502, '上游没有返回完整 Responses 结果', 'upstream_error');
-        apiServiceManager.recordUsage(keyRecord, extractUsage(payload), result.model);
+        apiServiceManager.recordUsage(keyRecord, extractUsage(payload), result.model, new Date(), { requestId, source: 'api' });
         return sendJson(response, 200, responsesToChat(payload));
       }
       if (chatBody.stream || contentType.includes('text/event-stream')) {
@@ -4140,13 +4251,13 @@ async function apiGatewayHandler(request, response) {
         let usageRecorded = false;
         if (!result.upstream.body) { abortContext.cleanup(); await result.cleanup?.(); return response.end(); }
         const stream = Readable.fromWeb(result.upstream.body);
-        const usageTap = createUsageTap((usage) => { usageRecorded = true; apiServiceManager.recordUsage(keyRecord, usage, result.model); });
+        const usageTap = createUsageTap((usage) => { usageRecorded = true; apiServiceManager.recordUsage(keyRecord, usage, result.model, new Date(), { requestId, source: 'api' }); });
         const transform = createChatSseTransform({ model: result.model });
         const heartbeat = setInterval(() => { if (!response.writableEnded) response.write(': navo-heartbeat\n\n'); }, 15_000);
         heartbeat.unref?.();
         const cleanup = () => { clearInterval(heartbeat); abortContext.cleanup(); result.cleanup?.(); };
-        stream.once('error', () => { if (!usageRecorded) apiServiceManager.recordUsage(keyRecord, {}, result.model); cleanup(); response.end(); });
-        usageTap.once('end', () => { if (!usageRecorded) apiServiceManager.recordUsage(keyRecord, {}, result.model); cleanup(); });
+        stream.once('error', () => { if (!usageRecorded) apiServiceManager.recordUsage(keyRecord, {}, result.model, new Date(), { requestId, source: 'api' }); cleanup(); response.end(); });
+        usageTap.once('end', () => { if (!usageRecorded) apiServiceManager.recordUsage(keyRecord, {}, result.model, new Date(), { requestId, source: 'api' }); cleanup(); });
         response.once('close', cleanup);
         stream.pipe(usageTap).pipe(transform).pipe(response);
         return;
@@ -4158,7 +4269,7 @@ async function apiGatewayHandler(request, response) {
       let payload;
       try { payload = JSON.parse(buffer.toString('utf8')); }
       catch { return sendOpenAiError(response, 502, '上游没有返回有效 JSON', 'upstream_error'); }
-      apiServiceManager.recordUsage(keyRecord, extractUsage(payload), result.model);
+      apiServiceManager.recordUsage(keyRecord, extractUsage(payload), result.model, new Date(), { requestId, source: 'api' });
       return sendJson(response, 200, responsesToChat(payload));
     }
     return sendOpenAiError(response, 404, '接口不存在', 'not_found_error');
@@ -4344,6 +4455,78 @@ const server = http.createServer(async (request, response) => {
         return sendJson(response, 200, { ok: true, data: models });
       } catch (error) {
         return sendError(response, 400, error.message);
+      }
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/model-diagnostics/catalog') {
+      const body = await readBody(request);
+      const targets = [...new Set(Array.isArray(body.targetIds) ? body.targetIds : [])].slice(0, 30);
+      const rows = await settledMap(targets, 2, async (targetId) => {
+        const { account, key, members } = diagnosticTarget(targetId);
+        const results = [];
+        for (const member of members) {
+          try {
+            const runtime = key ? await apiKeyNetworkRuntime(key.id) : await networkManager.ensureAccount(member.id);
+            const models = await readCodexModels(findCodexCli(), accountPaths(member).codexHomeDir, 20_000, networkManager.environmentForRuntime(runtime, process.env));
+            for (const model of models) if (!key || !key.modelAllowlist.length || key.modelAllowlist.includes(model.id)) results.push({ ...model, accountId: member.id,
+              ...(key ? { memberTargetId: `api-member:${key.id}:${member.id}` } : {}) });
+          } catch { results.push({ accountId: member.id, error: 'catalog_unavailable' }); }
+        }
+        return { targetId, models: results, kind: account?.accountKind || (key ? 'api' : 'regular') };
+      });
+      return sendJson(response, 200, { ok: true, data: rows.map((row, index) => row.status === 'fulfilled' ? row.value : { targetId: targets[index], models: [], error: 'catalog_unavailable' }) });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/model-diagnostics/start') {
+      const body = await readBody(request);
+      if (body.confirmed !== true) return sendError(response, 400, 'Real requests require confirmation');
+      if (!Array.isArray(body.items) || !body.items.length || body.items.length > 60) return sendError(response, 400, 'Select between 1 and 60 checks');
+      const seen = new Set();
+      const items = body.items.map((item) => {
+        const { members } = diagnosticTarget(item.targetId);
+        if (typeof item.model !== 'string' || !/^[a-zA-Z0-9._/-]{1,120}$/.test(item.model)) throw new Error('Invalid model');
+        const id = `${item.targetId}:${item.model}`;
+        if (seen.has(id)) throw new Error('Duplicate check'); seen.add(id);
+        return { targetId: item.targetId, model: item.model, lockIds: members.map((member) => member.id),
+          requestId: crypto.randomUUID(), allowBusy: body.allowBusy === true };
+      });
+      return sendJson(response, 200, { ok: true, data: modelDiagnostics.start(items) });
+    }
+    const diagnosticJobMatch = url.pathname.match(/^\/api\/model-diagnostics\/jobs\/([a-f0-9-]+)(\/cancel)?$/);
+    if (diagnosticJobMatch && ['GET', 'POST'].includes(request.method)) {
+      const job = diagnosticJobMatch[2] && request.method === 'POST' ? modelDiagnostics.cancel(diagnosticJobMatch[1]) : modelDiagnostics.view(diagnosticJobMatch[1]);
+      return job ? sendJson(response, 200, { ok: true, data: job }) : sendError(response, 404, 'Check no longer exists');
+    }
+    const resetMatch = url.pathname.match(/^\/api\/accounts\/([a-z0-9-]+)\/reset-credits(?:\/(consume))?$/);
+    if (resetMatch && request.method === 'POST') {
+      const account = accounts.find((item) => item.id === resetMatch[1]);
+      if (!account) return sendError(response, 404, 'Account does not exist');
+      const body = await readBody(request);
+      const authenticatedAccountId = accountIdFromAuth(readAccountAuth(account));
+      if (!authenticatedAccountId) return sendError(response, 409, 'Refresh account credentials before using reset credits');
+      const identity = `${account.id}:${authenticatedAccountId}`;
+      const safeOperation = () => { const op = resetCreditOperations.get(identity); return op ? {
+        status: op.status, outcome: op.outcome, clientOperationId: op.clientOperationId, creditId: op.creditId,
+      } : null; };
+      if (!resetMatch[2]) {
+        await refreshWakeQuota(account);
+        return sendJson(response, 200, { ok: true, data: { credits: account.quota.resetCredits, quota: account.quota, operation: safeOperation() } });
+      }
+      if (body.confirmed !== true || !/^[a-f0-9-]{36}$/i.test(body.clientOperationId || '')) return sendError(response, 400, 'Explicit reset confirmation required');
+      const prior = resetCreditOperations.get(identity, body.clientOperationId) || resetCreditOperations.get(identity);
+      if (prior?.status !== 'pending' && prior?.clientOperationId !== body.clientOperationId) {
+        await refreshWakeQuota(account);
+        if (!(account.quota.resetCredits?.availableCount > 0)) return sendError(response, 409, 'No available reset credits');
+        if (body.creditId && !account.quota.resetCredits.credits?.some((credit) => credit.id === body.creditId)) return sendError(response, 409, 'Refresh reset credit details before using');
+      }
+      try {
+        const environment = await accountTaskEnvironment(account, process.env);
+        const result = await resetCreditOperations.run(identity, body.creditId || null,
+          (params) => consumeCodexResetCredit(findCodexCli(), accountPaths(account).codexHomeDir, params, environment), body.clientOperationId);
+        let quotaSynced = true;
+        try { await refreshWakeQuota(account); } catch { quotaSynced = false; }
+        return sendJson(response, 200, { ok: true, data: { outcome: result.outcome, quotaSynced, quota: account.quota, operation: safeOperation() } });
+      } catch {
+        return sendJson(response, 200, { ok: true, data: { outcome: 'pending', operation: safeOperation() } });
       }
     }
 
@@ -4994,7 +5177,7 @@ server.listen(settings.port, '127.0.0.1', () => {
     child.unref();
   }
   setTimeout(runScheduledWakes, 5_000).unref?.();
-  setTimeout(() => refreshStaleAccountPlanExpiries({ force: true }), 3_000).unref?.();
+  setTimeout(() => refreshStaleAccountPlanExpiries(), 3_000).unref?.();
 });
 
 const wakeScheduleTimer = setInterval(runScheduledWakes, 60_000);

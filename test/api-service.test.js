@@ -131,7 +131,7 @@ test('enforces model, request, token and expiry restrictions', (t) => {
   assert.throws(() => service.authorizeKey(record, provider, 'allowed'), /请求额度/);
 });
 
-test('estimates new and historical API token usage', (t) => {
+test('prices new API usage without guessing historical model from current allowlist', (t) => {
   const root = temporaryDirectory(t);
   writeJsonAtomic(path.join(root, 'api-service', 'keys.json'), [{
     id: 'existing-key', name: 'Existing', salt: 'salt', hash: 'hash', modelAllowlist: ['gpt-5.6-sol'],
@@ -140,16 +140,41 @@ test('estimates new and historical API token usage', (t) => {
   const service = new ApiServiceManager({ runtimeRoot: root, readJson, writeJsonAtomic });
   service.ensureAccountPool(['gpt-5.6-sol']);
   const record = service.keys[0];
-  assert.equal(record.usage.pricedRequests, 2);
-  assert.equal(record.usage.unpricedRequests, 0);
-  assert.equal(record.usage.estimatedCostUsd, 5.75);
-  assert.equal(record.usage.estimatedCostApproximate, true);
+  assert.equal(record.usage.pricedRequests, 0);
+  assert.equal(record.usage.unpricedRequests, 2);
+  assert.equal(record.usage.estimatedCostUsd, 0);
+  assert.equal(record.usage.estimatedCostApproximate, false);
   assert.equal(record.usage.costVersion, 2);
   const historicalEstimate = record.usage.estimatedCostUsd;
   service.recordUsage(record, { inputTokens: 1000, cachedInputTokens: 500, cacheWriteInputTokens: 250, outputTokens: 100 }, 'gpt-5.6-sol');
-  assert.equal(record.usage.pricedRequests, 3);
+  assert.equal(record.usage.pricedRequests, 1);
   assert.equal(record.usage.cacheWriteInputTokens, 250);
   assert.ok(record.usage.estimatedCostUsd > historicalEstimate);
+});
+
+test('durable ledger deduplicates request IDs and safely reconciles only complete buckets', (t) => {
+  const service = manager(t);
+  const { key } = service.createKey();
+  const record = service.keys.find((item) => item.id === key.id);
+  const usage = { inputTokens: 1000, cachedInputTokens: 500, outputTokens: 100 };
+  service.recordUsage(record, usage, 'gpt-5.6-sol', new Date(), { requestId: 'request-1', secret: 'never-save' });
+  assert.equal(service.recordUsage(record, usage, 'gpt-5.6-sol', new Date(), { requestId: 'request-1' }), false);
+  assert.equal(record.usage.requests, 1);
+  assert.equal(service.publicState().keys[0].usageLedger, undefined);
+  assert.equal(fs.readFileSync(service.keysFile, 'utf8').includes('never-save'), false);
+  const expected = record.usage.estimatedCostUsd;
+  record.usage.estimatedCostUsd = 0;
+  record.dailyUsage[0].usage.estimatedCostUsd = 0;
+  assert.deepEqual(service.reconcileHistoricalCosts(), { repaired: 2, unavailable: 0 });
+  assert.equal(record.usage.estimatedCostUsd, expected);
+  assert.ok(fs.existsSync(`${service.keysFile}.before-ledger-repricing.bak`));
+  record.usage.requests += 1;
+  record.usage.estimatedCostUsd = 0;
+  assert.deepEqual(service.reconcileHistoricalCosts(), { repaired: 0, unavailable: 1 });
+  assert.equal(record.usage.estimatedCostUsd, 0);
+  const restarted = new ApiServiceManager({ runtimeRoot: path.dirname(service.directory), readJson, writeJsonAtomic });
+  assert.equal(restarted.keys[0].usageLedger.length, 1);
+  assert.equal(restarted.recordUsage(restarted.keys[0], usage, 'gpt-5.6-sol', new Date(), { requestId: 'request-1' }), false);
 });
 
 test('stores API key usage in separate local-day buckets while keeping lifetime limits cumulative', (t) => {

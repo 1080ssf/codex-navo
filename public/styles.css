@@ -368,12 +368,41 @@ h1 { font-size: clamp(30px, 3vw, 38px); line-height: 1; letter-spacing: -.035em;
 .usage-primary > div + div { border-left: 1px solid #d4e0ef; background: rgba(255,255,255,.52); }
 .usage-primary > div:first-child strong { color: var(--blue-dark); font-size: 28px; }
 .usage-primary .usage-cost strong { color: #147052; font-size: 19px; }
+.usage-primary .usage-cost small { white-space: normal; overflow-wrap: anywhere; line-height: 1.45; }
 .token-scale-note { color: #55718f; font: 650 9px/1 "Segoe UI Variable Text", "Microsoft YaHei UI", sans-serif; font-style: normal; white-space: nowrap; }
 .usage-primary > div > .token-scale-note { position: absolute; top: 13px; right: 15px; padding: 3px 6px; border: 1px solid #cbd9ea; border-radius: 999px; background: rgba(255,255,255,.64); }
 .usage-breakdown { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .usage-metric { display: flex; min-width: 0; flex-direction: column; justify-content: center; padding: 10px 15px; border: 1px solid #dbe3ed; border-radius: 10px; background: #fff; }
 .usage-metric strong, .usage-metric small { overflow: hidden; text-overflow: ellipsis; }
 
+.navo-account-tools-dialog { width: min(760px, calc(100vw - 36px)); max-height: calc(100vh - 48px); box-sizing: border-box; padding: 22px; overflow: auto; border: 1px solid #cedbea; border-radius: 16px; color: #26364d; background: #fff; box-shadow: 0 24px 80px #26364d33; }
+.navo-account-tools-dialog::backdrop { background: #17283b55; }
+.navo-account-tools-dialog header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.navo-account-tools-dialog h2 { margin: 0; font-size: 19px; }
+.navo-account-tools-dialog h3 { font-size: 14px; }
+.navo-account-tools-dialog header button { width: 34px; height: 34px; padding: 0; font-size: 22px; }
+.navo-account-tools-dialog button { min-height: 34px; padding: 6px 12px; border: 1px solid #cdd9e8; border-radius: 8px; background: #f8fbff; color: #31577d; font: inherit; font-size: 12px; cursor: pointer; }
+.navo-account-tools-dialog button:disabled { opacity: .5; cursor: not-allowed; }
+.navo-account-tools-dialog button:focus-visible { outline: 2px solid #2866de; outline-offset: 2px; }
+.navo-account-tools-dialog p { font-size: 12px; line-height: 1.65; color: #64768d; }
+.tools-targets { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 10px; }
+.tools-targets details { padding: 10px; border: 1px solid #dfe7f1; border-radius: 9px; min-width: 0; }
+.tools-targets summary { cursor: pointer; font-size: 12px; font-weight: 650; }
+.navo-account-tools-dialog .tools-targets label, .navo-account-tools-dialog .tools-catalog label { display: flex; align-items: center; gap: 10px; min-width: 0; margin: 0; padding: 10px 8px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; cursor: pointer; }
+.navo-account-tools-dialog input[type="checkbox"] { flex: 0 0 16px; width: 16px; height: 16px; min-width: 16px; min-height: 16px; margin: 0; padding: 0; accent-color: var(--blue); }
+.navo-account-tools-dialog .tools-option-text { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
+.navo-account-tools-dialog .tools-targets label:hover, .navo-account-tools-dialog .tools-catalog label:hover { background: #f2f6fc; border-radius: 6px; }
+.navo-account-tools-dialog .tools-targets details[open] > summary { margin-bottom: 8px; }
+.tools-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin: 15px 0; }
+.navo-account-tools-dialog .tools-active-option { display: flex; align-items: center; gap: 10px; margin: 14px 0; font-size: 12px; line-height: 1.5; color: #64768d; }
+.navo-account-tools-dialog .tools-active-option span { min-width: 0; overflow-wrap: anywhere; }
+.tools-catalog { max-height: 230px; overflow: auto; }
+.tools-catalog small { color: #8491a3; margin-left: auto; white-space: nowrap; }
+.tools-results article, .tools-credit { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 12px; margin-top: 8px; border: 1px solid #dfe7f1; border-radius: 10px; font-size: 12px; overflow-wrap: anywhere; }
+.tools-results article strong { flex: 1; }
+.tools-results article small, .tools-credit small { flex-basis: 100%; color: #64768d; line-height: 1.6; }
+.tools-error { margin-top: 12px; padding: 10px; border-radius: 8px; color: #a43747; background: #fff2f4; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tools-pending { padding: 10px; background: #fff8e9; border-radius: 8px; }
 .account-list { position: relative; display: grid; gap: 14px; }
 .account-group-head { --group-accent: #437dcc; display: flex; min-height: 40px; align-items: center; gap: 9px; padding: 0 9px 0 13px; border: 1px solid #cfdaea; border-radius: 11px; color: #263f60; background: linear-gradient(110deg, #fff 0%, #f5f8fc 100%); box-shadow: 0 2px 8px rgba(42,70,105,.055); font-size: 11px; font-weight: 760; text-align: left; cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
 .account-group-head::before { width: 4px; height: 18px; border-radius: 999px; background: var(--group-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--group-accent) 11%, transparent); content: ""; }
@@ -407,8 +436,21 @@ h1 { font-size: clamp(30px, 3vw, 38px); line-height: 1; letter-spacing: -.035em;
 .account-grid .account-identity h3 { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 16px; }
 .account-grid .identity-badges { flex-wrap: wrap; }
 .account-grid .quota-panel { align-self: stretch; }
-.account-grid .account-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) repeat(4, 38px); align-self: end; gap: 8px; padding-top: 16px; border-top: 1px solid #e2e8f0; }
-.account-grid .account-actions .action-primary { width: 100%; min-width: 0; padding-inline: 8px; overflow: hidden; text-overflow: ellipsis; }
+.account-grid .account-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(30px, 1fr)); align-self: end; gap: 6px; padding-top: 14px; border-top: 1px solid #e2e8f0; }
+.account-grid .account-actions .action-primary { width: auto; min-width: 38px; padding-inline: 10px; }
+.account-action-icon { display: none; }
+.account-grid .account-actions button:has(.account-action-icon), .account-grid .account-actions button.icon-action { display: inline-flex; align-items: center; justify-content: center; width: 100%; min-width: 0; padding: 0; }
+.account-grid .account-actions .danger-button { order: 10; }
+.account-grid .account-action-icon { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; }
+.account-action-icon svg, .account-action-icon img { display: block; width: 20px; height: 20px; object-fit: contain; }
+.account-grid .account-action-label { display: none; }
+.account-grid .identity-network-row { flex-basis: 100%; min-width: 0; }
+.account-grid .network-badge { max-width: 100%; }
+.account-grid .identity-badges { gap: 6px; row-gap: 7px; }
+.account-grid .plan-badge { max-width: 100%; white-space: normal; overflow-wrap: anywhere; font-family: inherit; line-height: 1.3; letter-spacing: 0; }
+.account-actions button:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.account-grid .account-actions button[aria-label] { position: relative; }
+.account-grid .account-actions button[aria-label]:focus-visible::before { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 5; width: max-content; max-width: 210px; padding: 6px 9px; border-radius: 6px; color: #fff; background: #26364d; box-shadow: 0 3px 10px #26364d25; font-size: 11px; line-height: 1.5; white-space: normal; content: attr(aria-label); pointer-events: none; }
 .account-grid .codex-login-panel { grid-column: 1; align-items: flex-start; flex-direction: column; }
 .account-grid .codex-login-panel strong { margin-right: 0; }
 .account-grid .empty-state { grid-column: 1 / -1; }
@@ -446,6 +488,8 @@ h1 { font-size: clamp(30px, 3vw, 38px); line-height: 1; letter-spacing: -.035em;
 .account-actions .action-blocked, .account-actions .action-blocked:hover { color: #718198; border-color: #d6dee8; background: #edf1f6; }
 .account-actions button.release { color: #956019; border-color: #e4c28e; background: #fffaf1; }
 .account-actions .icon-action { width: 38px; min-width: 38px; padding: 0; color: #5f7590; font-size: 20px; line-height: 1; }
+.account-actions .icon-action[data-tool] { display: inline-flex; align-items: center; justify-content: center; }
+.account-actions .icon-action[data-tool] svg { width: 19px; height: 19px; }
 .account-actions .wake-action { color: #168267; background: #f4fbf8; }
 .account-actions .wake-action svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .account-actions .wake-action:hover { color: #fff; border-color: #168267; background: #168267; }
@@ -689,6 +733,13 @@ dialog textarea { resize: vertical; line-height: 1.55; }
 .api-editor-dialog form { display: flex; max-height: calc(100vh - 36px); flex-direction: column; padding: 28px; overflow: hidden; }
 .api-editor-dialog .api-editor-fields { min-height: 0; padding-right: 5px; overflow-x: hidden; overflow-y: auto; }
 .api-editor-dialog form > .dialog-actions { flex: 0 0 auto; margin: 14px -5px 0; padding: 14px 5px 0; border-top: 1px solid #e1e8f1; background: #fff; }
+.api-editor-dialog.api-secret-dialog { width: min(520px, calc(100% - 32px)); padding: 24px; overflow-y: auto; }
+.api-secret-dialog .dialog-head { align-items: flex-start; gap: 16px; }
+.api-secret-dialog .dialog-head h2 { margin: 6px 0 0; font-size: 23px; line-height: 1.3; }
+.api-secret-dialog .dialog-head .icon-button { flex: 0 0 30px; width: 30px; height: 30px; min-height: 30px; padding: 0; }
+.api-secret-dialog .dialog-copy { margin: 16px 0; padding: 0; border: 0; background: transparent; }
+.api-secret-dialog .dialog-actions { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.api-secret-dialog .dialog-actions button { min-height: 36px; height: 36px; padding: 0 16px; font-size: 13px; }
 .codex-launch-dialog { width: min(610px, calc(100% - 36px)); height: min(680px, calc(100vh - 52px)); max-height: calc(100vh - 52px); overflow: hidden; }
 .codex-launch-dialog form { display: flex; height: 100%; min-height: 0; flex-direction: column; padding: 18px; }
 .codex-launch-dialog h2 { font-size: 23px; }
@@ -826,7 +877,7 @@ dialog textarea { resize: vertical; line-height: 1.55; }
 .account-list:not(.account-grid) .api-virtual-card:not(.usage-expanded) { min-height: 112px; padding-block: 20px; }
 .account-grid .api-virtual-card { min-height: 354px; grid-template-rows: auto auto auto auto; gap: 14px; }
 .account-grid .api-virtual-card .quota-panel { padding: 12px 0 2px; border-top: 1px solid #e4eaf1; }
-.account-grid .api-virtual-card .account-actions { grid-template-columns: repeat(2, minmax(0, 1fr)) repeat(3, 38px); padding-top: 14px; }
+.account-grid .api-virtual-card .account-actions { padding-top: 14px; }
 .account-grid .api-virtual-card .account-actions .action-primary { min-width: 0; overflow: visible; text-overflow: clip; }
 .api-model-detect { flex: 0 0 auto; min-height: 38px; padding: 0 15px; }
 .api-model-status { min-width: 0; color: var(--muted); font-size: 11px; font-weight: 600; line-height: 1.5; }
