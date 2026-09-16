@@ -160,9 +160,12 @@ function applyTheme() {
 }
 applyTheme();
 const englishUi = new Map([
+  ['（旧结果，尚未重新确认）','(previous result; not revalidated)'], ['重新下载','Download again'], ['下载更新','Download update'],
+  ['尚未检查。点击“重新检查”读取官方版本与本机安装状态。','Not checked yet. Select Check again to read official and installed versions.'],
+  ['，其余仍在读取…','; reading remaining targets…'],
   ['费用估值', 'Cost estimate'], ['费用估值 · 不完整', 'Cost estimate · partial'],
   ['缺少模型明细的历史记录不会猜算', 'Historical records without model details are not guessed'], ['套餐待识别', 'Unrecognized plan'],
-  ['账号管理', 'Accounts'], ['网络代理', 'Network'], ['授权迁移', 'Authorization'], ['会话管理', 'Sessions'],
+  ['账号管理', 'Accounts'], ['个账号', 'accounts'], ['网络代理', 'Network'], ['授权迁移', 'Authorization'], ['会话管理', 'Sessions'],
   ['通知提醒', 'Notifications'], ['API 服务', 'API Service'], ['唤醒设置', 'Wake Settings'], ['语言设置', 'Language'], ['应用设置', 'Application Settings'],
   ['账号池', 'Account Pool'], ['添加账号', 'Add Account'], ['本机用量', 'Local Usage'], ['今日', 'Today'], ['昨日', 'Yesterday'],
   ['全部', 'All'], ['立即刷新', 'Refresh'], ['本机会话', 'Local Sessions'], ['进行中', 'Active'], ['失败', 'Failed'], ['本机提醒', 'Local Alerts'],
@@ -194,7 +197,7 @@ const englishUi = new Map([
   ['优先选择额度充足账号', 'Prioritize accounts with more quota'], ['快速找到额度较低账号', 'Find low-quota accounts'],
   ['按名称顺序排列', 'Sort by name'], ['新账号排在前面', 'Newest accounts first'], ['账号池可用额度', 'Combined account quota'],
   ['刷新额度', 'Refresh quota'], ['唤醒账号', 'Wake account'], ['配置账号网络', 'Configure account network'],
-  ['直连', 'Direct'], ['代理', 'Proxy'], ['不使用代理', 'No proxy'], ['单独线路', 'Standalone routes'], ['节点组', 'Node groups'], ['机场订阅', 'Subscriptions'], ['额度刷新失败', 'Quota refresh failed'], ['正在读取额度', 'Loading quota'],
+  ['直连', 'Direct'], ['代理', 'Proxy'], ['代理 ·', 'Proxy ·'], ['不使用代理', 'No proxy'], ['单独线路', 'Standalone routes'], ['节点组', 'Node groups'], ['机场订阅', 'Subscriptions'], ['额度刷新失败', 'Quota refresh failed'], ['正在读取额度', 'Loading quota'],
   ['等待登录授权', 'Waiting for sign-in'], ['登录已失效', 'Sign-in expired'], ['重新登录授权', 'Sign in again'],
   ['Codex 授权已完成，请在当前 Chrome 中完成 ChatGPT 网页登录', 'Codex authorization is complete. Finish signing in to ChatGPT in the current Chrome window'],
   ['Codex 授权已完成，请在当前 Chrome 中完成 ChatGPT 网页登录。', 'Codex authorization is complete. Finish signing in to ChatGPT in the current Chrome window.'],
@@ -296,7 +299,7 @@ const englishUi = new Map([
   ['ChatGPT 不支持', 'ChatGPT unsupported'],
   ['“额度重置后”会同时检测预计时间、重置时间变化和额度突然恢复，通常在 5 分钟内识别不定时重置。', 'After quota reset checks the estimated time, reset-time changes, and sudden quota recovery, usually detecting unscheduled resets within 5 minutes.'],
   ['0 表示不限。', '0 means unlimited.'], ['按 Codex 官方美国定价 US$0.04/Credit 换算', 'Converted at the official US Codex price of US$0.04/Credit'],
-  ['保存后，该账号的网页端、登录授权、Codex 桌面端及其 GitHub 访问都会使用同一节点；后台额度刷新和唤醒按全局择优线路执行。', 'After saving, Web, authorization, Codex Desktop, and GitHub for this account use the same route. Background quota refresh and wake tasks use the best available global route.'],
+  ['保存后，该账号的网页登录、Codex OAuth 和 Codex 任务使用此线路；后台额度刷新和唤醒按全局择优线路执行。', 'After saving, web sign-in, Codex OAuth, and Codex tasks for this account use this route. Background quota refresh and wake tasks use the best available global route.'],
   ['保存权限', 'Save permissions'], ['备用流程需要先在 ChatGPT 设置中开启设备代码授权。', 'Enable device-code authorization in ChatGPT settings before using this fallback flow.'],
   ['编辑 Key 权限', 'Edit key permissions'], ['测试提醒已发送', 'Test notification sent'], ['创建 Navo API Key', 'Create Navo API key'],
   ['从启用统计后开始记录', 'Recorded since usage tracking was enabled'], ['待检查', 'Pending check'], ['导入临时账号', 'Import temporary accounts'],
@@ -342,7 +345,8 @@ const englishUi = new Map([
   ['上移', 'Move up'], ['尚未找到可加载的本地项目或会话', 'No local projects or conversations are available to load'],
   ['设备代码是备用流程。请先在 ChatGPT 设置 → 账户安全与登录中开启“为 Codex 启用设备代码授权”。继续吗？', 'Device code is a fallback flow. First enable “Device code authorization for Codex” under ChatGPT Settings → Account security and sign-in. Continue?'],
   ['设备代码授权', 'Device-code authorization'], ['设备验证码', 'Device verification code'], ['使用中', 'In use'],
-  ['首次网页登录、Codex OAuth、Codex 桌面端及其 GitHub 访问都使用这条线路。', 'Initial web sign-in, Codex OAuth, Codex Desktop, and GitHub all use this route.'],
+  ['创建独立账号环境，并在 Chrome 中完成官方登录与 Codex OAuth。', 'Create an isolated account environment, then complete official sign-in and Codex OAuth in Chrome.'],
+  ['网页登录、Codex OAuth 和 Codex 任务使用此线路。', 'Web sign-in, Codex OAuth, and Codex tasks use this route.'],
   ['授权包已生成，但该账号没有可导出的有效网页会话，因此仅包含 Codex 授权。', 'The package was created, but this account has no valid web session to export, so it contains Codex authorization only.'],
   ['授权流程已中断', 'Authorization interrupted'], ['刷新订阅', 'Refresh subscription'], ['刷新全部账号额度', 'Refresh all account quotas'], ['刷新中…', 'Refreshing…'],
   ['双端授权包已生成：包含 Codex 授权和网页会话。', 'The complete authorization package was created with Codex authorization and the web session.'],
@@ -351,7 +355,7 @@ const englishUi = new Map([
   ['退出当前 Codex？正在进行的任务会被中断。', 'Quit the current Codex? Active tasks will be interrupted.'], ['外部 Codex 已关闭', 'External Codex closed'], ['外部 Codex 正在运行', 'External Codex is running'],
   ['完整 Key 只会在创建成功后显示一次，请及时复制保存。', 'The complete key is shown once after creation. Copy and save it now.'],
   ['完整 Key 只在这里显示一次。请立即复制并保存，关闭后不会再次显示。', 'The complete key is shown here once. Copy and save it now; it cannot be shown again after closing.'],
-  ['网络与节点', 'Network and nodes'], ['网页端、授权、额度与 Codex 使用此节点', 'Web, authorization, quota, and Codex use this route'],
+  ['网络与节点', 'Network and nodes'], ['网页登录、Codex OAuth 和 Codex 任务使用此线路', 'Web sign-in, Codex OAuth, and Codex tasks use this route'],
   ['网页端已登录并入池', 'Web signed in and account added'], ['网页使用中', 'Web in use'], ['为该账号选择独立线路。', 'Choose an independent route for this account.'],
   ['未安装', 'Not installed'], ['未知错误', 'Unknown error'], ['文件已读取，导入时会自动识别格式并检查重复账号。', 'File loaded. Import automatically detects its format and checks for duplicate accounts.'],
   ['无法读取本地状态', 'Unable to read local state'], ['无推理', 'No reasoning'], ['下移', 'Move down'], ['先添加节点或订阅，刷新成功后即可为这个账号选择线路。', 'Add a node or subscription first. After a successful refresh, you can choose a route for this account.'],
@@ -422,10 +426,11 @@ const englishUiPatterns = [
   [/^当前 Codex · /, 'Current Codex · '],
   [/^(\d+) 个超大会话可检查。$/, '$1 oversized conversations can be checked.'],
   [/^· 优化后 (.+)$/, '· after $1'],
-  [/^(\d+) 个账号/, '$1 accounts'], [/ · (\d+) 个 Navo API/g, ' · $1 Navo API'], [/^(\d+) 使用中$/, '$1 active'],
+  [/^(\d+) 个账号$/, '$1 accounts'], [/ · (\d+) 个 Navo API/g, ' · $1 Navo API'], [/^(\d+) 使用中$/, '$1 active'],
   [/^更新于 /, 'Updated '], [/ 次待定价$/, ' unpriced calls'], [/^缓存率 /, 'Cache rate '], [/其中推理 /, 'Reasoning '],
   [/^按 (\d+) 个绑定账号的总额度平均计算$/, 'Average of total quota across $1 linked accounts'],
-  [/^(\d+) 个底层账号$/, '$1 backing accounts'], [/^代理 · (\d+)$/, 'Proxy · $1'], [/^已选 (\d+) 个项目、(\d+) 个会话$/, '$1 projects and $2 sessions selected'],
+  [/^(\d+) 个底层账号$/, '$1 backing accounts'], [/^代理 · /, 'Proxy · '], [/^已选 (\d+) 个项目、(\d+) 个会话$/, '$1 projects and $2 sessions selected'],
+  [/^(\d+) 天额度$/, '$1-day quota'], [/^(\d+) 小时额度$/, '$1-hour quota'],
   [/^(\d+) 个会话$/, '$1 sessions'], [/^实时读取 /, 'Reading '], [/^还没有读取到本地 Codex 会话$/, 'No local Codex sessions found'],
   [/^今日用量$/, 'Today usage'], [/^昨日用量$/, 'Yesterday usage'], [/^近 7 天$/, 'Last 7 days'], [/^近 30 天$/, 'Last 30 days'], [/^全部记录$/, 'All records'],
   [/^(\d+) 次待定价$/, '$1 unpriced calls'], [/^约 ([\d.]+) 亿$/, 'About $1 hundred million'],
@@ -471,9 +476,20 @@ const englishUiPatterns = [
   [/^v(.+) 可更新$/, 'v$1 available'],
   [/^账号顺序：(.+)$/, 'Account order: $1'], [/^请求 (.+) · Token (.+)$/, 'Requests $1 · Tokens $2'],
   [/^仅用于 API 反代，将于 (.+) 到期$/, 'Used only for API relay; expires at $1'],
+  [/^最近成功检查：(.+)。$/, 'Last successful check: $1.'],
+  [/^已选 (.+)\/30 个账号目标 · (.+)\/60 项检测$/, '$1/30 account targets · $2/60 checks selected'],
+  [/^模型目录：(.+)\/(.+) 个目标已返回(.*)$/, 'Model catalog: $1/$2 targets returned$3'],
+  [/^目录已读取 (\d+) 个模型，尚未实测。可在账号管理的模型检测中检查实时可用性。$/, '$1 models listed; not live-tested. Use Model diagnostics in Accounts to check current availability.'],
+  [/^以下目标的目录未能完整读取，可重新读取：(.+)$/, 'Catalogs could not be fully read for: $1. Read again to retry.'],
+  [/^确认对「(.+)」使用一张重置卡？实际重置范围由官方决定，操作可能无法撤销。$/, 'Use one reset credit for “$1”? The server determines its scope; this may be irreversible.'],
+  [/^将发送 (.+) 个真实检测请求，会消耗少量账号额度。(?:\\n|\n)账号：(?:\\n|\n)(.+)(?:\\n|\n)(.*)继续？$/, 'Send $1 live probes, consuming account quota? Accounts: $2. $3 Continue?'],
 ];
 function translateText(value) {
   const trimmed = String(value || '').trim();
+  // Route names are user data: translate only the application-owned prefix.
+  // Do not run the remaining quota/time patterns over that name afterward.
+  if (trimmed.startsWith('代理 · ')) return String(value).replace(trimmed, `Proxy · ${trimmed.slice('代理 · '.length)}`);
+  if (trimmed.startsWith('Proxy · ')) return value;
   let translated = englishUi.get(trimmed) || trimmed;
   for (const [pattern, replacement] of englishUiPatterns) translated = translated.replace(pattern, replacement);
   return translated === trimmed ? value : String(value).replace(trimmed, translated);
@@ -489,7 +505,7 @@ function translateUi(root = document.body) {
     const translated = translateText(root.value);
     if (translated !== root.value) root.value = translated;
   }
-  for (const name of ['title', 'aria-label', 'placeholder']) {
+  for (const name of ['title', 'aria-label', 'placeholder', 'data-tooltip']) {
     const value = root.getAttribute?.(name);
     if (!value) continue;
     const translated = translateText(value);
@@ -506,7 +522,7 @@ function translateUi(root = document.body) {
         const translated = translateText(node.value);
         if (translated !== node.value) node.value = translated;
       }
-      for (const name of ['title', 'aria-label', 'placeholder']) {
+      for (const name of ['title', 'aria-label', 'placeholder', 'data-tooltip']) {
         const value = node.getAttribute(name);
         if (!value) continue;
         const translated = translateText(value);
@@ -527,7 +543,7 @@ translationObserver.observe(document.documentElement, {
   childList: true,
   characterData: true,
   attributes: true,
-  attributeFilter: ['title', 'aria-label', 'placeholder'],
+  attributeFilter: ['title', 'aria-label', 'placeholder', 'data-tooltip'],
   subtree: true,
 });
 queueMicrotask(() => translateUi());
@@ -589,89 +605,110 @@ function renderApplicationUpdate() {
   const currentVersion = applicationUpdate.currentVersion || '';
   const availableVersion = applicationUpdate.availableVersion || '';
   const percent = Math.max(0, Math.min(100, Number(applicationUpdate.percent) || 0));
+  const tr = (zh, en) => navoUsesChinese() ? zh : en;
+  const busy = ['checking','cancelling','verifying','installing'].includes(status);
+  const retryDownload = ['cancelled','error'].includes(status) && Boolean(availableVersion);
   const labels = {
-    idle: currentVersion ? `v${currentVersion}` : '检查更新',
-    development: currentVersion ? `v${currentVersion}` : '开发模式',
-    checking: '正在检查',
-    current: currentVersion ? `v${currentVersion}` : '已是最新版',
-    available: `v${availableVersion} 可更新`,
-    downloading: `下载 ${percent}%`,
-    downloaded: '重启更新',
-    error: '更新检查失败',
+    idle: currentVersion ? `v${currentVersion}` : tr('检查更新','Check updates'),
+    development: currentVersion ? `v${currentVersion}` : tr('开发模式','Development'),
+    checking: tr('正在检查','Checking'),
+    current: currentVersion ? `v${currentVersion}` : tr('已是最新版','Up to date'),
+    available: tr(`v${availableVersion} 可更新`,`v${availableVersion} available`),
+    downloading: tr(`下载 ${percent}%`,`Downloading ${percent}%`),
+    downloaded: tr('重启更新','Restart to update'),
+    verifying: tr('正在校验','Verifying'), cancelling: tr('正在取消','Cancelling'),
+    cancelled: tr('下载已取消','Download cancelled'),installing: tr('正在安装','Installing'),
+    error: tr('更新失败','Update failed'),
   };
 
   elements.updateChip.hidden = false;
   elements.updateChip.className = `update-chip ${status}`;
   elements.updateChip.querySelector('span').textContent = labels[status] || labels.idle;
   elements.updateChip.setAttribute('aria-label', status === 'available' || status === 'downloaded'
-    ? '打开应用更新'
-    : '检查应用更新');
+    ? tr('打开应用更新', 'Open application updates')
+    : tr('检查应用更新', 'Check application updates'));
 
-  elements.navoCurrentVersion.textContent = currentVersion ? `v${currentVersion}` : '读取中';
-  const statusCopy = status === 'available'
-    ? `当前版本 v${currentVersion}。下载完成后由你决定何时重启安装。`
-    : status === 'downloading'
-      ? '正在后台下载更新，账号数据和登录环境不会被覆盖。'
-      : status === 'downloaded'
-        ? '更新已经下载完成。重启应用即可安装，正在运行的 Codex 不会被强制关闭。'
-        : status === 'current'
-          ? `当前 v${currentVersion} 已是最新版。`
-          : status === 'development'
-            ? '开发模式不会连接更新服务，请安装本地构建的 Setup 版本测试。'
-            : status === 'error'
-              ? (applicationUpdate.error || '无法连接更新服务，请稍后重试。')
-              : '检查 GitHub Releases 是否有新版本。';
+  elements.navoCurrentVersion.textContent = currentVersion ? `v${currentVersion}` : tr('读取中', 'Loading');
+  const copies = {
+    available: tr(`当前版本 v${currentVersion}。下载完成后由你决定何时重启安装。`,`Current version: v${currentVersion}. Choose when to restart and install after the download.`),
+    downloading: tr('正在后台下载更新，账号数据和登录环境不会被覆盖。','Downloading in the background. Account data and login environments are preserved.'),
+    downloaded: tr('安装包已下载并校验。点击“重启并安装”才会安装；直接退出不会自动安装。','The package is downloaded and verified. Only Restart and install begins installation; quitting alone does not.'),
+    verifying: tr('文件已传输完成，正在校验安装包；尚未开始安装。','Transfer finished. Verifying the package; installation has not started.'),
+    installing: tr('正在退出 Navo 并启动安装程序…','Closing Navo and starting the installer…'),
+    cancelling: tr('正在取消下载，请稍候…','Cancelling the download…'),
+    cancelled: tr('下载已取消，可以重新下载；没有进行安装。','Download cancelled. You can download again; nothing was installed.'),
+    checking: tr('正在检查 GitHub Releases…','Checking GitHub Releases…'),
+    current: tr(`当前 v${currentVersion} 已是最新版。`,`v${currentVersion} is up to date.`),
+    development: tr('开发模式不会连接更新服务，请使用 Setup 安装版测试。','Development mode does not connect to the update service. Use an installed Setup build.'),
+    error: tr('更新未完成，请重试。','The update did not complete. Please retry.') + (applicationUpdate.error ? ` ${tr('详情：','Details: ')}${applicationUpdate.error}` : ''),
+  };
+  const statusCopy = copies[status] || tr('检查 GitHub Releases 是否有新版本。','Check GitHub Releases for a newer version.');
   const transferCopy = status === 'downloading' ? formatUpdateTransfer(applicationUpdate) : '';
   const detailedCopy = statusCopy + (transferCopy ? ` · ${transferCopy}` : '');
   elements.updateDialogCopy.textContent = detailedCopy;
   if (elements.navoSettingsUpdateCopy) elements.navoSettingsUpdateCopy.textContent = detailedCopy;
-  if (elements.navoSettingsVersion) elements.navoSettingsVersion.textContent = currentVersion ? `v${currentVersion}` : '读取中';
+  if (elements.navoSettingsVersion) elements.navoSettingsVersion.textContent = currentVersion ? `v${currentVersion}` : tr('读取中', 'Loading');
 
-  elements.updateProgress.hidden = status !== 'downloading';
+  const showProgress = ['downloading','verifying','cancelling','installing'].includes(status);
+  elements.updateProgress.hidden = !showProgress;
+  elements.updateProgress.classList.toggle('indeterminate',status !== 'downloading');
   elements.updateProgressBar.style.width = `${percent}%`;
-  elements.updateProgressLabel.textContent = `${percent}%`;
-  if (elements.navoSettingsProgress) elements.navoSettingsProgress.hidden = status !== 'downloading';
+  elements.updateProgressLabel.textContent = status === 'downloading' ? `${percent}%` : labels[status];
+  if (elements.navoSettingsProgress) { elements.navoSettingsProgress.hidden = !showProgress; elements.navoSettingsProgress.classList.toggle('indeterminate',status !== 'downloading'); }
   if (elements.navoSettingsProgressBar) elements.navoSettingsProgressBar.style.width = `${percent}%`;
-  if (elements.navoSettingsProgressLabel) elements.navoSettingsProgressLabel.textContent = `${percent}%`;
+  if (elements.navoSettingsProgressLabel) elements.navoSettingsProgressLabel.textContent = elements.updateProgressLabel.textContent;
   const notes = String(applicationUpdate.releaseNotes || '').trim();
   elements.updateNotes.hidden = !(notes && status === 'available');
   elements.updateNotes.textContent = notes;
 
-  elements.updatePrimaryAction.hidden = status === 'downloading';
-  elements.updatePrimaryAction.disabled = status === 'checking';
-  elements.updatePrimaryAction.dataset.action = status === 'available'
+  elements.updatePrimaryAction.hidden = false;
+  elements.updatePrimaryAction.disabled = busy || (status === 'downloading' && applicationUpdate.cancellable !== true);
+  elements.updatePrimaryAction.dataset.action = status === 'downloading' ? 'cancel' : status === 'available' || retryDownload
     ? 'download'
     : status === 'downloaded'
       ? 'install'
       : 'check';
-  elements.updatePrimaryAction.textContent = status === 'available'
-    ? '下载更新'
+  elements.updatePrimaryAction.textContent = status === 'downloading' ? tr('取消下载','Cancel download') : status === 'available' || retryDownload
+    ? tr(retryDownload ? '重新下载' : '下载更新',retryDownload ? 'Download again' : 'Download update')
     : status === 'downloaded'
-      ? '重启并安装'
-      : status === 'checking'
-        ? '正在检查'
-        : '重新检查';
+      ? tr('重启并安装','Restart and install')
+      : busy ? tr('正在处理…','Working…') : tr('重新检查','Check again');
   if (elements.navoSettingsUpdateAction) {
-    elements.navoSettingsUpdateAction.hidden = status === 'downloading';
-    elements.navoSettingsUpdateAction.disabled = status === 'checking';
+    elements.navoSettingsUpdateAction.hidden = false;
+    elements.navoSettingsUpdateAction.disabled = elements.updatePrimaryAction.disabled;
     elements.navoSettingsUpdateAction.dataset.action = elements.updatePrimaryAction.dataset.action;
     elements.navoSettingsUpdateAction.textContent = elements.updatePrimaryAction.textContent;
   }
 }
 
+let applicationUpdateRevision = 0;
+let codexUpdateRevision = 0;
+
+async function readApplicationUpdateState() {
+  const revision = ++applicationUpdateRevision;
+  try {
+    const next = await window.codexUpdater.getState();
+    if (revision === applicationUpdateRevision) applicationUpdate = next;
+  } catch (error) {
+    if (revision === applicationUpdateRevision) showToast(error.message || String(error), true);
+  }
+  renderApplicationUpdate();
+}
+
 async function initializeApplicationUpdater() {
   if (!window.codexUpdater) return;
   try {
-    applicationUpdate = await window.codexUpdater.getState();
-    renderApplicationUpdate();
     window.codexUpdater.onState((nextState) => {
+      applicationUpdateRevision++;
       applicationUpdate = nextState;
       renderApplicationUpdate();
     });
     window.codexUpdater.onCodexState?.((nextState) => {
+      codexUpdateRevision++;
       codexDesktopUpdate = nextState;
       renderCodexDesktopUpdate();
     });
+    await readApplicationUpdateState();
   } catch {
     elements.updateChip.hidden = true;
   }
@@ -930,10 +967,19 @@ function escapeHtml(value) {
 }
 
 function showToast(message, error = false) {
-  elements.toast.textContent = message;
-  elements.toast.className = `toast visible${error ? ' error' : ''}`;
-  clearTimeout(showToast.timeout);
-  showToast.timeout = setTimeout(() => { elements.toast.className = 'toast'; }, 3200);
+  const queue = showToast.queue ||= [];
+  const item = {message:String(message || ''),error};
+  if (showToast.active?.message === item.message || queue.some(entry=>entry.message===item.message)) return;
+  queue.push(item);
+  if (queue.length > 4) queue.shift();
+  const next = () => {
+    const entry = queue.shift(); showToast.active = entry || null;
+    if (!entry) { elements.toast.className = 'toast'; return; }
+    elements.toast.textContent = navoUsesChinese() ? entry.message : translateText(entry.message);
+    elements.toast.className = `toast visible${entry.error ? ' error' : ''}`;
+    showToast.timeout = setTimeout(next,entry.error ? 5000 : 3200);
+  };
+  if (!showToast.active) next();
 }
 
 function setLaunchControlsDisabled(disabled) {
@@ -946,8 +992,11 @@ function setLaunchControlsDisabled(disabled) {
 function renderCodexLaunchProgress(progress = state.launchProgress) {
   if (!elements.codexLaunchStatus || !progress || progress.stage === 'idle') return;
   if (progress.startedAt && progress.startedAt !== state.launchProgressStartedAt) {
+    const pendingStart = state.launchProgressPendingStart;
+    const adoptingPendingStart = Boolean(pendingStart && pendingStart.kind === progress.kind && pendingStart.label === progress.label);
+    state.launchProgressPendingStart = null;
     state.launchProgressStartedAt = progress.startedAt;
-    state.launchProgressDismissed = false;
+    if (!adoptingPendingStart) state.launchProgressDismissed = false;
     state.launchProgressCompleteKey = '';
     clearTimeout(renderCodexLaunchProgress.hideTimer);
   }
@@ -998,6 +1047,7 @@ function renderCodexLaunchProgress(progress = state.launchProgress) {
 function beginLaunchUi(kind, label) {
   state.launchProgressDismissed = false;
   state.launchProgressStartedAt = '';
+  state.launchProgressPendingStart = { kind, label };
   state.launchProgressCompleteKey = '';
   clearTimeout(renderCodexLaunchProgress.hideTimer);
   renderCodexLaunchProgress({ active: true, kind, label, stage: 'preparing', message: '正在准备启动环境…', percent: 6 });
@@ -1125,8 +1175,13 @@ function openApiSecretDialog(secret) {
   });
 }
 
+function tr(zh, en) {
+  return navoUsesChinese() ? zh : en;
+}
+
 function formatLaunchSize(bytes) {
   const value = Number(bytes) || 0;
+  if (value <= 0) return '0 KB';
   if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`;
   if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(value >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
   return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
@@ -1143,19 +1198,27 @@ async function openCodexLaunchDialog() {
     form.method = 'dialog';
     const projectMarkup = catalog.projects.map((project) => `
       <section class="launch-project collapsed" data-launch-project-section="${escapeHtml(project.id)}">
-        <div class="launch-project-head"><label><input type="checkbox" data-launch-project value="${escapeHtml(project.id)}" checked><span><strong>${escapeHtml(project.label)}</strong><small>${project.threads.length} 个会话${project.roots?.[0] ? ` · ${escapeHtml(project.roots[0])}` : ''}</small></span></label><div class="launch-project-actions"><button type="button" data-launch-only="${escapeHtml(project.id)}">仅选此项目</button><button type="button" data-launch-toggle="${escapeHtml(project.id)}" aria-expanded="false" aria-label="展开项目会话"><span class="fold-icon" aria-hidden="true"><span class="ui-chevron"></span></span></button></div></div>
+        <div class="launch-project-head"><label><input type="checkbox" data-launch-project value="${escapeHtml(project.id)}" checked><span><strong>${escapeHtml(project.label)}</strong><small>${tr(`${project.threads.length} 个会话`, `${project.threads.length} ${project.threads.length === 1 ? 'conversation' : 'conversations'}`)}${project.roots?.[0] ? ` · ${escapeHtml(project.roots[0])}` : ''}</small></span></label><div class="launch-project-actions"><button type="button" data-launch-only="${escapeHtml(project.id)}">仅选此项目</button><button type="button" data-launch-toggle="${escapeHtml(project.id)}" aria-expanded="false" aria-label="展开项目会话"><span class="fold-icon" aria-hidden="true"><span class="ui-chevron"></span></span></button></div></div>
         <div class="launch-thread-list">${project.threads.map((thread) => `
           <label class="launch-thread"><input type="checkbox" data-launch-thread data-project-id="${escapeHtml(project.id)}" value="${escapeHtml(thread.id)}" checked><span><strong>${escapeHtml(thread.title)}</strong><small>${escapeHtml(thread.cwd || '本地会话')}</small></span><em class="${thread.oversized ? 'oversized' : ''}">${formatLaunchSize(thread.sizeBytes)}</em></label>
         `).join('') || '<p class="launch-empty">该项目目前没有本地会话</p>'}</div>
       </section>`).join('');
+    const optimizationHelp = [
+      catalog.oversizedThreadCount
+        ? tr(`${catalog.oversizedThreadCount} 个超大会话可检查。`, `${catalog.oversizedThreadCount} oversized ${catalog.oversizedThreadCount === 1 ? 'conversation can' : 'conversations can'} be checked.`)
+        : tr('当前没有超过 500 MB 的会话。', 'No conversation currently exceeds 500 MB.'),
+      tr('仅处理含有效恢复检查点的会话；异常、旧格式或含回滚记录时会跳过，并保留原文件备份。', 'Only conversations with a valid recovery checkpoint are processed. Invalid, legacy, or rolled-back histories are skipped and the original file is backed up.'),
+    ].join(navoUsesChinese() ? '' : ' ');
     form.innerHTML = `
       <div class="dialog-head"><div><p class="eyebrow">CODEX LAUNCH</p><h2>选择本次加载内容</h2></div><button class="icon-button" type="button" data-launch-close aria-label="关闭">×</button></div>
+      <div class="launch-dialog-content">
       <p class="dialog-copy">普通账号和 API 模式共用这组选项。未勾选的项目与会话不会在本次启动中加载，原始数据仍会保留。</p>
       <label class="launch-language"><span>界面语言</span><div class="launch-language-control"><i>文</i><select name="language">${catalog.languages.map((item) => `<option value="${escapeHtml(item.id)}"${item.id === catalog.defaultLanguage ? ' selected' : ''}>${escapeHtml(item.label)}</option>`).join('')}</select></div></label>
       <div class="launch-select-bar"><label><input type="checkbox" data-launch-all checked><span>全选项目和会话</span></label><div><small data-launch-selected>已选 ${catalog.projects.length} 个项目、${catalog.threadCount} 个会话</small><button type="button" data-launch-collapse-all>全部展开</button></div><progress class="launch-selection-progress" data-launch-progress value="100" max="100">100%</progress></div>
       <div class="launch-projects">${projectMarkup || '<p class="launch-empty">尚未找到可加载的本地项目或会话</p>'}</div>
-      <div class="launch-optimize"><label><input type="checkbox" name="optimizeOversized"><span><strong>启动前安全优化超大历史会话</strong><small>${catalog.oversizedThreadCount ? `${catalog.oversizedThreadCount} 个超大会话可检查。` : '当前没有超过 500 MB 的会话。'}仅处理含有效恢复检查点的会话；异常、旧格式或含回滚记录时会跳过，并保留原文件备份。</small></span></label><button class="secondary-button launch-backups-button" type="button" data-launch-backups>查看备份</button></div>
-      <section class="launch-backup-panel" data-launch-backup-panel hidden><strong>会话文件备份与恢复</strong><div data-launch-backup-list></div></section>
+      <div class="launch-optimize"><label><input type="checkbox" name="optimizeOversized"><span><strong>启动前安全优化超大历史会话</strong><small>${escapeHtml(optimizationHelp)}</small></span></label><button class="secondary-button launch-backups-button" type="button" data-launch-backups>查看备份</button></div>
+      <section class="launch-backup-panel" data-launch-backup-panel hidden><strong>会话文件备份与恢复</strong><p class="launch-backup-storage" data-launch-backup-storage></p><div data-launch-backup-list></div></section>
+      </div>
       <div class="dialog-actions"><button class="secondary-button" type="button" data-launch-cancel>取消</button><button class="primary-button" type="submit">按所选内容启动</button></div>`;
     dialog.appendChild(form);
     document.body.appendChild(dialog);
@@ -1169,10 +1232,12 @@ async function openCodexLaunchDialog() {
     const backupPanel = form.querySelector('[data-launch-backup-panel]');
     const backupList = form.querySelector('[data-launch-backup-list]');
     const loadBackups = async () => {
-      const backups = await api('/api/codex-rollout-backups');
+      const [backups, storage] = await Promise.all([api('/api/codex-rollout-backups'), api('/api/codex-rollout-backups/storage')]);
+      if (!dialog.isConnected) return;
+      form.querySelector('[data-launch-backup-storage]').textContent = `${tr('备份占用', 'Backup storage')}: ${formatLaunchSize(storage.backupRootBytes)} · ${tr('备份数量', 'Backup count')}: ${storage.backupCount || 0} · ${tr('磁盘可用', 'Disk available')}: ${storage.freeBytes == null ? '—' : formatLaunchSize(storage.freeBytes)}`;
       backupList.innerHTML = backups.length ? backups.map((backup) => `
         <article class="launch-backup-item">
-          <span><strong>${escapeHtml(backup.conversationFile)}</strong><small>${escapeHtml(new Date(backup.createdAt).toLocaleString())} · 优化前 ${formatLaunchSize(backup.beforeBytes)}${backup.afterBytes ? ` · 优化后 ${formatLaunchSize(backup.afterBytes)}` : ''}</small></span>
+          <span><strong title="${escapeHtml(backup.conversationFile)}">${escapeHtml(backup.conversationFile)}</strong><small>${escapeHtml(new Date(backup.createdAt).toLocaleString(state.appLocale))} · ${backup.kind === 'pre-restore' ? tr('恢复前备份', 'Pre-restore backup') : tr('优化前', 'Before optimization')} ${formatLaunchSize(backup.beforeBytes)}${backup.afterBytes && backup.kind !== 'pre-restore' ? ` · ${tr('优化后', 'After optimization')} ${formatLaunchSize(backup.afterBytes)}` : ''}</small><small>${tr('耗时', 'Duration')}: ${backup.durationMs ? `${(backup.durationMs / 1000).toFixed(1)} s` : '—'} · ${tr('备份文件', 'Backup file')}: ${formatLaunchSize(backup.backupBytes)} · ${backup.checksumAvailable ? tr('含校验记录', 'Checksum recorded') : tr('旧备份无校验记录', 'Legacy backup without checksum')}</small></span>
           <button class="secondary-button" type="button" data-restore-rollout="${escapeHtml(backup.id)}">恢复</button>
         </article>`).join('') : '<p class="launch-empty">暂无可恢复备份</p>';
     };
@@ -1228,7 +1293,12 @@ async function openCodexLaunchDialog() {
     form.querySelector('[data-launch-backups]').addEventListener('click', async () => {
       backupPanel.hidden = !backupPanel.hidden;
       if (!backupPanel.hidden) {
-        try { await loadBackups(); } catch (error) { showToast(error.message, true); }
+        try { await loadBackups(); } catch (error) {
+          if (!dialog.isConnected) return;
+          form.querySelector('[data-launch-backup-storage]').textContent = '';
+          backupList.innerHTML = `<p class="launch-empty" role="alert">${escapeHtml(`${tr('无法读取备份：', 'Unable to read backups: ')}${error.message}`)}</p>`;
+          showToast(error.message, true);
+        }
       }
     });
     backupList.addEventListener('click', async (event) => {
@@ -1236,8 +1306,8 @@ async function openCodexLaunchDialog() {
       if (!button || !confirm('恢复会话备份？当前文件会先自动备份。')) return;
       button.disabled = true;
       try {
-        await api('/api/codex-rollout-backups/restore', { method: 'POST', body: JSON.stringify({ id: button.dataset.restoreRollout }) });
-        showToast('会话备份已恢复');
+        const restored = await api('/api/codex-rollout-backups/restore', { method: 'POST', body: JSON.stringify({ id: button.dataset.restoreRollout }) });
+        showToast(`${tr('会话备份已恢复', 'Conversation backup restored')} · ${tr('耗时', 'Duration')}: ${(Number(restored.durationMs || 0) / 1000).toFixed(1)} s${restored.safetyBackup ? ` · ${tr('已保留恢复前备份', 'Pre-restore backup retained')}` : ''}`);
         await loadBackups();
       } catch (error) {
         showToast(error.message, true);
@@ -1271,13 +1341,13 @@ function parseModelList(value) {
   return [...new Set(String(value || '').split(/[\s,]+/).map((item) => item.trim()).filter(Boolean))];
 }
 
-function mountModelPicker({ form, fieldName = 'models', buttonLabel = '检测并读取模型', loadModels }) {
+function mountModelPicker({ form, fieldName = 'models', buttonLabel = tr('读取模型目录', 'Read model catalog'), loadModels }) {
   const control = form.elements[fieldName];
   const row = form.querySelector(`[data-api-field-row="${fieldName}"]`);
   if (!control || !row) return;
   const panel = document.createElement('div');
   panel.className = 'api-model-picker';
-  panel.innerHTML = `<div class="api-model-picker-bar"><button class="secondary-button api-model-detect" type="button">${escapeHtml(buttonLabel)}</button><span class="api-model-status">填写连接信息后检测</span></div><div class="api-model-options" hidden></div>`;
+  panel.innerHTML = `<div class="api-model-picker-bar"><button class="secondary-button api-model-detect" type="button">${escapeHtml(buttonLabel)}</button><span class="api-model-status">${tr('先勾选账号，再读取模型目录；目录不代表实时可用性。', 'Select accounts, then read their model catalog; a listed model is not a live availability result.')}</span></div><div class="api-model-options" hidden></div>`;
   row.insertAdjacentElement('afterend', panel);
   const button = panel.querySelector('.api-model-detect');
   const status = panel.querySelector('.api-model-status');
@@ -1298,13 +1368,13 @@ function mountModelPicker({ form, fieldName = 'models', buttonLabel = '检测并
   button.addEventListener('click', async () => {
     button.disabled = true;
     status.className = 'api-model-status loading';
-    status.textContent = '正在读取账号池可用模型…';
+    status.textContent = tr('正在读取所选账号的模型目录…', 'Reading the selected accounts’ model catalog…');
     try {
       const records = await loadModels();
-      if (!records.length) throw new Error('没有读取到可用模型');
+      if (!records.length) throw new Error(tr('所选账号未返回模型目录，请检查账号选择或稍后重试。', 'The selected accounts returned no model catalog. Check the account selection or try again later.'));
       render(records);
       status.className = 'api-model-status success';
-      status.textContent = `已读取 ${records.length} 个模型，请勾选要使用的模型`;
+      status.textContent = tr(`目录已读取 ${records.length} 个模型，尚未实测。可在账号管理的模型检测中检查实时可用性。`, `${records.length} models listed; not live-tested. Use Model diagnostics in Accounts to check current availability.`);
     } catch (error) {
       status.className = 'api-model-status error';
       status.textContent = error.message;
@@ -1561,7 +1631,14 @@ async function api(url, options = {}) {
   const response = await fetch(url, { ...options, headers });
   let payload;
   try { payload = await response.json(); } catch { throw new Error('本地服务返回了无法识别的内容'); }
-  if (!response.ok || !payload.ok) throw new Error(payload.error || `请求失败（${response.status}）`);
+  if (!response.ok || !payload.ok) {
+    const error = new Error(payload.error || `请求失败（${response.status}）`);
+    error.status = response.status;
+    error.code = payload.code || '';
+    error.operationStatus = payload.operationStatus || '';
+    error.diagnostics = payload.diagnostics;
+    throw error;
+  }
   return payload.data;
 }
 
@@ -1691,6 +1768,8 @@ function notificationFormValue() {
 }
 
 async function loadNotificationSettings() {
+  elements.notificationForm.elements.sound.setAttribute('aria-label', tr('通知提示音', 'Notification sound'));
+  elements.notificationForm.elements.volume.setAttribute('aria-label', tr('通知音量', 'Notification volume'));
   try {
     state.notificationSettings = await api('/api/notification-settings');
     fillNotificationForm(state.notificationSettings);
@@ -1780,7 +1859,7 @@ function operator() {
 }
 
 function formatReset(timestamp) {
-  if (!timestamp) return '重置时间未知';
+  if (!timestamp) return tr('重置时间未知', 'Reset time unknown');
   const reset = new Date(timestamp * 1000);
   const remaining = Math.max(0, reset.getTime() - Date.now());
   const days = Math.floor(remaining / 86_400_000);
@@ -1790,12 +1869,19 @@ function formatReset(timestamp) {
   if (days) parts.push(`${days}d`);
   if (hours || days) parts.push(`${hours}h`);
   parts.push(`${minutes}m`);
-  const dateText = reset.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+  const dateText = reset.toLocaleString(navoUsesChinese() ? 'zh-CN' : 'en-US', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
   return `${parts.join(' ')} (${dateText})`;
 }
 
 function quotaLabel(window) {
-  return Number(window.windowDurationMins) >= 6 * 24 * 60 ? '周额度' : window.label;
+  const minutes = Number(window.windowDurationMins);
+  if (minutes >= 6 * 24 * 60) return tr('周额度', 'Weekly quota');
+  if (minutes >= 4 * 60 && minutes <= 6 * 60) return tr('5 小时额度', '5-hour quota');
+  if (minutes >= 24 * 60) return tr(`${Math.round(minutes / 1440)} 天额度`, `${Math.round(minutes / 1440)}-day quota`);
+  if (minutes >= 60) return tr(`${Math.round(minutes / 60)} 小时额度`, `${Math.round(minutes / 60)}-hour quota`);
+  return window.label && window.label !== '短时额度'
+    ? navoUsesChinese() ? window.label : translateText(window.label)
+    : tr('短时额度', 'Short-term quota');
 }
 
 function renderQuota(account) {
@@ -1815,7 +1901,7 @@ function renderQuota(account) {
     const tone = remaining >= 70 ? 'healthy' : remaining >= 30 ? 'warning' : 'critical';
     return `<div class="quota-window ${tone}">
       <div class="quota-line"><span>${escapeHtml(quotaLabel(window))}</span><strong>${remaining}%</strong></div>
-      <progress class="quota-track" aria-label="${escapeHtml(quotaLabel(window))}可用额度" value="${remaining}" max="100">${remaining}%</progress>
+      <progress class="quota-track" aria-label="${escapeHtml(quotaLabel(window))}${tr('剩余', ' remaining')}" value="${remaining}" max="100">${remaining}%</progress>
       <div class="quota-reset">${escapeHtml(formatReset(window.resetsAt))}</div>
     </div>`;
   }).join('');
@@ -1856,7 +1942,7 @@ function renderApiAccountCards() {
     const backing = key.backingAccounts || [];
     const apiProxyEnabled = key.network?.mode === 'proxy';
     return `<article class="account-card api-virtual-card${active ? ' current' : ''}${usageExpanded ? ' usage-expanded' : ''}" data-id="api-key:${key.id}" aria-expanded="${usageExpanded}">
-      <div class="account-overview"><div class="account-identity"><div class="identity-title"><h3>${escapeHtml(key.name || 'Codex Navo API')}</h3></div><div class="identity-badges"><span class="plan-badge">API</span><span class="balance-badge">${backing.length} 个底层账号</span>${apiProxyEnabled ? `<span class="network-badge">代理 · ${escapeHtml(key.network.displayName || key.network.nodeName || '')}</span>` : ''}</div><p class="account-secondary">${escapeHtml(key.prefix || '')}</p></div></div>
+      <div class="account-overview"><div class="account-identity"><div class="identity-title"><h3>${escapeHtml(key.name || 'Codex Navo API')}</h3></div><div class="identity-badges"><span class="plan-badge">API</span><span class="balance-badge">${backing.length} 个底层账号</span>${apiProxyEnabled ? `<span class="network-badge">${tr('代理', 'Proxy')} · ${escapeHtml(key.network.displayName || key.network.nodeName || '')}</span>` : ''}</div><p class="account-secondary">${escapeHtml(key.prefix || '')}</p></div></div>
       <div class="quota-panel"><div class="quota-window ${remaining >= 70 ? 'healthy' : remaining >= 30 ? 'warning' : 'critical'}"><div class="quota-line"><span>账号池可用额度</span><strong>${remaining}%</strong></div><progress class="quota-track" value="${remaining}" max="100">${remaining}%</progress><div class="quota-reset">按 ${backing.length} 个绑定账号的总额度平均计算</div></div></div>
       <div class="account-actions"><button class="action-primary ${active ? 'action-exit' : 'action-codex'}" data-action="api-codex-${active ? 'stop' : 'launch'}">${active ? '退出 Codex' : '登录 Codex'}</button><button class="action-primary" data-action="api-route">账号与顺序</button><button class="icon-action network-action" data-action="api-network" data-active="${apiProxyEnabled}" title="配置 API 账号池代理" aria-label="配置 API 账号池代理"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M3.8 12h16.4M12 3.5c2.2 2.3 3.4 5.2 3.4 8.5S14.2 18.2 12 20.5M12 3.5C9.8 5.8 8.6 8.7 8.6 12s1.2 6.2 3.4 8.5"></path></svg></button><button class="icon-action wake-action" data-action="api-wake" title="唤醒底层账号" aria-label="唤醒底层账号"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.2 2.8 5.8 13h5l-1 8.2L18.2 10h-5z"></path></svg></button><button class="icon-action" data-action="api-refresh" title="刷新额度">↻</button></div>
       ${usageExpanded ? renderUsageStrip(apiUsageInSelectedRangeForKey(key)) : ''}
@@ -1871,12 +1957,12 @@ function render() {
   renderApiService();
   const proxiedAccounts = state.accounts.filter((account) => account.network?.mode === 'proxy').length;
   elements.networkSettingsButton.dataset.tooltip = proxiedAccounts
-    ? `${proxiedAccounts} 个账号使用代理`
-    : '网络与节点';
-  elements.networkSettingsButton.setAttribute('aria-pressed', String(proxiedAccounts > 0));
+    ? tr(`${proxiedAccounts} 个账号使用代理`, `${proxiedAccounts} ${proxiedAccounts === 1 ? 'account uses' : 'accounts use'} a proxy`)
+    : tr('网络与节点', 'Network and nodes');
+  elements.networkSettingsButton.removeAttribute('aria-pressed');
   const apiAccountCount = (state.apiService?.keys || []).length;
   const occupied = state.accounts.filter((account) => account.lease || account.codexActive).length + (state.apiService?.activeKeyId ? 1 : 0);
-  elements.summary.innerHTML = `<span><strong>${state.accounts.length}</strong> 个账号${apiAccountCount ? ` · ${apiAccountCount} 个 Navo API` : ''}</span><i aria-hidden="true"></i><span class="${occupied ? 'has-active' : ''}"><strong>${occupied}</strong> 使用中</span>`;
+  elements.summary.innerHTML = `<span><strong>${state.accounts.length}</strong>${tr(' 个账号', state.accounts.length === 1 ? ' account' : ' accounts')}${apiAccountCount ? tr(` · ${apiAccountCount} 个 Navo API`, ` · ${apiAccountCount} Navo API`) : ''}</span><i aria-hidden="true"></i><span class="${occupied ? 'has-active' : ''}"><strong>${occupied}</strong>${tr(' 使用中', ' active')}</span>`;
   const activeAccount = state.accounts.find((account) => account.codexActive);
   const activeApiKey = (state.apiService?.keys || []).find((key) => key.id === state.apiService?.activeKeyId);
   const externalCodexRunning = Boolean(state.codexRunning && !activeAccount && !activeApiKey);
@@ -1940,8 +2026,14 @@ function render() {
       : '';
     const expiryMs = Date.parse(account.planExpiresAt || '');
     const remainingDays = Number.isFinite(expiryMs) ? Math.max(0, Math.ceil((expiryMs - Date.now()) / 86_400_000)) : null;
+    const expiryTitle = remainingDays == null
+      ? account.planExpiryError || tr('正在自动读取官方套餐到期时间', 'Automatically checking the official plan expiration date')
+      : `${tr('套餐到期：', 'Plan expires: ')}${new Date(expiryMs).toLocaleDateString(navoUsesChinese() ? 'zh-CN' : 'en-US')}`;
+    const expiryLabel = remainingDays == null
+      ? (account.planExpiryCheckedAt ? tr('到期 暂未读取', 'Expiration unavailable') : tr('到期 自动检测中', 'Expiration: checking'))
+      : tr(`剩余 ${remainingDays} 天`, `${remainingDays} ${remainingDays === 1 ? 'day' : 'days'} left`);
     const expiryBadge = planType && planType !== 'free'
-      ? `<span class="expiry-badge" title="${remainingDays == null ? escapeHtml(account.planExpiryError || '正在自动读取官方套餐到期时间') : `套餐到期：${escapeHtml(new Date(expiryMs).toLocaleDateString())}`}">${remainingDays == null ? (account.planExpiryCheckedAt ? '到期 暂未读取' : '到期 自动检测中') : `剩余 ${remainingDays} 天`}</span>`
+      ? `<span class="expiry-badge" title="${escapeHtml(expiryTitle)}">${escapeHtml(expiryLabel)}</span>`
       : '';
     const resetCount = account.quota?.resetCredits?.availableCount;
     const resetBadge = typeof resetCount === 'number' && Number.isFinite(resetCount) ? `<button type="button" data-tool="reset-credits" class="reset-credit-badge" title="Codex 返回的可用额度重置卡">重置卡 ${Math.max(0, Math.floor(resetCount))} 张</button>` : '';
@@ -1960,7 +2052,7 @@ function render() {
       ? `<span class="health-badge health-${escapeHtml(health.status)}" title="${escapeHtml(health.detail || health.label)}">${escapeHtml(health.label || '待检查')}</span>`
       : '';
     const networkBadge = account.network?.mode === 'proxy'
-      ? `<span class="network-badge" title="${escapeHtml(account.network.label)}">代理 · ${escapeHtml(account.network.displayName || account.network.nodeName)}</span>`
+      ? `<span class="network-badge" title="${escapeHtml(account.network.label)}">${tr('代理', 'Proxy')} · ${escapeHtml(account.network.displayName || account.network.nodeName)}</span>`
       : '';
     let codexAction;
     if (relayOnly) {
@@ -2039,7 +2131,7 @@ async function refresh(options = {}) {
       elements.navoCurrentVersion.textContent = `v${state.appVersion}`;
     }
     if (state.usageRange !== 'today') state.usage = await api(`/api/usage?range=${encodeURIComponent(state.usageRange)}`);
-    if (background && editingSurfaceActive()) return;
+    if (background && (document.hidden || editingSurfaceActive())) return;
     render();
     const completed = state.accounts.find((account) => pendingAccountIds.has(account.id) && account.codexInitialized);
     if (completed) {
@@ -2624,34 +2716,34 @@ function showNetworkResult(message, error = false) {
 
 function nodeTestText(node) {
   const labels = {
-    available: '可用',
-    'unsupported-region': 'ChatGPT 不支持',
-    'challenge-required': '可连接（CF 保护）',
-    'cloudflare-protected': '可连接（CF 保护）',
-    blocked: '站点拒绝',
-    'rate-limited': '访问限流',
-    'connection-failed': '连接失败',
-    'tls-failed': 'TLS 中断',
-    checking: '检测中…',
+    available: tr('可用', 'Available'),
+    'unsupported-region': tr('ChatGPT 不支持', 'ChatGPT unsupported'),
+    'challenge-required': tr('可连接（CF 保护）', 'Reachable (CF protected)'),
+    'cloudflare-protected': tr('可连接（CF 保护）', 'Reachable (CF protected)'),
+    blocked: tr('站点拒绝', 'Site rejected'),
+    'rate-limited': tr('访问限流', 'Rate limited'),
+    'connection-failed': tr('连接失败', 'Connection failed'),
+    'tls-failed': tr('TLS 中断', 'TLS interrupted'),
+    checking: tr('检测中…', 'Checking…'),
   };
-  return labels[node.status] || (node.status ? '已检测' : '未检测');
+  return labels[node.status] || (node.status ? tr('已检测', 'Tested') : tr('未检测', 'Not tested'));
 }
 
 function nodeRouteText(node) {
   const states = {
-    available: '可用',
-    'unsupported-region': 'ChatGPT 不支持',
-    'challenge-required': '可连接（CF 保护）',
-    'cloudflare-protected': '可连接（CF 保护）',
-    blocked: '站点拒绝',
-    'rate-limited': '访问限流',
-    'connection-failed': '连接失败',
-    'tls-failed': 'TLS 中断',
-    checking: '检测中…',
+    available: tr('可用', 'Available'),
+    'unsupported-region': tr('ChatGPT 不支持', 'ChatGPT unsupported'),
+    'challenge-required': tr('可连接（CF 保护）', 'Reachable (CF protected)'),
+    'cloudflare-protected': tr('可连接（CF 保护）', 'Reachable (CF protected)'),
+    blocked: tr('站点拒绝', 'Site rejected'),
+    'rate-limited': tr('访问限流', 'Rate limited'),
+    'connection-failed': tr('连接失败', 'Connection failed'),
+    'tls-failed': tr('TLS 中断', 'TLS interrupted'),
+    checking: tr('检测中…', 'Checking…'),
   };
-  if (node.connectDelay != null) return `连接 ${node.connectDelay} ms · ${states[node.status] || 'ChatGPT 未完成'}`;
-  if (node.delay != null) return `连接 ${node.delay} ms · ${states[node.status] || '已检测'}`;
-  return states[node.status] || '未检测';
+  if (node.connectDelay != null) return `${tr('连接', 'Connection')} ${node.connectDelay} ms · ${states[node.status] || tr('ChatGPT 未完成', 'ChatGPT check incomplete')}`;
+  if (node.delay != null) return `${tr('连接', 'Connection')} ${node.delay} ms · ${states[node.status] || tr('已检测', 'Tested')}`;
+  return states[node.status] || tr('未检测', 'Not tested');
 }
 
 function renderNetworkSources() {
@@ -2837,7 +2929,7 @@ function syncAccountNetworkPreview() {
   const apiPool = state.accountNetworkId.startsWith('api-key:');
   elements.accountNetworkPreview.querySelector('small').textContent = direct
     ? (apiPool ? '该 API Key 的账号池请求全部直连' : '网页端和 Codex 均不使用代理')
-    : (apiPool ? '该 API Key 绑定的全部账号统一使用此节点' : '网页端、授权、额度与 Codex 使用此节点');
+    : (apiPool ? '该 API Key 绑定的全部账号统一使用此节点' : '网页登录、Codex OAuth 和 Codex 任务使用此线路');
 }
 
 function openAccountNetwork(account) {
@@ -3035,9 +3127,7 @@ async function openApplicationSettings() {
   loadLanguageSettings();
   refreshCodexUpdateState();
   if (!window.codexUpdater) return;
-  if (['available', 'downloading', 'downloaded', 'error', 'development'].includes(applicationUpdate.status)) return;
-  applicationUpdate = await window.codexUpdater.check();
-  renderApplicationUpdate();
+  await readApplicationUpdateState();
 }
 
 function renderCodexDesktopUpdate() {
@@ -3064,7 +3154,7 @@ function renderCodexDesktopUpdate() {
       ? `Windows Store is offering Codex v${info.latestVersion} to this device. It can be updated directly in Navo.`
       : `The official Codex v${info.latestVersion} direct package is available and can be updated in Navo.`;
   const copies = chinese ? {
-    idle: '正在读取官方版本信息。',
+    idle: '尚未检查。点击“重新检查”读取官方版本与本机安装状态。',
     checking: '正在检查 OpenAI 官方版本与安装包状态…',
     available: info.packageReady ? readyCopy : unavailableCopy,
     propagating: unavailableCopy,
@@ -3079,7 +3169,7 @@ function renderCodexDesktopUpdate() {
     current: `当前 Codex v${info.version || info.latestVersion} 已是官方最新版。`,
     error: `Codex 更新失败：${info.error || '请检查网络后重试。'}`,
   } : {
-    idle: 'Loading official version information.',
+    idle: 'Not checked yet. Select Check again to read official and installed versions.',
     checking: 'Checking the official OpenAI version and package availability…',
     available: info.packageReady ? readyCopy : unavailableCopy,
     propagating: unavailableCopy,
@@ -3095,13 +3185,20 @@ function renderCodexDesktopUpdate() {
     error: `Codex update failed: ${info.error || 'Check the network and try again.'}`,
   };
   elements.codexUpdateCopy.textContent = copies[info.status] || copies.idle;
+  if (info.checkedAt) {
+    const checked = new Date(info.checkedAt).toLocaleString(chinese ? 'zh-CN' : 'en-US');
+    elements.codexUpdateCopy.textContent += chinese ? ` 最近成功检查：${checked}${info.stale ? '（旧结果，尚未重新确认）' : ''}。` : ` Last successful check: ${checked}${info.stale ? ' (previous result; not revalidated)' : ''}.`;
+  }
   if (info.status === 'downloading' && Number(info.bytesDownloaded) > 0) {
     elements.codexUpdateCopy.textContent += ` · ${formatUpdateTransfer(info)}`;
   }
   elements.codexUpdateProgress.hidden = !busy;
-  elements.codexUpdateProgress.classList.toggle('indeterminate', info.status === 'store-installing' && percent === 0);
-  elements.codexUpdateProgressBar.style.width = info.status === 'store-installing' && percent === 0 ? '32%' : `${percent}%`;
-  elements.codexUpdateProgressLabel.textContent = info.status === 'store-installing' && percent === 0 ? '…' : `${percent}%`;
+  const measuredProgress = info.status === 'downloading' || (info.status === 'store-installing' && info.phase === 'store-downloading' && percent > 0);
+  elements.codexUpdateProgress.classList.toggle('indeterminate', !measuredProgress);
+  elements.codexUpdateProgressBar.style.width = measuredProgress ? `${percent}%` : '32%';
+  elements.codexUpdateProgressLabel.textContent = measuredProgress ? `${percent}%`
+    : info.status === 'verifying' ? tr('校验中', 'Verifying')
+    : ['installing', 'store-installing'].includes(info.status) ? tr('安装中', 'Installing') : tr('处理中', 'Working');
   elements.codexUpdateAction.disabled = busy && info.status !== 'downloading';
   if (info.status === 'downloading') elements.codexUpdateAction.textContent = chinese ? '取消' : 'Cancel';
   else if (busy) elements.codexUpdateAction.textContent = chinese ? '正在处理…' : 'Working…';
@@ -3123,29 +3220,34 @@ function formatUpdateTransfer(info) {
   return `${megabytes(received)} MB${total ? ` / ${megabytes(total)} MB` : ''}${speed ? ` · ${megabytes(speed)} MB/s` : ''}${eta}`;
 }
 
-async function refreshCodexUpdateState() {
+async function refreshCodexUpdateState(check = false) {
   if (!window.codexUpdater?.getCodexState) return;
-  codexDesktopUpdate = { ...codexDesktopUpdate, status: 'checking', phase: 'checking', percent: 0, error: '' };
-  renderCodexDesktopUpdate();
+  const revision = ++codexUpdateRevision;
+  if (check) { codexDesktopUpdate = { ...codexDesktopUpdate, status: 'checking', phase: 'checking', percent: 0, error: '' }; renderCodexDesktopUpdate(); }
   try {
-    codexDesktopUpdate = await window.codexUpdater.getCodexState();
+    const next = check ? await window.codexUpdater.checkCodex() : await window.codexUpdater.getCodexState();
+    if (revision === codexUpdateRevision) codexDesktopUpdate = next;
   } catch (error) {
-    codexDesktopUpdate = { ...codexDesktopUpdate, status: 'error', error: error.message || String(error) };
+    if (revision === codexUpdateRevision) codexDesktopUpdate = { ...codexDesktopUpdate, status: 'error', error: error.message || String(error) };
   }
   renderCodexDesktopUpdate();
 }
 
 async function installCodexUpdate() {
   if (codexDesktopUpdate.status === 'downloading') {
-    await window.codexUpdater?.cancelCodexDownload?.();
+    try { await window.codexUpdater?.cancelCodexDownload?.(); }
+    catch (error) { showToast(error.message || String(error), true); }
     return;
   }
-  if (!window.codexUpdater?.installCodexUpdate) return refreshCodexUpdateState();
-  if (!(codexDesktopUpdate.updateAvailable && codexDesktopUpdate.packageReady)) return refreshCodexUpdateState();
+  if (!window.codexUpdater?.installCodexUpdate) return refreshCodexUpdateState(true);
+  if (!(codexDesktopUpdate.updateAvailable && codexDesktopUpdate.packageReady)) return refreshCodexUpdateState(true);
+  const revision = ++codexUpdateRevision;
   try {
-    codexDesktopUpdate = await window.codexUpdater.installCodexUpdate({ locale: state.appLocale });
+    const next = await window.codexUpdater.installCodexUpdate({ locale: state.appLocale });
+    if (revision === codexUpdateRevision) codexDesktopUpdate = next;
   } catch (error) {
-    codexDesktopUpdate = { ...codexDesktopUpdate, status: 'error', error: error.message || String(error) };
+    if (revision === codexUpdateRevision) codexDesktopUpdate = { ...codexDesktopUpdate, status: 'error', error: error.message || String(error) };
+    else showToast(error.message || String(error), true);
   }
   renderCodexDesktopUpdate();
 }
@@ -3153,12 +3255,21 @@ async function installCodexUpdate() {
 async function performApplicationUpdateAction(button = elements.updatePrimaryAction) {
   if (!window.codexUpdater) return;
   const action = button?.dataset.action || 'check';
-  if (action === 'download') applicationUpdate = await window.codexUpdater.download();
-  else if (action === 'install') {
-    await window.codexUpdater.install();
-    return;
-  } else applicationUpdate = await window.codexUpdater.check();
-  renderApplicationUpdate();
+  if (button?.disabled) return;
+  const revision = ++applicationUpdateRevision;
+  if (button) button.disabled = true;
+  try {
+    let next;
+    if (action === 'download') next = await window.codexUpdater.download();
+    else if (action === 'cancel') next = await window.codexUpdater.cancelDownload();
+    else if (action === 'install') { await window.codexUpdater.install(); return; }
+    else next = await window.codexUpdater.check();
+    if (revision === applicationUpdateRevision) applicationUpdate = next;
+  } catch (error) {
+    if (revision === applicationUpdateRevision) applicationUpdate = {...applicationUpdate,status:'error',error:error.message || String(error)};
+    else showToast(error.message || String(error), true);
+  }
+  finally { renderApplicationUpdate(); }
 }
 
 elements.updateChip.addEventListener('click', openApplicationSettings);
@@ -3330,6 +3441,7 @@ elements.languageForm.addEventListener('submit', (event) => {
   document.documentElement.lang = state.appLocale;
   applyTheme();
   window.codexFloating?.updateLocale?.(state.appLocale);
+  window.NavoRuntimeTools?.render();
   elements.languageStatus.textContent = navoUsesChinese() ? '已保存。Navo 与 Codex 默认使用简体中文。' : 'Saved. Navo is using English and Codex will use the selected language.';
   showToast('语言设置已保存');
   if (!navoUsesChinese()) {
@@ -3432,9 +3544,10 @@ async function editApiKey(record = null) {
       });
       mountModelPicker({
         form,
-        buttonLabel: '检测账号池模型',
+        buttonLabel: tr('读取账号池模型目录', 'Read account-pool model catalog'),
         loadModels: async () => {
           const accountIds = String(form.elements.accountIds.value || '').split(',').map((id) => id.trim()).filter(Boolean);
+          if (!accountIds.length) throw new Error(tr('请先勾选要加入 Key 的账号。', 'Select the accounts to include in this key first.'));
           const models = await api('/api/api-service/models/detect', {
             method: 'POST',
             body: JSON.stringify({ accountIds }),
@@ -3593,11 +3706,17 @@ loadNotificationSettings();
 refreshSessions();
 refresh();
 state.timer = setInterval(() => {
-  if (!editingSurfaceActive()) refresh({ background: true });
+  if (!document.hidden && !editingSurfaceActive()) refresh({ background: true });
 }, 5_000);
 window.addEventListener('storage', (event) => {
   if (event.key === 'codex-navo-quota-refreshed-at') refresh({ background: true });
 });
-state.sessionTimer = setInterval(() => refreshSessions(), 2_000);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  refresh({ background: true });
+  refreshSessions();
+  pollCodexLaunchProgress();
+});
+state.sessionTimer = setInterval(() => { if (!document.hidden) refreshSessions(); }, 2_000);
 state.notificationTimer = setInterval(() => pollNotificationEvents(), 1_000);
 state.launchProgressTimer = setInterval(() => pollCodexLaunchProgress(), 450);

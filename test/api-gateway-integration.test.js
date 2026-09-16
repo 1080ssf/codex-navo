@@ -30,7 +30,7 @@ test('gateway serves account-pool models with Navo key authentication', { timeou
   const service = new ApiServiceManager({ runtimeRoot, readJson: json, writeJsonAtomic: write, gatewayPort });
   service.saveConfig({ enabled: true });
   service.ensureAccountPool(['gpt-5.6-sol']);
-  const created = service.createKey({ name: 'Integration' });
+  const created = service.createKey({ name: 'Integration', accountIds: ['missing-account'] });
   const child = spawn(process.execPath, ['server.js'], {
     cwd: path.resolve(__dirname, '..'),
     env: { ...process.env, CODEX_SWITCHBOARD_USER_DATA: runtimeRoot, CODEX_NAVO_API_PORT: String(gatewayPort), CODEX_MANAGER_PORT: '0', CODEX_MANAGER_NO_OPEN: '1', CODEX_MANAGER_MOCK_LAUNCH: '1' },

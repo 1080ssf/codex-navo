@@ -23,12 +23,12 @@ test('添加账号可以在首次登录授权前选择独立网络线路', () =>
   assert.match(server, /networkManager\.assign\(account\.id, body\.network\)[\s\S]{0,900}startCodexBrowserLogin\(account, operator\)/);
 });
 
-test('账号线路明确覆盖 Codex 内的 GitHub 访问', () => {
+test('账号线路明确覆盖 Codex 任务远程站点而非仅 GitHub', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   const network = fs.readFileSync(path.join(__dirname, '..', 'lib', 'account-network.js'), 'utf8');
-  assert.match(html, /Codex 桌面端及其 GitHub 访问都使用这条线路/);
-  assert.match(html, /GitHub 访问都会使用同一节点/);
+  assert.match(html, /网页登录、Codex OAuth 和 Codex 任务使用此线路/);
+  assert.match(html, /后台额度刷新和唤醒按全局择优线路执行/);
   assert.match(network, /HTTP_PROXY: url, HTTPS_PROXY: url/);
   assert.match(network, /ALL_PROXY: url, all_proxy: url/);
   assert.match(network, /NODE_USE_ENV_PROXY: '1'/);
@@ -333,7 +333,7 @@ test('批量节点检测随完成结果实时刷新并继续后台检测', () =>
   assert.match(server, /url\.pathname === '\/api\/network-state'/);
 });
 
-test('线路侧栏保持固定高度且节点列表只在超过最大高度后滚动', () => {
+test('线路侧栏保持固定高度且节点列表填满可用区域但不拉高单个节点', () => {
   const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
   assert.match(styles, /\.network-page-form \.network-workspace\s*\{[^}]*height:\s*352px[^}]*min-height:\s*352px/);
@@ -341,10 +341,10 @@ test('线路侧栏保持固定高度且节点列表只在超过最大高度后�
   assert.match(styles, /\.network-workspace\s*\{[^}]*position:\s*relative[^}]*padding-left:\s*220px/);
   assert.match(styles, /\.network-source-sidebar\s*\{[^}]*position:\s*absolute[^}]*inset:\s*0 auto 0 0[^}]*width:\s*220px/);
   assert.match(styles, /\.network-source-tabs\s*\{[^}]*height:\s*calc\(100% - 30px\)[^}]*overflow-y:\s*auto/);
-  assert.match(styles, /\.network-node-list\s*\{[^}]*max-height:\s*204px[^}]*overflow-y:\s*auto/);
+  assert.match(styles, /\.network-node-list\s*\{[^}]*flex:\s*1[^}]*min-height:\s*0[^}]*max-height:\s*none[^}]*overflow-y:\s*auto/);
   assert.match(styles, /\.network-node-list\s*\{[^}]*display:\s*block/);
-  assert.match(styles, /\.network-node\s*\{[^}]*height:\s*34px[^}]*min-height:\s*34px/);
-  assert.doesNotMatch(styles, /\.network-node-pane\s*\{[^}]*height:\s*100%/);
+  assert.match(styles, /\.network-node\s*\{[^}]*height:\s*auto[^}]*min-height:\s*40px/);
+  assert.match(styles, /\.network-node-pane\s*\{[^}]*display:\s*flex[^}]*height:\s*100%[^}]*flex-direction:\s*column/);
   assert.doesNotMatch(client, /selected\.kind\s*===\s*['"]subscription['"][\s\S]{0,120}network-workspace-height/);
   assert.match(client, /<span>连接延迟<\/span><span>ChatGPT 检测<\/span>/);
   assert.match(client, /class="node-connect"/);
@@ -654,6 +654,7 @@ test('Codex launch dialog keeps actions visible and omits the redundant language
   const launchDialog = client.slice(client.indexOf('async function openCodexLaunchDialog'), client.indexOf('function parseModelList'));
   assert.doesNotMatch(launchDialog, /跟随 Navo 默认语言/);
   assert.match(styles, /\.codex-launch-dialog form \{[^}]*display: flex[^}]*height: 100%[^}]*flex-direction: column/s);
+  assert.match(styles, /\.launch-dialog-content \{[^}]*flex: 1 1 auto[^}]*min-height: 0[^}]*overflow-y: auto/s);
   assert.match(styles, /\.launch-projects \{[^}]*flex: 1 1 auto[^}]*overflow-y: auto/s);
   assert.match(styles, /\.codex-launch-dialog \.dialog-actions \{[^}]*flex: 0 0 auto/s);
 });
@@ -773,6 +774,7 @@ test('notification message is user-authored and sound rows keep aligned controls
   assert.match(client, /finally \{ state\.notificationPolling = false; \}/);
   assert.match(styles, /\.notification-two-column \{[^}]*repeat\(2, minmax\(0, 1fr\)\)/s);
   assert.match(styles, /\.notification-control-card \{[^}]*min-height: 126px/s);
+  assert.match(styles, /\.notification-sound-controls \{[^}]*repeat\(auto-fit, minmax\(min\(100%, 140px\), 1fr\)\)/s);
   assert.match(styles, /\.compact-switch input \{[^}]*width: 1px[^}]*height: 1px/s);
   assert.match(styles, /\.notification-channel \.compact-switch input \{[^}]*width: 1px[^}]*height: 1px/s);
 });
@@ -801,7 +803,10 @@ test('英文界面翻译只写入真正变化的文本，避免 MutationObserver
   assert.doesNotMatch(client, /root\.nodeValue = translateText\(root\.nodeValue\)/);
   assert.doesNotMatch(client, /node\.nodeValue = translateText\(node\.nodeValue\)/);
   assert.match(client, /record\.type === 'attributes'/);
-  assert.match(client, /attributeFilter:\s*\['title', 'aria-label', 'placeholder'\]/);
+  const observedAttributes = client.match(/attributeFilter:\s*\[([^\]]+)\]/)?.[1] || '';
+  for (const attribute of ['title', 'aria-label', 'placeholder', 'data-tooltip']) {
+    assert.ok(observedAttributes.includes(`'${attribute}'`), `Missing translation observation for ${attribute}`);
+  }
 });
 
 test('发布前语言审计覆盖静态、动态和悬浮窗文案', () => {
@@ -903,7 +908,7 @@ test('new API keys start with no accounts and detect models per selected account
   assert.match(client, /\/api\/api-service\/models\/detect/);
   assert.match(server, /detectSelectedAccountModels/);
   assert.match(server, /accountModelCapabilities\.set/);
-  assert.match(server, /accountPoolCandidates\(keyRecord\?\.accountIds, model\)/);
+  assert.match(server, /accountPoolCandidates\(keyRecord, model\)/);
   assert.match(quota, /method: 'model\/list'/);
 });
 

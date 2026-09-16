@@ -1,5 +1,6 @@
 const crypto = require('node:crypto');
 const { settledMap } = require('./lib/bounded-work');
+const { QuotaRefreshScheduler, quotaRefreshDue, refreshAccountQuota, beginQuotaRead } = require('./lib/quota-refresh-scheduler');
 const { ModelDiagnostics, inspectProbeResponse } = require('./lib/model-diagnostics');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -18,11 +19,11 @@ const {
   validateAccountId,
 } = require('./lib/core');
 const { hasSpendableCredits, readCodexModels, readCodexQuota, warmCodexAppServer, consumeCodexResetCredit } = require('./lib/codex-quota');
-const { ResetCreditOperations } = require('./lib/reset-credit-operations');
+const { ResetCreditOperations, isResetCreditUsable } = require('./lib/reset-credit-operations');
 const { CodexUsageTracker } = require('./lib/codex-usage');
-const { selectNewestCli } = require('./lib/codex-cli-selection');
+const { createCliResolver } = require('./lib/codex-cli-selection');
 const { readModelCatalog } = require('./lib/model-catalog');
-const { detectQuotaReset, isQuotaWindowActive, localDateKey, normalizeWakeSettings, quotaObservation, shouldWakeAccount } = require('./lib/wake');
+const { classifyWakeFailure, detectQuotaReset, isQuotaWindowActive, normalizeWakeSettings, quotaObservation, shouldVerifyWakeAccount, shouldWakeAccount, wakeAttemptState, wakeVerificationState } = require('./lib/wake');
 const { isModelCompatibilityError, parseWakeJsonl, wakeFailureMessage } = require('./lib/wake-command');
 const { authIdentity, createAuthPackage, isNonRefreshableWebSessionAuth, readAuthPackage, validateAuthPayload } = require('./lib/auth-package');
 const {
@@ -45,6 +46,7 @@ const {
 const { AccountNetworkManager } = require('./lib/account-network');
 const { StableProxyRelay } = require('./lib/stable-proxy-relay');
 const { ApiServiceManager, MAX_RESPONSE_BYTES, extractUsage, usageForLocalDate } = require('./lib/api-service');
+const { LEGACY_ALL_ACCOUNT_SCOPE, resolveApiKeyMembers } = require('./lib/api-key-members');
 const {
   chatToResponses,
   responsesToChat,
@@ -69,6 +71,7 @@ const {
   pruneMissingLocalProjects,
   restoreLaunchView,
   restoreRolloutBackup,
+  rolloutBackupStorage,
   syncSessionIndexNames,
   withDesktopLocale,
 } = require('./lib/codex-launch-view');
@@ -409,8 +412,8 @@ function sendJson(response, statusCode, payload) {
   response.end(JSON.stringify(payload));
 }
 
-function sendError(response, statusCode, message) {
-  sendJson(response, statusCode, { ok: false, error: message });
+function sendError(response, statusCode, message, details = {}) {
+  sendJson(response, statusCode, { ...details, ok: false, error: message });
 }
 
 function terminalSafeText(value) {
@@ -585,43 +588,12 @@ function findCodexDesktop() {
   return { executable, appUserModelId: String(packageInfo?.AppUserModelId || '').trim(), version: String(packageInfo?.Version || '').trim() };
 }
 
-function findCodexCli() {
-  if (settings.codexCliExecutable) {
-    if (!fs.existsSync(settings.codexCliExecutable)) {
-      throw new Error('settings.json 中配置的 Codex CLI 路径不存在');
-    }
-    return settings.codexCliExecutable;
-  }
-
-  const npmExecutable = path.join(
-    process.env.APPDATA || '',
-    'npm',
-    'node_modules',
-    '@openai',
-    'codex',
-    'node_modules',
-    '@openai',
-    'codex-win32-x64',
-    'vendor',
-    'x86_64-pc-windows-msvc',
-    'bin',
-    'codex.exe',
-  );
-  const candidates = fs.existsSync(npmExecutable) ? [npmExecutable] : [];
-
-  const managedBin = path.join(process.env.LOCALAPPDATA || '', 'OpenAI', 'Codex', 'bin');
-  if (fs.existsSync(managedBin)) {
-    const managedExecutables = fs.readdirSync(managedBin, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => path.join(managedBin, entry.name, 'codex.exe'))
-      .filter((candidate) => fs.existsSync(candidate))
-      .sort((left, right) => fs.statSync(right).mtimeMs - fs.statSync(left).mtimeMs);
-    candidates.push(...managedExecutables);
-  }
-
-  if (candidates.length) return selectNewestCli(candidates);
-
-  throw new Error('没有找到 Codex CLI，无法启动首次设备授权');
+let cliResolver = createCliResolver();
+function cliOptions(extra = {}) {
+  return { configured: settings.codexCliExecutable, desktopExecutable: settings.codexDesktopExecutable, ...extra };
+}
+async function findCodexCli() {
+  return cliResolver.resolve(cliOptions());
 }
 
 const CODEX_PROCESS_CACHE_MS = 1_500;
@@ -693,6 +665,7 @@ function codexProcessIdentityMatches(expected, snapshot) {
 }
 
 function detectCodexDesktopSnapshot({ preferCache = true } = {}) {
+  if (settings.mockLaunch) return { pid: null, reliable: true, checkedAt: Date.now(), mocked: true };
   const now = Date.now();
   if (preferCache && now - lastCodexDesktopAttemptAt < CODEX_PROCESS_CACHE_MS) {
     return { ...lastCodexDesktopSnapshot, cached: true };
@@ -1083,20 +1056,25 @@ function accountHasUsableQuota(account) {
   return accountRemainingPercent(account) > 0 || hasSpendableCredits(account.quota?.credits);
 }
 
-function accountPoolCandidates(accountIds = [], model = '') {
+function apiKeyConfiguredMembers(keyRecord) {
+  return resolveApiKeyMembers(keyRecord, accounts);
+}
+
+function apiKeyMembers(keyRecord) {
+  return resolveApiKeyMembers(keyRecord, accounts, (account) => account.enabled !== false
+    && isCodexAuthenticated(account) && account.quotaErrorCode !== 'auth_expired');
+}
+
+function accountPoolCandidates(keyRecord, model = '') {
   const now = Date.now();
-  const eligible = accounts.filter((account) => account.enabled !== false && isCodexAuthenticated(account)
-    && account.quotaErrorCode !== 'auth_expired' && accountHasUsableQuota(account)
+  const eligible = apiKeyMembers(keyRecord).filter((account) => accountHasUsableQuota(account)
     && (accountPoolCooldowns.get(account.id) || 0) <= now);
   const requestedModel = String(model || '').split('/').pop();
   const supportsModel = (account) => {
     const known = accountModelCapabilities.get(account.id);
     return !requestedModel || !known || known.has(requestedModel);
   };
-  if (Array.isArray(accountIds) && accountIds.length) {
-    const byId = new Map(eligible.map((account) => [account.id, account]));
-    return accountIds.map((id) => byId.get(id)).filter((account) => account && supportsModel(account));
-  }
+  if (keyRecord?.accountScope !== LEGACY_ALL_ACCOUNT_SCOPE) return eligible.filter(supportsModel);
   return eligible.filter(supportsModel).sort((left, right) => accountRemainingPercent(right) - accountRemainingPercent(left)
       || (accountPoolLastUsed.get(left.id) || 0) - (accountPoolLastUsed.get(right.id) || 0)
       || String(left.createdAt || '').localeCompare(String(right.createdAt || '')));
@@ -1176,10 +1154,8 @@ function coolDownAccountPoolEntry(accountId, upstream) {
 }
 
 function accountPoolHealth(keyRecord) {
-  const selected = new Set(Array.isArray(keyRecord?.accountIds) ? keyRecord.accountIds : []);
   const now = Date.now();
-  return accounts
-    .filter((account) => !selected.size || selected.has(account.id))
+  return apiKeyConfiguredMembers(keyRecord)
     .map((account) => {
       const cooldownUntil = accountPoolCooldowns.get(account.id) || 0;
       const authenticated = isCodexAuthenticated(account) && account.quotaErrorCode !== 'auth_expired';
@@ -1225,7 +1201,7 @@ function poolFailureError(failures) {
 }
 
 async function forwardAccountPoolResponses({ keyRecord, model, body, upstreamHeaders = {}, signal }) {
-  const candidates = accountPoolCandidates(keyRecord?.accountIds, model);
+  const candidates = accountPoolCandidates(keyRecord, model);
   if (!candidates.length) throw Object.assign(new Error(`所选账号均不可用、处于冷却状态或不支持模型 ${model}`), {
     statusCode: 503,
     errorType: 'account_pool_error',
@@ -1460,26 +1436,8 @@ function updateWakeState(accountId, patch) {
   });
 }
 
-function recordWakeAttempt(account, trigger, status, { error = '', evidence = null } = {}) {
-  const previous = wakeState(account.id);
-  const next = {
-    ...previous,
-    lastWakeAt: new Date().toISOString(),
-    lastWakeStatus: status,
-    lastWakeError: String(error || '').slice(0, 500),
-    lastWakeEvidence: evidence,
-  };
-  if (trigger === 'daily') next.lastDailyDate = localDateKey();
-  if (trigger === 'after-reset') {
-    const event = previous.pendingResetEvent;
-    if (status === 'success' || status === 'pending') {
-      next.lastHandledResetEventKey = event?.key || previous.lastHandledResetEventKey || '';
-      next.pendingResetEvent = null;
-      next.lastResetAttemptAt = '';
-    } else {
-      next.lastResetAttemptAt = next.lastWakeAt;
-    }
-  }
+function recordWakeAttempt(account, trigger, status, options = {}) {
+  const next = wakeAttemptState(wakeState(account.id), trigger, status, options);
   saveWakeSettings({
     ...wakeSettings,
     accountStates: { ...wakeSettings.accountStates, [account.id]: next },
@@ -1507,7 +1465,7 @@ async function runWakeCommand(account, environmentOverride = null, options = {})
   const selectedModel = options.model ?? wakeSettings.model;
   const selectedPrompt = String(options.prompt || wakeSettings.prompt).trim();
 
-  const executable = findCodexCli();
+  const executable = await findCodexCli();
   const { codexDir, codexHomeDir } = accountPaths(account);
   const workspace = path.join(codexDir, 'wake-workspace');
   fs.mkdirSync(workspace, { recursive: true });
@@ -1525,13 +1483,24 @@ async function runWakeCommand(account, environmentOverride = null, options = {})
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let spawned = false;
     let timeout = null;
     const startedAt = Date.now();
-    const child = spawn(executable, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-      env: taskEnvironment,
-    });
+    // Persist uncertainty before starting the process: a crash must never turn
+    // an already submitted wake into a fresh automatic generation attempt.
+    options.onSubmitting?.();
+    let child;
+    try {
+      child = spawn(executable, args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        env: taskEnvironment,
+      });
+    } catch (error) {
+      error.wakeSubmission = 'not-submitted';
+      return reject(error);
+    }
+    child.once('spawn', () => { spawned = true; });
     wakeRuns.set(account.id, child);
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
@@ -1542,11 +1511,17 @@ async function runWakeCommand(account, environmentOverride = null, options = {})
       settled = true;
       clearTimeout(timeout);
       wakeRuns.delete(account.id);
-      if (error) return reject(error);
       const parsed = parseWakeJsonl(stdout);
-      if (!parsed.verified) {
-        const failure = new Error(wakeFailureMessage({ code: 0, parsed, stderr }));
+      if (error || !parsed.verified) {
+        const failure = error || new Error(wakeFailureMessage({ code: 0, parsed, stderr }));
         failure.wakeOutput = `${parsed.errors.join('\n')}\n${stderr}`;
+        failure.wakeSubmission ||= parsed.verified ? 'completed' : 'unknown';
+        failure.wakeEvidence = {
+          verified: parsed.verified,
+          threadId: parsed.threadId,
+          agentMessageReceived: parsed.agentMessageReceived,
+          usage: parsed.usage,
+        };
         return reject(failure);
       }
       return resolve({
@@ -1559,12 +1534,19 @@ async function runWakeCommand(account, environmentOverride = null, options = {})
         usage: parsed.usage,
       });
     };
-    child.on('error', (error) => finish(new Error(`无法启动 Codex 唤醒请求：${error.message}`)));
+    child.on('error', (error) => {
+      const failure = new Error(`无法启动 Codex 唤醒请求：${error.message}`);
+      failure.code = error.code;
+      failure.wakeSubmission = spawned ? 'unknown' : 'not-submitted';
+      finish(failure);
+    });
     child.on('close', (code) => {
       if (code === 0) return finish();
       const parsed = parseWakeJsonl(stdout);
       const failure = new Error(wakeFailureMessage({ code, parsed, stderr }));
       failure.wakeOutput = `${parsed.errors.join('\n')}\n${stderr}`;
+      if (!parsed.turnCompleted && !parsed.agentMessageReceived && !parsed.usage.totalTokens
+        && isModelCompatibilityError(failure.wakeOutput)) failure.wakeSubmission = 'not-submitted';
       return finish(failure);
     });
     timeout = setTimeout(() => {
@@ -1576,18 +1558,25 @@ async function runWakeCommand(account, environmentOverride = null, options = {})
   try {
     return await execute(selectedModel);
   } catch (error) {
-    if (!selectedModel || !isModelCompatibilityError(`${error.message}\n${error.wakeOutput || ''}`)) throw error;
+    if (!selectedModel || error.wakeSubmission !== 'not-submitted'
+      || !isModelCompatibilityError(`${error.message}\n${error.wakeOutput || ''}`)) throw error;
     return execute('', true);
   }
 }
 
 async function refreshWakeQuota(account, environmentOverride = null) {
+  const quotaRead = beginQuotaRead(account);
   const { codexHomeDir } = accountPaths(account);
-  const quotaEnvironment = environmentOverride || await accountTaskEnvironment(account, process.env);
-  account.quota = await readCodexQuota(findCodexCli(), codexHomeDir, 15_000, quotaEnvironment);
-  account.quotaError = '';
-  account.quotaErrorCode = '';
-  account.quotaCheckedAt = account.quota.refreshedAt;
+  try {
+    const quotaEnvironment = environmentOverride || await accountTaskEnvironment(account, process.env);
+    quotaRead.checkpoint();
+    const executable = await findCodexCli();
+    quotaRead.checkpoint();
+    quotaRead.apply(await readCodexQuota(executable, codexHomeDir, 15_000, quotaEnvironment));
+  } catch (error) {
+    quotaRead.checkpoint();
+    throw error;
+  }
   saveAccounts([...accounts]);
   return quotaObservation(account.quota);
 }
@@ -1603,9 +1592,19 @@ async function verifyWakeWindow(account, environmentOverride = null) {
 async function wakeAccount(account, trigger = 'manual', operator = '本机用户', environmentOverride = null) {
   if (wakeOperations.has(account.id)) throw new Error('该账号正在唤醒，请稍候');
   wakeOperations.add(account.id);
+  let submission = 'not-submitted';
   try {
+    recordWakeAttempt(account, trigger, 'running', { evidence: { submission } });
     const quotaBefore = quotaObservation(account.quota);
-    const commandEvidence = await runWakeCommand(account, environmentOverride);
+    const commandEvidence = await runWakeCommand(account, environmentOverride, {
+      onSubmitting: () => {
+        recordWakeAttempt(account, trigger, 'pending', { evidence: { submission: 'unknown', verified: false } });
+        submission = 'unknown';
+      },
+    });
+    submission = 'completed';
+    // Store command completion separately from the later quota synchronization.
+    recordWakeAttempt(account, trigger, 'pending', { evidence: { ...commandEvidence, submission } });
     let quotaRefreshError = '';
     const verification = settings.mockLaunch
       ? { active: true, first: quotaBefore, second: quotaBefore }
@@ -1616,6 +1615,7 @@ async function wakeAccount(account, trigger = 'manual', operator = '本机用户
     const quotaAfter = verification.second || verification.first || quotaObservation(account.quota);
     const evidence = {
       ...commandEvidence,
+      submission,
       quotaRefreshed: !quotaRefreshError,
       quotaRefreshError,
       quotaBefore: quotaBefore?.remainingPercent ?? null,
@@ -1630,9 +1630,38 @@ async function wakeAccount(account, trigger = 'manual', operator = '本机用户
     if (trigger === 'after-reset') updateWakeState(account.id, { quotaObservation: quotaAfter });
     return accountView(account);
   } catch (error) {
-    recordWakeAttempt(account, trigger, 'failed', { error: error.message });
+    const failure = classifyWakeFailure(error, error.wakeSubmission || submission);
+    if (failure.authExpired) {
+      account.quotaErrorCode = 'auth_expired';
+      account.quotaError = '登录已失效，请重新授权';
+      saveAccounts([...accounts]);
+    }
+    recordWakeAttempt(account, trigger,
+      failure.submission === 'not-submitted' || failure.authExpired ? 'failed' : 'pending', {
+        error: error.message,
+        retryable: failure.retryable,
+        evidence: { ...error.wakeEvidence, submission: failure.submission },
+      });
     audit('account.wake.failed', { accountId: account.id, operator, result: error.message });
     throw error;
+  } finally {
+    wakeOperations.delete(account.id);
+  }
+}
+
+async function verifyPendingWakeAccount(account) {
+  if (wakeOperations.has(account.id)) return;
+  wakeOperations.add(account.id);
+  try {
+    const verification = await verifyWakeWindow(account).catch((error) => {
+      if (classifyWakeFailure(error).authExpired) {
+        account.quotaErrorCode = 'auth_expired';
+        account.quotaError = '登录已失效，请重新授权';
+        saveAccounts([...accounts]);
+      }
+      return { active: false, error: error.message };
+    });
+    updateWakeState(account.id, wakeVerificationState(wakeState(account.id), verification));
   } finally {
     wakeOperations.delete(account.id);
   }
@@ -1643,14 +1672,16 @@ async function refreshQuotaForResetDetection(account) {
   const lastProbe = Date.parse(state.lastQuotaProbeAt || '');
   if (Number.isFinite(lastProbe) && Date.now() - lastProbe < 60_000) return;
   updateWakeState(account.id, { lastQuotaProbeAt: new Date().toISOString() });
+  const quotaRead = beginQuotaRead(account);
   try {
     const { codexHomeDir } = accountPaths(account);
-    account.quota = await readCodexQuota(findCodexCli(), codexHomeDir, 15_000, await accountTaskEnvironment(account, process.env));
-    account.quotaError = '';
-    account.quotaErrorCode = '';
-    account.quotaCheckedAt = account.quota.refreshedAt;
+    const environment = await accountTaskEnvironment(account, process.env);
+    const executable = await findCodexCli();
+    quotaRead.checkpoint();
+    quotaRead.apply(await readCodexQuota(executable, codexHomeDir, 15_000, environment));
     saveAccounts([...accounts]);
   } catch (error) {
+    if (!quotaRead.isCurrent()) return;
     audit('wake.quota-probe.failed', { accountId: account.id, result: error.message });
   }
 }
@@ -1672,11 +1703,20 @@ async function detectResetForAccount(account) {
 }
 
 async function runScheduledWakes() {
-  if (wakeScheduleRunning || !wakeSettings.enabled || wakeSettings.mode === 'manual') return;
+  if (wakeScheduleRunning) return;
   wakeScheduleRunning = true;
   try {
     for (const account of accounts) {
       if (!isCodexAuthenticated(account) || account.quotaErrorCode === 'auth_expired' || wakeOperations.has(account.id)) continue;
+      if (shouldVerifyWakeAccount(wakeState(account.id))) {
+        try { await verifyPendingWakeAccount(account); } catch (error) {
+          audit('account.wake.verify.failed', { accountId: account.id, result: error.message });
+        }
+      }
+      // Disabling automatic generation does not discard bounded verification
+      // for a request already submitted manually.
+      if (!wakeSettings.enabled || wakeSettings.mode === 'manual') continue;
+      if (account.quotaErrorCode === 'auth_expired') continue;
       if (wakeSettings.mode === 'after-reset') await detectResetForAccount(account);
       if (!shouldWakeAccount(wakeSettings, account)) continue;
       const lastAttempt = Date.parse(wakeState(account.id).lastResetAttemptAt || '');
@@ -1709,7 +1749,7 @@ async function detectSelectedAccountModels(accountIds) {
     try {
       const runtime = await networkManager.ensureAccount(account.id);
       const environment = networkManager.environmentForRuntime(runtime, process.env);
-      const models = await readCodexModels(findCodexCli(), accountPaths(account).codexHomeDir, 20_000, environment);
+      const models = await readCodexModels(await findCodexCli(), accountPaths(account).codexHomeDir, 20_000, environment);
       const idsForAccount = new Set(models.map((model) => model.id));
       accountModelCapabilities.set(account.id, idsForAccount);
       for (const model of models) {
@@ -1844,14 +1884,14 @@ function diagnosticTarget(targetId) {
   if (String(targetId).startsWith('api-member:')) {
     const [, keyId, memberId] = String(targetId).split(':');
     const routeKey = apiServiceManager.keys.find((item) => item.id === keyId);
-    const account = accounts.find((item) => item.id === memberId);
-    if (!account || !routeKey?.accountIds.includes(memberId)) throw new Error('Account is not a member of this API key');
+    const account = apiKeyMembers(routeKey).find((item) => item.id === memberId);
+    if (!account) throw new Error('Account is not a member of this API key');
     return { account, routeKey, members: [account] };
   }
   if (String(targetId).startsWith('api-key:')) {
     const key = apiServiceManager.keys.find((item) => `api-key:${item.id}` === targetId);
     if (!key) throw new Error('API Key does not exist');
-    return { key, members: accounts.filter((account) => key.accountIds.includes(account.id)) };
+    return { key, members: apiKeyMembers(key) };
   }
   const account = accounts.find((item) => item.id === targetId);
   if (!account) throw new Error('Account does not exist');
@@ -1861,7 +1901,8 @@ function diagnosticTarget(targetId) {
 const modelDiagnostics = new ModelDiagnostics(async (item, signal) => {
   const { account, key, routeKey, members } = diagnosticTarget(item.targetId);
   const activeApi = readActiveApiCodex();
-  const activePool = activeApi ? apiServiceManager.keys.find((entry) => entry.id === activeApi.keyId)?.accountIds || [] : [];
+  const activePool = apiKeyMembers(activeApi ? apiServiceManager.keys.find((entry) => entry.id === activeApi.keyId) : null)
+    .map((member) => member.id);
   if (!item.allowBusy && members.some((member) => member.id === activeCodexAccountId()
     || activePool.includes(member.id) || wakeOperations.has(member.id))) return { state: 'busy' };
   const body = { model: item.model, input: [{ role: 'user', content: [{ type: 'input_text', text: 'Reply only OK.' }] }],
@@ -2065,14 +2106,12 @@ function publicApiServiceState() {
   apiServiceManager.ensureAccountPool(wakeModelCatalog().map((item) => item.slug));
   const state = apiServiceManager.publicState();
   state.keys = state.keys.map((key) => {
-    const eligible = accounts.filter((account) => account.enabled !== false && isCodexAuthenticated(account)
-      && account.quotaErrorCode !== 'auth_expired');
-    const byId = new Map(eligible.map((account) => [account.id, account]));
-    const pool = key.accountIds?.length ? key.accountIds.map((id) => byId.get(id)).filter(Boolean) : eligible;
+    const pool = apiKeyMembers(key);
     const combined = combinedAccountQuota(pool, accountRemainingPercent);
     const network = networkManager.publicAssignment(apiKeyNetworkId(key.id));
     return {
       ...key,
+      resolvedAccountIds: pool.map((account) => account.id),
       network,
       quota: {
         remainingPercent: combined.remainingPercent,
@@ -2092,6 +2131,41 @@ function publicApiServiceState() {
   return state;
 }
 
+function floatingQuotaSync(pool = [], now = Date.now()) {
+  const timestamp = (value) => Date.parse(value || '') || 0;
+  const successes = pool.map((account) => Math.max(
+    timestamp(account.quota?.refreshedAt), timestamp(account.quotaRefreshSucceededAt),
+  )).filter((value) => value > 0);
+  const attempts = pool.map((account) => Math.max(
+    timestamp(account.quotaRefreshAttemptedAt), timestamp(account.quotaCheckedAt),
+  )).filter((value) => value > 0);
+  const failedAccountCount = pool.filter((account) => account.quotaError || account.quotaErrorCode).length;
+  const syncedAccountCount = pool.filter((account) => !account.quotaError && !account.quotaErrorCode
+    && Math.max(timestamp(account.quota?.refreshedAt), timestamp(account.quotaRefreshSucceededAt)) > 0).length;
+  // A pool is only as current as its oldest successfully read member. Missing
+  // members are reported separately, never assigned the snapshot's fresh time.
+  const oldestSuccess = successes.length ? Math.min(...successes) : 0;
+  const partial = pool.length > 1 && (successes.length < pool.length || (failedAccountCount > 0 && failedAccountCount < pool.length));
+  const stale = oldestSuccess > 0 && (now - oldestSuccess > 2 * 60_000 || partial);
+  return {
+    status: failedAccountCount ? 'failed' : !oldestSuccess ? 'never' : stale ? 'stale' : 'fresh',
+    lastSucceededAt: oldestSuccess ? new Date(oldestSuccess).toISOString() : null,
+    lastAttemptedAt: attempts.length ? new Date(Math.max(...attempts)).toISOString() : null,
+    accountCount: pool.length,
+    syncedAccountCount,
+    failedAccountCount,
+    partial,
+  };
+}
+
+function recentActiveFloatingTask(tasks = [], processRunning = false) {
+  if (!processRunning) return null;
+  const activeStatuses = new Set(['running', 'waiting_input', 'waiting_approval']);
+  return tasks.filter((task) => !task.isSubagent && !task.parentThreadId && !task.archived && activeStatuses.has(task.status))
+    .sort((left, right) => (Date.parse(right.lastUpdatedAt || '') || 0) - (Date.parse(left.lastUpdatedAt || '') || 0)
+      || String(left.id).localeCompare(String(right.id)))[0] || null;
+}
+
 function floatingWindowState() {
   const codexSnapshot = detectCodexDesktopSnapshot();
   const apiService = publicApiServiceState();
@@ -2104,22 +2178,17 @@ function floatingWindowState() {
     inputTokens: 0, cachedInputTokens: 0, outputTokens: 0,
   };
   const activePool = activeKey
-    ? accounts.filter((account) => account.enabled !== false && isCodexAuthenticated(account)
-      && account.quotaErrorCode !== 'auth_expired'
-      && (!activeKey.accountIds?.length || activeKey.accountIds.includes(account.id)))
+    ? apiKeyMembers(activeKey)
     : activeAccount ? [activeAccount] : [];
   const quotaWindows = combinedFloatingQuotaWindows(activePool);
   const quotaValues = quotaWindows.map((item) => Number(item.remainingPercent)).filter(Number.isFinite);
   const quotaRemaining = activeKey
     ? Number(activeKey.quota?.remainingPercent)
     : quotaValues.length ? Math.min(...quotaValues) : null;
-  const activeStatuses = new Set(['running', 'waiting_input', 'waiting_approval']);
   // Rollout files can end without a terminal event after a reboot or forced
   // shutdown. Never surface that stale state as a running task when no Codex
   // desktop process exists.
-  const task = codexSnapshot.pid
-    ? sessionMonitor.snapshot().tasks.find((item) => activeStatuses.has(item.status)) || null
-    : null;
+  const task = recentActiveFloatingTask(codexSnapshot.pid ? sessionMonitor.snapshot().tasks : [], Boolean(codexSnapshot.pid));
   return {
     account: {
       id: activeKey?.id || activeAccount?.id || '',
@@ -2128,6 +2197,7 @@ function floatingWindowState() {
       planType: activeKey ? null : activeAccount?.quota?.planType || null,
       quotaRemaining: Number.isFinite(quotaRemaining) ? Math.max(0, Math.min(100, quotaRemaining)) : null,
       quotaWindows,
+      quotaSync: floatingQuotaSync(activePool),
     },
     usage: {
       input: Number(usage.inputTokens || 0),
@@ -2136,6 +2206,9 @@ function floatingWindowState() {
     },
     task: task ? {
       id: task.id,
+      turnId: task.turnId || null,
+      selection: 'recent-active-root',
+      lastActivityAt: task.lastUpdatedAt || null,
       title: task.threadName || 'Untitled session',
       project: task.project || '',
       status: task.status,
@@ -2155,6 +2228,7 @@ function combinedFloatingQuotaWindows(pool = []) {
   const grouped = new Map();
   for (const account of pool) {
     for (const window of account.quota?.windows || []) {
+      if (window.windowDurationMins == null || window.remainingPercent == null) continue;
       const duration = Number(window.windowDurationMins);
       const remaining = Number(window.remainingPercent);
       if (!Number.isFinite(duration) || !Number.isFinite(remaining)) continue;
@@ -2167,7 +2241,7 @@ function combinedFloatingQuotaWindows(pool = []) {
     .slice(0, 2)
     .map(([windowDurationMins, windows]) => {
       const remainingPercent = windows.reduce((sum, window) => sum + Number(window.remainingPercent), 0) / windows.length;
-      const resetValues = windows.map((window) => Number(window.resetsAt)).filter(Number.isFinite);
+      const resetValues = windows.filter((window) => window.resetsAt != null).map((window) => Number(window.resetsAt)).filter(Number.isFinite);
       return {
         windowDurationMins,
         label: windowDurationMins >= 6 * 24 * 60 ? 'Weekly' : '5 hour quota',
@@ -2182,18 +2256,26 @@ async function refreshFloatingWindowQuota() {
   const apiState = publicApiServiceState();
   const activeKey = apiServiceManager.keys.find((key) => key.id === apiState.activeKeyId) || null;
   if (activeKey) {
-    const pool = accountPoolCandidates(activeKey.accountIds);
+    const pool = apiKeyMembers(activeKey);
     if (!pool.length) throw new Error('该 API Codex 没有可刷新的底层账号');
-    const environment = await apiKeyTaskEnvironment(activeKey.id, process.env);
+    const quotaReads = new Map(pool.map(account => [account, beginQuotaRead(account)]));
+    let environment;
+    try { environment = await apiKeyTaskEnvironment(activeKey.id, process.env); }
+    catch (error) {
+      if (![...quotaReads.values()].some(read => read.isCurrent())) return floatingWindowState();
+      throw error;
+    }
     const errors = [];
     for (const account of pool) {
+      const quotaRead = quotaReads.get(account);
       try {
+        quotaRead.checkpoint();
         const { codexHomeDir } = accountPaths(account);
-        account.quota = await readCodexQuota(findCodexCli(), codexHomeDir, 15_000, environment);
-        account.quotaError = '';
-        account.quotaErrorCode = '';
-        account.quotaCheckedAt = account.quota.refreshedAt;
+        const executable = await findCodexCli();
+        quotaRead.checkpoint();
+        quotaRead.apply(await readCodexQuota(executable, codexHomeDir, 15_000, environment));
       } catch (error) {
+        if (!quotaRead.isCurrent()) continue;
         account.quotaError = error.message;
         account.quotaCheckedAt = new Date().toISOString();
         errors.push(error);
@@ -2206,16 +2288,17 @@ async function refreshFloatingWindowQuota() {
   const accountId = activeCodexAccountId(codexSnapshot);
   const account = accounts.find((item) => item.id === accountId);
   if (!account) throw new Error('当前没有可刷新的账号额度');
+  const quotaRead = beginQuotaRead(account);
   try {
     const { codexHomeDir } = accountPaths(account);
     await prepareAccountNetwork(account);
-    account.quota = await readCodexQuota(findCodexCli(), codexHomeDir, 15_000, codexEnvironment(process.env, account));
-    account.quotaError = '';
-    account.quotaErrorCode = '';
-    account.quotaCheckedAt = account.quota.refreshedAt;
+    const executable = await findCodexCli();
+    quotaRead.checkpoint();
+    quotaRead.apply(await readCodexQuota(executable, codexHomeDir, 15_000, codexEnvironment(process.env, account)));
     saveAccounts([...accounts]);
     return floatingWindowState();
   } catch (error) {
+    if (!quotaRead.isCurrent()) return floatingWindowState();
     account.quotaError = error.message;
     account.quotaCheckedAt = new Date().toISOString();
     saveAccounts([...accounts]);
@@ -2223,63 +2306,51 @@ async function refreshFloatingWindowQuota() {
   }
 }
 
-let scheduledQuotaRefreshRun = null;
+const scheduledQuotaRefresh = new QuotaRefreshScheduler({
+  refresh: ({ account, active, environment }) => refreshScheduledAccountQuota(account, environment, active),
+  onError: (error, account) => audit('quota.background-refresh.failed', { accountId: account.id, result: error.message }),
+});
 
-async function refreshScheduledAccountQuota(account, environment) {
-  try {
-    const { codexHomeDir } = accountPaths(account);
-    account.quota = await readCodexQuota(findCodexCli(), codexHomeDir, 15_000, environment);
-    account.quotaError = '';
-    account.quotaErrorCode = '';
-    account.quotaCheckedAt = account.quota.refreshedAt;
-    audit('quota.background-refresh', { accountId: account.id, result: 'success' });
-  } catch (error) {
-    const authExpired = /401|unauthorized|token_revoked|invalidated oauth/i.test(error.message);
-    account.quotaError = authExpired ? '登录已失效，请重新授权' : '额度读取失败，请稍后重试';
-    account.quotaErrorCode = authExpired ? 'auth_expired' : 'fetch_failed';
-    account.quotaCheckedAt = new Date().toISOString();
-    audit('quota.background-refresh', { accountId: account.id, result: error.message });
-  }
+async function refreshScheduledAccountQuota(account, environment, active = false) {
+  return refreshAccountQuota(account, {
+    active,
+    persist: () => saveAccounts([...accounts]),
+    audit: (result) => audit('quota.background-refresh', { accountId: account.id, result }),
+    loadQuota: async (context) => {
+      let quotaEnvironment;
+      if (typeof environment === 'function') quotaEnvironment = await environment();
+      else if (environment) quotaEnvironment = environment;
+      else {
+        await prepareAccountNetwork(account);
+        context.checkpoint();
+        quotaEnvironment = codexEnvironment(process.env, account);
+      }
+      context.checkpoint('查找 Codex CLI');
+      const executable = await findCodexCli();
+      context.checkpoint('读取额度');
+      const { codexHomeDir } = accountPaths(account);
+      return readCodexQuota(executable, codexHomeDir, 15_000, quotaEnvironment);
+    },
+  });
 }
 
 async function refreshDueAccountQuotas() {
-  if (scheduledQuotaRefreshRun) return scheduledQuotaRefreshRun;
-  scheduledQuotaRefreshRun = (async () => {
-    const codexSnapshot = detectCodexDesktopSnapshot();
-    const apiState = publicApiServiceState();
-    const activeKey = apiServiceManager.keys.find((key) => key.id === apiState.activeKeyId) || null;
-    const activeAccountId = activeKey ? '' : activeCodexAccountId(codexSnapshot);
-    const activePoolIds = new Set(activeKey?.accountIds?.length
-      ? activeKey.accountIds
-      : activeKey ? accounts.filter((account) => account.enabled !== false).map((account) => account.id) : []);
-    const now = Date.now();
-    const due = accounts.filter((account) => {
-      if (!isCodexAuthenticated(account) || account.quotaErrorCode === 'auth_expired') return false;
-      const isActive = account.id === activeAccountId || activePoolIds.has(account.id);
-      const interval = isActive ? 60_000 : 5 * 60_000;
-      const lastChecked = Math.max(
-        Date.parse(account.quota?.refreshedAt || '') || 0,
-        Date.parse(account.quotaCheckedAt || '') || 0,
-      );
-      return !Number.isFinite(lastChecked) || lastChecked <= now - interval;
-    });
-    if (!due.length) return;
-    let sharedApiEnvironment = null;
-    if (activeKey && due.some((account) => activePoolIds.has(account.id))) {
-      sharedApiEnvironment = await apiKeyTaskEnvironment(activeKey.id, process.env);
-    }
-    due.sort((a, b) => Number(b.id === activeAccountId || activePoolIds.has(b.id))
-      - Number(a.id === activeAccountId || activePoolIds.has(a.id)));
-    await settledMap(due, 3, async (account) => {
-      if (activePoolIds.has(account.id) && sharedApiEnvironment) {
-        return refreshScheduledAccountQuota(account, sharedApiEnvironment);
-      }
-      await prepareAccountNetwork(account);
-      return refreshScheduledAccountQuota(account, codexEnvironment(process.env, account));
-    });
-    saveAccounts([...accounts]);
-  })().finally(() => { scheduledQuotaRefreshRun = null; });
-  return scheduledQuotaRefreshRun;
+  const codexSnapshot = detectCodexDesktopSnapshot();
+  const apiState = publicApiServiceState();
+  const activeKey = apiServiceManager.keys.find((key) => key.id === apiState.activeKeyId) || null;
+  const activeAccountId = activeKey ? '' : activeCodexAccountId(codexSnapshot);
+  const activePoolIds = new Set(apiKeyMembers(activeKey).map((account) => account.id));
+  const now = Date.now();
+  let sharedApiEnvironment;
+  const apiEnvironment = () => sharedApiEnvironment ||= apiKeyTaskEnvironment(activeKey.id, process.env);
+  const due = accounts.map((account) => ({
+    account,
+    active: account.id === activeAccountId || activePoolIds.has(account.id),
+    environment: activePoolIds.has(account.id) ? apiEnvironment : null,
+  })).filter(({ account, active }) => isCodexAuthenticated(account)
+    && account.quotaErrorCode !== 'auth_expired' && quotaRefreshDue(account, active, now));
+  due.sort((left, right) => Number(right.active) - Number(left.active));
+  scheduledQuotaRefresh.scan(due);
 }
 
 function reserveLoopbackPort() {
@@ -2680,7 +2751,7 @@ async function launchCodexDesktop(account, launchOptions = null) {
     const catalog = listCodexLaunchOptions(SHARED_CODEX_HOME);
     const selection = normalizeLaunchSelection(launchOptions, catalog);
     if (selection.optimizeOversized) {
-      const optimized = await optimizeSelectedRollouts(SHARED_CODEX_HOME, selection.threadIds, ROLLOUT_BACKUP_ROOT);
+      const optimized = await optimizeSelectedRollouts(SHARED_CODEX_HOME, selection.threadIds, ROLLOUT_BACKUP_ROOT, { isFileActive: () => Boolean(findRunningCodexDesktopPid()) });
       for (const item of optimized) audit('codex.rollout.optimized', { result: `${item.threadId}:${item.beforeBytes}->${item.afterBytes}` });
     }
     setCodexLaunchProgress({ stage: 'credentials', message: '正在切换账号授权…', percent: 58 });
@@ -3119,7 +3190,7 @@ async function launchApiKeyCodex(keyId, launchOptions = null) {
     const catalog = listCodexLaunchOptions(SHARED_CODEX_HOME);
     const selection = normalizeLaunchSelection(launchOptions, catalog);
     if (selection.optimizeOversized) {
-      const optimized = await optimizeSelectedRollouts(SHARED_CODEX_HOME, selection.threadIds, ROLLOUT_BACKUP_ROOT);
+      const optimized = await optimizeSelectedRollouts(SHARED_CODEX_HOME, selection.threadIds, ROLLOUT_BACKUP_ROOT, { isFileActive: () => Boolean(findRunningCodexDesktopPid()) });
       for (const item of optimized) audit('codex.rollout.optimized', { result: `${item.threadId}:${item.beforeBytes}->${item.afterBytes}` });
     }
     if (readJson(ACTIVE_API_CODEX_FILE, null)) throw new Error('上一次 API Codex 启动状态尚未恢复，请先完成会话状态恢复');
@@ -3137,7 +3208,7 @@ async function launchApiKeyCodex(keyId, launchOptions = null) {
     // applies a fixed 30-second initialize deadline, so finish those migrations
     // before opening the GUI instead of racing its handshake timer.
     setCodexLaunchProgress({ stage: 'warming', message: '正在初始化 Codex 服务…', percent: 67 });
-    const warmup = await warmCodexAppServer(findCodexCli(), codexHomeDir, 90_000, environment);
+    const warmup = await warmCodexAppServer(await findCodexCli(), codexHomeDir, 90_000, environment);
     audit('api.codex.prewarmed', { result: `${keyId}:${warmup.elapsedMs}ms` });
     const localeDebugPort = selection.language === 'en-US' ? 0 : await reserveLoopbackPort();
     // Keep the local Navo API gateway direct, but send every remote Chromium
@@ -3515,7 +3586,7 @@ async function startCodexBrowserLogin(account, operator, options = {}) {
   await prepareAccountNetwork(account);
   const { codexHomeDir } = accountPaths(account);
   ensureCodexProfileConfig(codexHomeDir);
-  const executable = findCodexCli();
+  const executable = await findCodexCli();
   const child = spawn(executable, ['app-server'], {
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
@@ -3650,7 +3721,7 @@ async function startCodexDeviceLogin(account, operator) {
   await prepareAccountNetwork(account);
   const { codexHomeDir } = accountPaths(account);
   ensureCodexProfileConfig(codexHomeDir);
-  const executable = findCodexCli();
+  const executable = await findCodexCli();
   const child = spawn(executable, ['login', '--device-auth', '-c', 'cli_auth_credentials_store="file"'], {
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
@@ -3783,6 +3854,10 @@ function accountView(account, context = {}) {
     quotaError: account.quotaError || '',
     quotaErrorCode: account.quotaErrorCode || '',
     quotaCheckedAt: account.quotaCheckedAt || null,
+    quotaRefreshAttemptedAt: account.quotaRefreshAttemptedAt || null,
+    quotaRefreshSucceededAt: account.quotaRefreshSucceededAt || null,
+    quotaRefreshRetryAt: account.quotaRefreshRetryAt || null,
+    quotaRefreshFailureCount: account.quotaRefreshFailureCount || 0,
     authSource: account.authSource || 'local-login',
     accountKind: account.accountKind || 'regular',
     relaySource: account.relaySource || '',
@@ -3819,18 +3894,22 @@ function saveAccounts(next) {
 
 async function checkAccountHealth(account, operator) {
   if (!isCodexAuthenticated(account)) return inspectAccountHealth(account);
+  const quotaRead = beginQuotaRead(account);
   try {
     readAccountAuth(account);
     if (!settings.mockLaunch) {
       const { codexHomeDir } = accountPaths(account);
-      account.quota = await readCodexQuota(findCodexCli(), codexHomeDir, 15_000, await backgroundTaskEnvironment(process.env));
-      account.quotaCheckedAt = account.quota.refreshedAt;
+      const environment = await backgroundTaskEnvironment(process.env);
+      const executable = await findCodexCli();
+      quotaRead.checkpoint();
+      quotaRead.apply(await readCodexQuota(executable, codexHomeDir, 15_000, environment));
     }
     account.quotaError = '';
     account.quotaErrorCode = '';
     saveAccounts([...accounts]);
     audit('account.health', { accountId: account.id, operator, result: 'healthy' });
   } catch (error) {
+    if (!quotaRead.isCurrent()) return inspectAccountHealth(account);
     const authExpired = /401|unauthorized|token_revoked|invalidated oauth/i.test(error.message);
     account.quotaError = authExpired ? '登录已失效，请重新授权' : '授权在线检查失败，请稍后重试';
     account.quotaErrorCode = authExpired ? 'auth_expired' : 'fetch_failed';
@@ -3883,14 +3962,19 @@ async function importAuthorizationPackage(envelope, operator) {
     ensureCodexProfileConfig(codexHomeDir);
     writeJsonAtomic(path.join(codexHomeDir, 'auth.json'), auth);
     if (!settings.mockLaunch) {
+      const quotaRead = beginQuotaRead(account);
       try {
-        account.quota = await readCodexQuota(findCodexCli(), codexHomeDir, 15_000, await backgroundTaskEnvironment(process.env));
-        account.quotaCheckedAt = account.quota.refreshedAt;
+        const environment = await backgroundTaskEnvironment(process.env);
+        const executable = await findCodexCli();
+        quotaRead.checkpoint();
+        quotaRead.apply(await readCodexQuota(executable, codexHomeDir, 15_000, environment));
       } catch (error) {
-        if (/401|unauthorized|token_revoked|invalidated oauth/i.test(error.message)) throw error;
-        account.quotaError = '授权已导入，但在线检查暂时失败';
-        account.quotaErrorCode = 'fetch_failed';
-        account.quotaCheckedAt = new Date().toISOString();
+        if (quotaRead.isCurrent()) {
+          if (/401|unauthorized|token_revoked|invalidated oauth/i.test(error.message)) throw error;
+          account.quotaError = '授权已导入，但在线检查暂时失败';
+          account.quotaErrorCode = 'fetch_failed';
+          account.quotaCheckedAt = new Date().toISOString();
+        }
       }
     }
     importStatus.codex = 'imported';
@@ -4086,14 +4170,15 @@ async function importRelayAccounts(value, operator) {
   if (!settings.mockLaunch) {
     void (async () => {
       for (const account of imported) {
+        const quotaRead = beginQuotaRead(account);
         try {
           const { codexHomeDir } = accountPaths(account);
           await prepareAccountNetwork(account);
-          account.quota = await readCodexQuota(findCodexCli(), codexHomeDir, 15_000, codexEnvironment(process.env, account));
-          account.quotaError = '';
-          account.quotaErrorCode = '';
-          account.quotaCheckedAt = account.quota.refreshedAt;
+          const executable = await findCodexCli();
+          quotaRead.checkpoint();
+          quotaRead.apply(await readCodexQuota(executable, codexHomeDir, 15_000, codexEnvironment(process.env, account)));
         } catch (error) {
+          if (!quotaRead.isCurrent()) continue;
           account.quotaError = account.relayTemporary ? '临时凭证暂未读取到额度' : '临时凭证已导入，额度读取暂时失败';
           account.quotaErrorCode = 'fetch_failed';
           account.quotaCheckedAt = new Date().toISOString();
@@ -4312,6 +4397,27 @@ const server = http.createServer(async (request, response) => {
       return sendError(response, 403, '页面令牌已失效，请刷新后重试');
     }
 
+    if (request.method === 'GET' && url.pathname === '/api/cli-state') {
+      return sendJson(response, 200, { ok: true, data: { ...cliResolver.snapshot(), configuredPath: settings.codexCliExecutable } });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/cli-diagnostics') {
+      const result = await cliResolver.inspect(cliOptions({ force: true }));
+      return sendJson(response, 200, { ok: true, data: { ...result, configuredPath: settings.codexCliExecutable } });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/cli-settings') {
+      const body = await readBody(request);
+      const executable = String(body.path || '').trim();
+      if (executable && (!path.isAbsolute(executable) || !/\.exe$/i.test(executable))) return sendError(response, 400, 'Choose an absolute Codex CLI .exe path');
+      // Validation of an unsaved draft must not replace live runtime diagnostics.
+      const validatedResolver = createCliResolver();
+      const result = await validatedResolver.inspect(cliOptions({ configured: executable, force: true }));
+      if (!result.selected) return sendError(response, 409, 'The selected CLI is not ready. Run diagnostics to view the reason.', { diagnostics: result });
+      writeJsonAtomic(SETTINGS_FILE, { ...readJson(SETTINGS_FILE, {}), codexCliExecutable: executable });
+      settings.codexCliExecutable = executable;
+      cliResolver = validatedResolver;
+      return sendJson(response, 200, { ok: true, data: { ...result, configuredPath: executable } });
+    }
+
     if (request.method === 'GET' && url.pathname === '/api/bootstrap') {
       const codexSnapshot = detectCodexDesktopSnapshot();
       await cleanLeases(codexSnapshot);
@@ -4401,11 +4507,15 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, { ok: true, data: listRolloutBackups(ROLLOUT_BACKUP_ROOT) });
     }
 
+    if (request.method === 'GET' && url.pathname === '/api/codex-rollout-backups/storage') {
+      return sendJson(response, 200, { ok: true, data: rolloutBackupStorage(ROLLOUT_BACKUP_ROOT) });
+    }
+
     if (request.method === 'POST' && url.pathname === '/api/codex-rollout-backups/restore') {
       if (findRunningCodexDesktopPid()) return sendError(response, 409, '请先退出 Codex，再恢复会话备份');
       try {
         const body = await readBody(request);
-        const restored = await restoreRolloutBackup(SHARED_CODEX_HOME, ROLLOUT_BACKUP_ROOT, body.id);
+        const restored = await restoreRolloutBackup(SHARED_CODEX_HOME, ROLLOUT_BACKUP_ROOT, body.id, { isFileActive: () => Boolean(findRunningCodexDesktopPid()) });
         audit('codex.rollout.restored', { result: `${body.id}:${restored.bytes}` });
         return sendJson(response, 200, { ok: true, data: restored });
       } catch (error) {
@@ -4467,7 +4577,7 @@ const server = http.createServer(async (request, response) => {
         for (const member of members) {
           try {
             const runtime = key ? await apiKeyNetworkRuntime(key.id) : await networkManager.ensureAccount(member.id);
-            const models = await readCodexModels(findCodexCli(), accountPaths(member).codexHomeDir, 20_000, networkManager.environmentForRuntime(runtime, process.env));
+            const models = await readCodexModels(await findCodexCli(), accountPaths(member).codexHomeDir, 20_000, networkManager.environmentForRuntime(runtime, process.env));
             for (const model of models) if (!key || !key.modelAllowlist.length || key.modelAllowlist.includes(model.id)) results.push({ ...model, accountId: member.id,
               ...(key ? { memberTargetId: `api-member:${key.id}:${member.id}` } : {}) });
           } catch { results.push({ accountId: member.id, error: 'catalog_unavailable' }); }
@@ -4502,7 +4612,7 @@ const server = http.createServer(async (request, response) => {
       if (!account) return sendError(response, 404, 'Account does not exist');
       const body = await readBody(request);
       const authenticatedAccountId = accountIdFromAuth(readAccountAuth(account));
-      if (!authenticatedAccountId) return sendError(response, 409, 'Refresh account credentials before using reset credits');
+      if (!authenticatedAccountId) return sendError(response, 409, 'Refresh account credentials before using reset credits', { operationStatus: 'not_submitted' });
       const identity = `${account.id}:${authenticatedAccountId}`;
       const safeOperation = () => { const op = resetCreditOperations.get(identity); return op ? {
         status: op.status, outcome: op.outcome, clientOperationId: op.clientOperationId, creditId: op.creditId,
@@ -4511,21 +4621,26 @@ const server = http.createServer(async (request, response) => {
         await refreshWakeQuota(account);
         return sendJson(response, 200, { ok: true, data: { credits: account.quota.resetCredits, quota: account.quota, operation: safeOperation() } });
       }
-      if (body.confirmed !== true || !/^[a-f0-9-]{36}$/i.test(body.clientOperationId || '')) return sendError(response, 400, 'Explicit reset confirmation required');
+      if (body.confirmed !== true || !/^[a-f0-9-]{36}$/i.test(body.clientOperationId || '')) return sendError(response, 400, 'Explicit reset confirmation required', { operationStatus: 'not_submitted' });
       const prior = resetCreditOperations.get(identity, body.clientOperationId) || resetCreditOperations.get(identity);
       if (prior?.status !== 'pending' && prior?.clientOperationId !== body.clientOperationId) {
-        await refreshWakeQuota(account);
-        if (!(account.quota.resetCredits?.availableCount > 0)) return sendError(response, 409, 'No available reset credits');
-        if (body.creditId && !account.quota.resetCredits.credits?.some((credit) => credit.id === body.creditId)) return sendError(response, 409, 'Refresh reset credit details before using');
+        try { await refreshWakeQuota(account); }
+        catch { return sendError(response, 503, 'Reset preparation failed; no redemption was submitted', { operationStatus: 'not_submitted' }); }
+        if (!(account.quota.resetCredits?.availableCount > 0)) return sendError(response, 409, 'No available reset credits', { operationStatus: 'not_submitted' });
+        if (body.creditId && !account.quota.resetCredits.credits?.some((credit) => credit.id === body.creditId && isResetCreditUsable(credit))) return sendError(response, 409, 'Refresh reset credit details before using', { operationStatus: 'not_submitted' });
       }
+      let submissionStarted = false;
       try {
         const environment = await accountTaskEnvironment(account, process.env);
+        const executable = await findCodexCli();
+        submissionStarted = true;
         const result = await resetCreditOperations.run(identity, body.creditId || null,
-          (params) => consumeCodexResetCredit(findCodexCli(), accountPaths(account).codexHomeDir, params, environment), body.clientOperationId);
+          (params) => consumeCodexResetCredit(executable, accountPaths(account).codexHomeDir, params, environment), body.clientOperationId);
         let quotaSynced = true;
         try { await refreshWakeQuota(account); } catch { quotaSynced = false; }
         return sendJson(response, 200, { ok: true, data: { outcome: result.outcome, quotaSynced, quota: account.quota, operation: safeOperation() } });
       } catch {
+        if (!submissionStarted) return sendError(response, 503, 'Reset preparation failed; no redemption was submitted', { operationStatus: 'not_submitted' });
         return sendJson(response, 200, { ok: true, data: { outcome: 'pending', operation: safeOperation() } });
       }
     }
@@ -4597,9 +4712,17 @@ const server = http.createServer(async (request, response) => {
         else {
           const key = apiServiceManager.keys.find((item) => item.id === keyId);
           if (!key) throw new Error('API Key 不存在');
-          const pool = accountPoolCandidates(key.accountIds);
+          const pool = operation === 'wake' ? accountPoolCandidates(key) : apiKeyMembers(key);
           if (!pool.length) throw new Error('该 API Key 没有可用的底层账号');
-          const apiEnvironment = await apiKeyTaskEnvironment(keyId, process.env);
+          const quotaReads = operation === 'wake' ? null : new Map(pool.map(account => [account, beginQuotaRead(account)]));
+          let apiEnvironment;
+          try { apiEnvironment = await apiKeyTaskEnvironment(keyId, process.env); }
+          catch (error) {
+            if (quotaReads && ![...quotaReads.values()].some(read => read.isCurrent())) {
+              return sendJson(response, 200, { ok: true, data: publicApiServiceState(), superseded: true });
+            }
+            throw error;
+          }
           if (operation === 'wake') {
             for (const account of pool) {
               await wakeAccount(account, 'manual', 'Navo API', await apiKeyTaskEnvironment(keyId, {
@@ -4608,13 +4731,14 @@ const server = http.createServer(async (request, response) => {
             }
           } else {
             for (const account of pool) {
+              const quotaRead = quotaReads.get(account);
               try {
+                quotaRead.checkpoint();
                 const { codexHomeDir } = accountPaths(account);
-                account.quota = await readCodexQuota(findCodexCli(), codexHomeDir, 15_000, apiEnvironment);
-                account.quotaError = '';
-                account.quotaErrorCode = '';
-                account.quotaCheckedAt = account.quota.refreshedAt;
-              } catch (error) { account.quotaError = error.message; }
+                const executable = await findCodexCli();
+                quotaRead.checkpoint();
+                quotaRead.apply(await readCodexQuota(executable, codexHomeDir, 15_000, apiEnvironment));
+              } catch (error) { if (quotaRead.isCurrent()) account.quotaError = error.message; }
             }
             saveAccounts([...accounts]);
           }
@@ -4632,7 +4756,7 @@ const server = http.createServer(async (request, response) => {
       if (request.method === 'POST') {
         const body = await readBody(request);
         try { return sendJson(response, 200, { ok: true, data: { key: apiServiceManager.updateKey(keyId, body), state: publicApiServiceState() } }); }
-        catch (error) { return sendError(response, 404, error.message); }
+        catch (error) { return sendError(response, error.statusCode || 404, error.message); }
       }
       if (request.method === 'DELETE') {
         try { apiServiceManager.removeKey(keyId); return sendJson(response, 200, { ok: true, data: publicApiServiceState() }); }
@@ -4978,17 +5102,19 @@ const server = http.createServer(async (request, response) => {
 
       if (operation === 'quota') {
         if (!isCodexAuthenticated(account)) return sendError(response, 409, '请先完成该账号的入池授权');
+        const quotaRead = beginQuotaRead(account);
         try {
           const { codexHomeDir } = accountPaths(account);
-          account.quota = await readCodexQuota(findCodexCli(), codexHomeDir, 15_000, await backgroundTaskEnvironment(process.env));
-          account.quotaError = '';
-          account.quotaErrorCode = '';
-          account.quotaCheckedAt = account.quota.refreshedAt;
+          const environment = await backgroundTaskEnvironment(process.env);
+          const executable = await findCodexCli();
+          quotaRead.checkpoint();
+          quotaRead.apply(await readCodexQuota(executable, codexHomeDir, 15_000, environment));
           saveAccounts([...accounts]);
           refreshAccountPlanExpiry(account, { force: true }).catch(() => {});
           audit('quota.refresh', { accountId, operator, result: 'success' });
           return sendJson(response, 200, { ok: true, data: accountView(account) });
         } catch (error) {
+          if (!quotaRead.isCurrent()) return sendJson(response, 200, { ok: true, data: accountView(account), superseded: true });
           const authExpired = /401|unauthorized|token_revoked|invalidated oauth/i.test(error.message);
           account.quotaError = authExpired ? '登录已失效，请重新授权' : '额度读取失败，请稍后重试';
           account.quotaErrorCode = authExpired ? 'auth_expired' : 'fetch_failed';

@@ -29,12 +29,16 @@ test('install entry does not consume stale update flags while a check is pending
   const end = source.indexOf('\nconst installCodexWindowsUpdateOnce', start);
   assert.ok(start >= 0 && end > start);
   const pending = { status: 'checking', updateAvailable: true, packageReady: true, latestVersion: '1.2.3' };
+  let checkCalls = 0;
   const forbidden = () => { throw new Error('Side effect must not run while checking'); };
-  const context = { codexUpdateState: pending, reusableUpdateCheck: () => false,
-    fetchOfficialCodexUpdateState: async () => pending,
+  const context = { codexUpdateState: pending, codexDownloadController: null, reusableUpdateCheck: () => false,
+    checkOfficialCodexUpdateOnce: async () => { checkCalls++; return pending; },
+    readInstalledCodexPackageState: forbidden,
     codexDesktopIsRunning: forbidden, closeCodexDesktop: forbidden,
     downloadCodexPackage: forbidden, installCodexPackage: forbidden, publishCodexUpdateState: forbidden };
   vm.createContext(context);
   vm.runInContext(source.slice(start, end), context);
   assert.equal(await context.installCodexWindowsUpdate(), pending);
+  assert.equal(checkCalls, 1, 'Installation must await the shared update check before interpreting stale flags');
+  assert.equal(context.codexDownloadController, null);
 });

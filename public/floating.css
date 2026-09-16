@@ -23,11 +23,14 @@ button, input { font: inherit; }
 .account-line em, .section-label em { padding: 4px 7px; border-radius: 999px; color: var(--accent); background: var(--accent-soft); font-size: 8px; font-style: normal; font-weight: 750; }
 .quota-heading { margin-top: 10px; }
 .quota-windows { display: grid; gap: 9px; margin-top: 7px; }
-.quota-window { display: grid; min-width: 0; grid-template-columns: minmax(0,1fr) auto; align-items: center; column-gap: 8px; }
+.quota-sync { overflow: hidden; margin-top: 6px; color: var(--muted); font-size: 10px; line-height: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.quota-sync[data-status="failed"], .quota-sync[data-status="stale"] { color: #a46b16; }
+body[data-theme="midnight"] .quota-sync[data-status="failed"], body[data-theme="midnight"] .quota-sync[data-status="stale"] { color: #f1bd68; }
+.quota-window { display: grid; min-width: 0; grid-template-columns: minmax(0,1fr) 160px; align-items: center; column-gap: 8px; }
 .quota-window .quota-line { grid-column: 1 / -1; }
 .quota-line { font-size: 9px; }
 .quota-line strong { color: var(--accent); font: 800 11px/1 "Cascadia Code", monospace; }
-.quota-window small { display: block; min-width: 126px; color: var(--muted); font-size: 8.5px; font-weight: 600; line-height: 1; text-align: right; white-space: nowrap; }
+.quota-window small { display: block; min-width: 126px; color: var(--muted); font-size: 10px; font-weight: 600; line-height: 1.25; text-align: right; white-space: nowrap; }
 .quota-heading button { display: grid; width: 20px; height: 20px; padding: 0; place-items: center; border: 0; border-radius: 6px; color: var(--accent); background: var(--accent-soft); cursor: pointer; }
 .quota-heading button svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .quota-heading button.loading svg { animation: quota-refreshing .8s linear infinite; }
@@ -61,4 +64,5 @@ button, input { font: inherit; }
 .opacity-row output { color: var(--accent); font-family: "Cascadia Code", monospace; }
 .opacity-row input { width: 100%; accent-color: var(--accent); }
 footer { display: flex; align-items: center; justify-content: center; gap: 7px; padding-top: 9px; color: var(--muted); font-size: 8px; }
+footer #updated-at { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 footer i { width: 3px; height: 3px; border-radius: 50%; background: var(--accent); }

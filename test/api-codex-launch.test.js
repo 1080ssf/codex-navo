@@ -11,7 +11,7 @@ const root = path.join(__dirname, '..');
 test('API Codex prewarms the shared app-server before desktop launch', () => {
   const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
   const quota = fs.readFileSync(path.join(root, 'lib', 'codex-quota.js'), 'utf8');
-  assert.match(server, /await warmCodexAppServer\(findCodexCli\(\), codexHomeDir, 90_000, environment\)/);
+  assert.match(server, /await warmCodexAppServer\(await findCodexCli\(\), codexHomeDir, 90_000, environment\)/);
   assert.ok(
     server.indexOf('await warmCodexAppServer') < server.indexOf('spawnDetached(installation.executable', server.indexOf('async function launchApiKeyCodex')),
     'warmup must finish before the Codex Desktop process is spawned',

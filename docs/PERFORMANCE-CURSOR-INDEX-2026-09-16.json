@@ -1,0 +1,33 @@
+{
+  "measuredAt": "2026-09-16T09:07:29.276Z",
+  "baselineRef": "42c62ea",
+  "node": "v22.22.3",
+  "platform": "win32-x64",
+  "cpu": "AMD Ryzen 5 7520U with Radeon Graphics",
+  "byteLimit": 50000000,
+  "bytesWritten": 18918756,
+  "rows": [
+    {"files":100,"variant":"baseline","operation":"cold","medianMs":160.523,"medianCpuMs":140,"samples":[{"elapsedMs":164.007,"cpuMs":172},{"elapsedMs":160.523,"cpuMs":140},{"elapsedMs":159.09,"cpuMs":140}]},
+    {"files":100,"variant":"baseline","operation":"unchanged","medianMs":13.592,"medianCpuMs":15,"samples":[{"elapsedMs":12.567,"cpuMs":15},{"elapsedMs":17.776,"cpuMs":16},{"elapsedMs":13.592,"cpuMs":15}]},
+    {"files":100,"variant":"baseline","operation":"migration","medianMs":36.572,"medianCpuMs":32,"samples":[{"elapsedMs":23.124,"cpuMs":32},{"elapsedMs":36.572,"cpuMs":31},{"elapsedMs":47.564,"cpuMs":48}]},
+    {"files":100,"variant":"indexed","operation":"cold","medianMs":122.679,"medianCpuMs":124,"samples":[{"elapsedMs":77.601,"cpuMs":62},{"elapsedMs":135.399,"cpuMs":125},{"elapsedMs":122.679,"cpuMs":124}]},
+    {"files":100,"variant":"indexed","operation":"unchanged","medianMs":12.222,"medianCpuMs":15,"samples":[{"elapsedMs":12.222,"cpuMs":0},{"elapsedMs":17.286,"cpuMs":31},{"elapsedMs":11.683,"cpuMs":15}]},
+    {"files":100,"variant":"indexed","operation":"migration","medianMs":44.533,"medianCpuMs":31,"samples":[{"elapsedMs":98.096,"cpuMs":31},{"elapsedMs":44.533,"cpuMs":47},{"elapsedMs":26.183,"cpuMs":16}]},
+    {"files":1000,"variant":"baseline","operation":"cold","medianMs":1902.663,"medianCpuMs":1829,"samples":[{"elapsedMs":2237.784,"cpuMs":2063},{"elapsedMs":1902.663,"cpuMs":1829},{"elapsedMs":1293.56,"cpuMs":1312}]},
+    {"files":1000,"variant":"baseline","operation":"unchanged","medianMs":108.181,"medianCpuMs":110,"samples":[{"elapsedMs":166.314,"cpuMs":156},{"elapsedMs":74.435,"cpuMs":77},{"elapsedMs":108.181,"cpuMs":110}]},
+    {"files":1000,"variant":"baseline","operation":"migration","medianMs":392.684,"medianCpuMs":421,"samples":[{"elapsedMs":685.635,"cpuMs":531},{"elapsedMs":392.684,"cpuMs":390},{"elapsedMs":360.546,"cpuMs":421}]},
+    {"files":1000,"variant":"indexed","operation":"cold","medianMs":1051.23,"medianCpuMs":1109,"samples":[{"elapsedMs":1051.23,"cpuMs":1109},{"elapsedMs":1120.098,"cpuMs":1141},{"elapsedMs":904.534,"cpuMs":891}]},
+    {"files":1000,"variant":"indexed","operation":"unchanged","medianMs":100.272,"medianCpuMs":94,"samples":[{"elapsedMs":102.002,"cpuMs":94},{"elapsedMs":100.272,"cpuMs":156},{"elapsedMs":99.248,"cpuMs":93}]},
+    {"files":1000,"variant":"indexed","operation":"migration","medianMs":257.644,"medianCpuMs":235,"samples":[{"elapsedMs":257.644,"cpuMs":297},{"elapsedMs":221.591,"cpuMs":235},{"elapsedMs":258.963,"cpuMs":220}]},
+    {"files":2000,"variant":"baseline","operation":"cold","medianMs":5426.876,"medianCpuMs":4376,"samples":[{"elapsedMs":5426.876,"cpuMs":4374},{"elapsedMs":5763.856,"cpuMs":4640},{"elapsedMs":4752.883,"cpuMs":4376}]},
+    {"files":2000,"variant":"baseline","operation":"unchanged","medianMs":268.863,"medianCpuMs":251,"samples":[{"elapsedMs":268.863,"cpuMs":266},{"elapsedMs":351.816,"cpuMs":251},{"elapsedMs":193.596,"cpuMs":187}]},
+    {"files":2000,"variant":"baseline","operation":"migration","medianMs":1522.408,"medianCpuMs":1452,"samples":[{"elapsedMs":1522.408,"cpuMs":1452},{"elapsedMs":1930.754,"cpuMs":1735},{"elapsedMs":1179.16,"cpuMs":1047}]},
+    {"files":2000,"variant":"indexed","operation":"cold","medianMs":2165.819,"medianCpuMs":2110,"samples":[{"elapsedMs":2165.819,"cpuMs":2110},{"elapsedMs":2422.285,"cpuMs":2141},{"elapsedMs":1700.479,"cpuMs":1687}]},
+    {"files":2000,"variant":"indexed","operation":"unchanged","medianMs":174.433,"medianCpuMs":187,"samples":[{"elapsedMs":174.433,"cpuMs":187},{"elapsedMs":349.924,"cpuMs":281},{"elapsedMs":142.76,"cpuMs":157}]},
+    {"files":2000,"variant":"indexed","operation":"migration","medianMs":468.003,"medianCpuMs":437,"samples":[{"elapsedMs":468.003,"cpuMs":437},{"elapsedMs":1002.58,"cpuMs":703},{"elapsedMs":362.601,"cpuMs":343}]}
+  ],
+  "instrumentationCounts": [
+    {"files":128,"variant":"baseline","operation":"cold","basenameCalls":8640},
+    {"files":128,"variant":"indexed","operation":"cold","basenameCalls":640}
+  ]
+}

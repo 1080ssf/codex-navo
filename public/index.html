@@ -253,6 +253,7 @@
               </div>
             </article>
           </section>
+          <section class="feature-surface cli-runtime-panel" id="cli-runtime-panel"></section>
           <section class="feature-surface community-panel" aria-labelledby="community-panel-title">
             <div class="community-panel-copy"><span class="language-card-kicker">COMMUNITY &amp; SOURCE</span><h2 id="community-panel-title">社区与项目</h2><p>加入社区交流使用经验、反馈问题，或前往 GitHub 查看项目源码与版本动态。</p></div>
             <div class="community-links">
@@ -296,7 +297,7 @@
         <div class="account-create-network">
           <label for="account-create-route">网络线路</label>
           <select name="route" id="account-create-route"><option value="direct">直连</option></select>
-          <small>首次网页登录、Codex OAuth、Codex 桌面端及其 GitHub 访问都使用这条线路。</small>
+          <small>网页登录、Codex OAuth 和 Codex 任务使用此线路。</small>
         </div>
         <div class="fixed-browser" id="account-fixed-browser" aria-label="浏览器">
           <span class="fixed-browser-label">浏览器</span>
@@ -339,7 +340,7 @@
         </div>
         <div class="account-network-preview" id="account-network-preview"><i></i><div><strong>直连</strong><small>网页端和 Codex 均不使用代理</small></div></div>
         <div class="account-network-empty" id="account-network-empty" hidden><div><strong>还没有可用节点</strong><small>先添加节点或订阅，刷新成功后即可为这个账号选择线路。</small></div><button type="button" id="manage-account-network">管理节点</button></div>
-        <p class="proxy-note">保存后，该账号的网页端、登录授权、Codex 桌面端及其 GitHub 访问都会使用同一节点；后台额度刷新和唤醒按全局择优线路执行。</p>
+        <p class="proxy-note">保存后，该账号的网页登录、Codex OAuth 和 Codex 任务使用此线路；后台额度刷新和唤醒按全局择优线路执行。</p>
         <div class="account-network-result" id="account-network-result" role="status" aria-live="polite" hidden></div>
         <div class="dialog-actions account-network-actions">
           <button class="secondary-button" id="test-account-network" type="button">检测当前线路</button>
@@ -388,6 +389,7 @@
       </form>
     </dialog>
 
+    <div class="app-notice-stack">
     <aside class="codex-launch-status" id="codex-launch-status" role="status" aria-live="polite" hidden>
       <div class="codex-launch-status-head">
         <span class="codex-launch-spinner" aria-hidden="true"></span>
@@ -399,7 +401,9 @@
       <div class="codex-launch-status-foot"><span id="codex-launch-status-account">Codex</span><b id="codex-launch-status-percent">6%</b></div>
     </aside>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    </div>
     <script src="/app.js" defer></script>
     <script src="/account-tools.js" defer></script>
+    <script src="/runtime-tools.js" defer></script>
   </body>
 </html>

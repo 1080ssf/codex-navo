@@ -67,6 +67,21 @@ function htmlText(source) {
 const appWithoutCatalog = appSource
   .replace(mapSource, '')
   .replace(patternSource, '');
+const accountToolsSource = fs.readFileSync(path.join(root,'public','account-tools.js'),'utf8');
+const runtimeToolsSource = fs.readFileSync(path.join(root,'public','runtime-tools.js'),'utf8');
+// New surfaces use explicit tr(zh, en) calls or [zh, en] label pairs rather
+// than the legacy DOM replacement map. Check that a nonempty English side
+// exists instead of making them duplicate the legacy dictionary.
+const bilingual = new Set();
+const literal = "(?:'(?:\\\\.|[^'\\\\])*'|\"(?:\\\\.|[^\"\\\\])*\")";
+const pairs = new RegExp('(?:\\btr\\s*\\(\\s*|\\[\\s*)(' + literal + ')\\s*,\\s*(' + literal + ')','g');
+for (const source of [appWithoutCatalog,accountToolsSource,runtimeToolsSource]) {
+  for (const match of source.matchAll(pairs)) {
+    const zh = vm.runInNewContext(match[1]);
+    const en = vm.runInNewContext(match[2]);
+    if (typeof en === 'string' && en.trim() && !/\p{Script=Han}/u.test(en)) bilingual.add(zh);
+  }
+}
 const serverSource = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
 const accountHealthSource = section(serverSource, 'function inspectAccountHealth(', 'function saveWakeSettings(');
 const candidates = new Set([
@@ -75,6 +90,8 @@ const candidates = new Set([
   ...htmlText(fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8')),
   ...quotedStrings(accountHealthSource),
   ...templateUiText(accountHealthSource),
+  ...quotedStrings(accountToolsSource), ...templateUiText(accountToolsSource),
+  ...quotedStrings(runtimeToolsSource), ...templateUiText(runtimeToolsSource),
 ]);
 
 const ignored = [
@@ -86,7 +103,7 @@ const missing = [...candidates]
   .filter((value) => value && !ignored.some((pattern) => pattern.test(value)))
   .filter((value) => !/[<>`;{}]|=>|\.textContent|\.innerHTML|JSON\.stringify|\b(?:const|return|function)\b/.test(value))
   .filter((value) => !/^[),:;]/.test(value))
-  .filter((value) => !translated(value))
+  .filter((value) => !bilingual.has(value) && !translated(value))
   .sort((left, right) => left.localeCompare(right, 'zh-CN'));
 
 if (missing.length) {

@@ -12,11 +12,30 @@
   };
   const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || icons.codex}</svg>`;
   let dialog, mode, timer, targetId, creditsState, busy = false, catalog = [], job = null, pollEpoch = 0;
+  let catalogEpoch = 0, catalogScope = '', pollFailures = 0, creditsNotice = '', creditsStale = false;
+  let catalogLoading = false, catalogCompleted = 0, catalogTotal = 0;
+  const modelSelections = new Set();
   const attempts = new Map();
   try { for (const [id, attempt] of JSON.parse(sessionStorage.getItem('navo-reset-attempts') || '[]')) if (attempt?.id) attempts.set(id, attempt); } catch {}
   function saveAttempts() { try { sessionStorage.setItem('navo-reset-attempts', JSON.stringify([...attempts])); } catch {} }
   const storedJob = () => { try { return sessionStorage.getItem('navo-model-job'); } catch { return null; } };
-  const rememberJob = id => { try { sessionStorage.setItem('navo-model-job', id); } catch {} };
+  const rememberJob = id => { try { sessionStorage.setItem('navo-model-job', id || ''); } catch {} };
+  const selectedTargets = () => [...dialog.querySelectorAll('[name="tools-target"]:checked')].map(el => el.value).sort();
+  const selectionScope = () => JSON.stringify(selectedTargets());
+  function targetName(id) {
+    if (String(id).startsWith('api-member:')) {
+      const [, keyId, memberId] = id.split(':');
+      return `${targetName(`api-key:${keyId}`)} / ${targetName(memberId)}`;
+    }
+    const target = targets().flatMap(group => group.values).find(item => item.id === id);
+    return target?.label || target?.emailHint || id || '—';
+  }
+  function resetCatalog() { catalogEpoch++; catalog = []; catalogScope = ''; catalogLoading = false; catalogCompleted = 0; catalogTotal = 0; modelSelections.clear(); renderCatalog(); renderSelection(); }
+  const modelKey = entry => `${entry.targetId}\0${entry.model}`;
+  function renderSelection() {
+    const box = dialog?.querySelector('.tools-selection');
+    if (box) box.textContent = tr(`已选 ${selectedTargets().length}/30 个账号目标 · ${modelSelections.size}/60 项检测`, `${selectedTargets().length}/30 account targets · ${modelSelections.size}/60 checks selected`);
+  }
   function targets() {
     return [
       { title: tr('普通账号', 'Regular accounts'), values: (state.accounts || []).filter(a => a.accountKind !== 'relay') },
@@ -30,7 +49,21 @@
       dialog = document.createElement('dialog');
       dialog.className = 'navo-account-tools-dialog';
       document.body.append(dialog);
-      dialog.addEventListener('close', () => { pollEpoch++; clearTimeout(timer); });
+      dialog.addEventListener('close', () => { pollEpoch++; catalogEpoch++; clearTimeout(timer); });
+      dialog.addEventListener('change', event => {
+        if (event.target.name === 'tools-target') resetCatalog();
+        if (event.target.name === 'tools-model') {
+          const entry = catalog[Number(event.target.value)];
+          if (entry) { if (event.target.checked) modelSelections.add(modelKey(entry)); else modelSelections.delete(modelKey(entry)); }
+          renderSelection();
+        }
+      });
+      dialog.addEventListener('input', event => {
+        if (event.target.name !== 'tools-search') return;
+        const query = event.target.value.trim().toLocaleLowerCase();
+        dialog.querySelectorAll('.tools-targets label').forEach(row => { row.hidden = !row.textContent.toLocaleLowerCase().includes(query); });
+        dialog.querySelectorAll('.tools-targets details').forEach(group => { if (query) group.open = [...group.querySelectorAll('label')].some(row => !row.hidden); });
+      });
       dialog.addEventListener('click', event => {
         const button = event.target.closest('[data-tools-action]');
         if (!button) return;
@@ -53,21 +86,30 @@
     return labels[value] ? tr(...labels[value]) : value || '—';
   }
   function modelBody(initial) {
+    catalogEpoch++; catalog = []; catalogScope = ''; catalogLoading = false; catalogCompleted = 0; catalogTotal = 0; modelSelections.clear();
     dialog.querySelector('.tools-body').innerHTML = `<p>${esc(tr('模型列表不代表实测可用。实际检测会产生少量用量；关闭窗口不会停止后台检测。', 'A listed model is not verified usable. Live probes consume some quota. Closing this window does not stop the job.'))}</p>
+      <label class="tools-search"><span>${esc(tr('搜索账号','Search accounts'))}</span><input type="search" name="tools-search" placeholder="${esc(tr('按账号名称筛选','Filter by account name'))}"></label><p class="tools-selection" role="status"></p>
       <div class="tools-targets">${targets().map(group => `<details ${group.values.some(a => a.id === initial) ? 'open' : ''}><summary>${esc(group.title)} · ${group.values.length}</summary>${group.values.map(a => `<label><input type="checkbox" name="tools-target" value="${esc(a.id)}" ${a.id === initial ? 'checked' : ''}><span class="tools-option-text">${esc(a.label || a.emailHint || a.id)}</span></label>`).join('')}</details>`).join('')}</div>
       <label class="tools-active-option"><input type="checkbox" name="tools-allow-busy"><span>${esc(tr('包含使用中的账号（可能影响当前任务的额度与限流）', 'Include active accounts (shares task quota and rate limits)'))}</span></label>
       <div class="tools-buttons"><button data-tools-action="catalog">${esc(tr('读取模型列表', 'Read model catalog'))}</button><button data-tools-action="start">${esc(tr('检测所选模型', 'Probe selected models'))}</button><button data-tools-action="cancel">${esc(tr('停止检测', 'Stop job'))}</button><button data-tools-action="retry">${esc(tr('重测失败项', 'Retry failed items'))}</button></div><div class="tools-catalog"></div><div class="tools-results" aria-live="polite"></div>`;
-    renderCatalog(); renderJob();
+    renderCatalog(); renderJob(); renderSelection();
   }
   function renderCatalog() {
     const box = dialog.querySelector('.tools-catalog');
     if (!box) return;
-    box.innerHTML = catalog.map((entry, i) => `<label><input type="checkbox" name="tools-model" value="${i}"><span class="tools-option-text">${esc(entry.targetLabel || entry.targetId)} · ${esc(entry.model)}</span><small>${esc(tr('未实测', 'Not probed'))}</small></label>`).join('');
+    const groups = new Map();
+    catalog.forEach((entry,i) => { if (!groups.has(entry.targetId)) groups.set(entry.targetId,[]); groups.get(entry.targetId).push({entry,i}); });
+    box.innerHTML = `${catalogTotal ? `<p class="tools-catalog-progress" role="status">${esc(tr(`模型目录：${catalogCompleted}/${catalogTotal} 个目标已返回${catalogLoading?'，其余仍在读取…':''}`, `Model catalog: ${catalogCompleted}/${catalogTotal} targets returned${catalogLoading?'; reading remaining targets…':''}`))}</p>` : ''}${[...groups].map(([id,entries])=>`<section class="tools-catalog-group"><h3>${esc(entries[0].entry.targetLabel || targetName(id))}</h3>${entries.map(({entry,i})=>`<label><input type="checkbox" name="tools-model" value="${i}" ${modelSelections.has(modelKey(entry))?'checked':''}><span class="tools-option-text">${esc(entry.model)}</span><small>${esc(tr('未实测','Not probed'))}</small></label>`).join('')}</section>`).join('')}`;
   }
   function renderJob() {
     const box = dialog?.querySelector('.tools-results');
     if (!box || !job) return;
-    box.innerHTML = `<h3>${esc(tr('检测结果', 'Probe results'))} · ${esc(status(job.status))}</h3>${(job.items || []).map(item => `<article><strong>${esc(item.model)} · ${esc(item.targetId)}</strong><span>${esc(status(item.state))}${item.httpStatus ? ` · HTTP ${esc(item.httpStatus)}` : ''}</span><small>${esc([item.errorCode, item.error || item.message, item.firstOutputMs != null ? `${tr('首段输出', 'First output')} ${item.firstOutputMs} ms` : '', item.checkedAt, item.retryAt ? `${tr('可重试时间', 'Retry at')}: ${item.retryAt}` : '', item.selectedAccountId ? `${tr('实际账号', 'Selected account')}: ${item.selectedAccountId}` : '', item.source, item.attemptedAccountIds?.length ? `${tr('尝试账号', 'Attempted accounts')}: ${item.attemptedAccountIds.join(', ')}` : ''].filter(Boolean).join(' · '))}</small></article>`).join('')}`;
+    const localDate = value => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString(navoUsesChinese()?'zh-CN':'en-US') : '—';
+    const groups = new Map();
+    for (const item of job.items || []) { if (!groups.has(item.targetId)) groups.set(item.targetId,[]); groups.get(item.targetId).push(item); }
+    const terminal = (job.items || []).filter(item => !['queued','running','checking'].includes(item.state)).length;
+    const available = (job.items || []).filter(item => ['available','success'].includes(item.state)).length;
+    box.innerHTML = `<h3>${esc(tr('检测结果', 'Probe results'))} · ${esc(status(job.status))}</h3><p class="tools-result-summary">${esc(tr(`${terminal}/${job.items?.length||0} 项已结束 · ${available} 项可用`, `${terminal}/${job.items?.length||0} finished · ${available} available`))}</p>${[...groups].map(([id,items])=>`<section class="tools-result-group"><h4>${esc(targetName(id))}</h4>${items.map(item => `<article><div class="tools-result-heading"><strong>${esc(item.model)}</strong><span>${esc(status(item.state))}${item.httpStatus ? ` · HTTP ${esc(item.httpStatus)}` : ''}</span></div><small>${esc(item.firstOutputMs != null ? `${tr('首段输出', 'First output')} ${item.firstOutputMs} ms · ` : '')}${esc(localDate(item.checkedAt))}</small><details><summary>${esc(tr('技术详情','Technical details'))}</summary><dl>${[[tr('目标编号','Target ID'),item.targetId],[tr('实际模型','Actual model'),item.actualModel],[tr('错误码','Error code'),item.errorCode],[tr('上游原文','Original upstream message'),item.error || item.message],[tr('可重试时间','Retry at'),item.retryAt?localDate(item.retryAt):''],[tr('实际账号','Selected account'),item.selectedAccountId?targetName(item.selectedAccountId):''],[tr('来源','Source'),item.source],[tr('尝试账号','Attempted accounts'),item.attemptedAccountIds?.map(targetName).join(', ')]].filter(([,value])=>value).map(([label,value])=>`<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join('')}</dl></details></article>`).join('')}</section>`).join('')}`;
   }
   async function poll(id) {
     clearTimeout(timer);
@@ -76,18 +118,29 @@
     try {
       const result = await api(`/api/model-diagnostics/jobs/${encodeURIComponent(id)}`);
       if (epoch !== pollEpoch || !dialog.open || mode !== 'models') return;
-      job = result; renderJob();
-    } catch (error) { if (epoch !== pollEpoch) return; showError(error); }
-    if (dialog.open && mode === 'models' && (!job || ['queued', 'running'].includes(job.status))) timer = setTimeout(() => poll(id), 1000);
+      job = result; pollFailures = 0; renderJob();
+    } catch (error) {
+      if (epoch !== pollEpoch) return;
+      if (error.status === 404) {
+        if (job) job = { ...job, id: null, status: 'unavailable', items: (job.items || []).map(item => ['queued', 'running', 'checking'].includes(item.state) ? { ...item, state: 'unavailable' } : item) };
+        rememberJob(''); pollEpoch++; renderJob();
+        showError(new Error(tr('此检测记录已失效，可以重新开始检测。', 'This probe job is no longer available. You can start a new check.')));
+        return;
+      }
+      pollFailures++; showError(error);
+    }
+    if (dialog.open && mode === 'models' && (!job || ['queued', 'running'].includes(job.status))) timer = setTimeout(() => poll(id), Math.min(15000, 1000 * 2 ** Math.min(pollFailures, 4)));
   }
   async function start(items) {
     if (job && ['queued', 'running'].includes(job.status)) throw new Error(tr('当前检测尚未结束，请等待完成或停止后再试。', 'A probe job is still active. Wait or stop it before starting another.'));
     if (!items.length) throw new Error(tr('请选择需要检测的模型。', 'Select models to probe.'));
+    if (items.length > 60) throw new Error(tr('每批最多检测 60 项，请减少选择后再试。', 'Select at most 60 checks per batch.'));
     const allowBusy = dialog?.querySelector('[name="tools-allow-busy"]')?.checked === true;
     const warning = allowBusy ? tr('已包含使用中的账号；检测会与当前任务共享额度和并发限制，可能触发限流。', 'Active accounts are included; probes share quota and concurrency limits with current tasks and may trigger rate limits.') : '';
-    if (!confirm(tr(`将发送 ${items.length} 个真实检测请求，会消耗少量账号额度。${warning}继续？`, `Send ${items.length} live probes, consuming account quota? ${warning}`))) return;
+    const names = [...new Set(items.map(item => targetName(item.targetId)))].join('\n');
+    if (!confirm(tr(`将发送 ${items.length} 个真实检测请求，会消耗少量账号额度。\n账号：\n${names}\n${warning}继续？`, `Send ${items.length} live probes, consuming account quota?\nAccounts:\n${names}\n${warning}`))) return;
     job = await post('/api/model-diagnostics/start', { items: items.map(({ targetId, model }) => ({ targetId, model })), confirmed: true, allowBusy });
-    pollEpoch++; rememberJob(job.id); renderJob(); poll(job.id);
+    pollEpoch++; pollFailures = 0; rememberJob(job.id); renderJob(); poll(job.id);
   }
   function updateQuota(data) {
     const account = (state.accounts || []).find(a => a.id === targetId);
@@ -97,39 +150,44 @@
     const id = targetId;
     const data = await post(`/api/accounts/${encodeURIComponent(id)}/reset-credits`);
     if (mode !== 'credits' || targetId !== id) return;
-    creditsState = data; updateQuota(data);
+    creditsState = data; creditsStale = false; updateQuota(data);
     if (data.operation?.clientOperationId && data.operation.status === 'pending') { attempts.set(id, { id: data.operation.clientOperationId, creditId: data.operation.creditId }); saveAttempts(); }
     else if (data.operation?.status === 'complete' && attempts.get(id)?.id === data.operation.clientOperationId) { attempts.delete(id); saveAttempts(); }
     renderCredits();
   }
   function creditCopy(card) {
-    const title = /^Full reset \(Weekly \+ 5 hr\)$/i.test(card.title || '')
+    const knownTitle = /^Full reset \(Weekly \+ 5 hr\)$/i.test(card.title || '');
+    const title = knownTitle
       ? tr('完整重置（周额度 + 5 小时额度）', 'Full reset (Weekly + 5 hr)') : card.title || tr('重置卡', 'Reset credit');
     const states = { available: ['可用', 'Available'], used: ['已使用', 'Used'], redeemed: ['已兑换', 'Redeemed'], expired: ['已过期', 'Expired'] };
     const stateLabel = states[card.status] ? tr(...states[card.status]) : tr('状态待识别', 'Unknown status');
     const scope = card.resetType === 'codexRateLimits' ? tr('Codex 使用额度', 'Codex rate limits') : tr('以官方返回范围为准', 'Scope determined by the server');
-    const description = /^Thanks for using Codex! You've been granted one free rate limit reset\.?$/i.test(card.description || '')
+    const knownDescription = /^Thanks for using Codex! You've been granted one free rate limit reset\.?$/i.test(card.description || '');
+    const description = knownDescription
       ? tr('感谢使用 Codex！你已获赠一次免费的额度重置。', "Thanks for using Codex! You've been granted one free rate limit reset.")
       : card.description || '';
     const date = new Date(card.expiresAt);
     const expiry = card.expiresAt && Number.isFinite(date.getTime())
       ? date.toLocaleString(navoUsesChinese() ? 'zh-CN' : 'en-US', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
       : tr('官方未提供', 'Not provided');
-    return { title, stateLabel, scope, description, expiry };
+    return { title, stateLabel, scope, description, expiry, original: Boolean((card.title && !knownTitle) || (card.description && !knownDescription)) };
   }
   function creditMarkup(card, i, pending) {
     const copy = creditCopy(card);
-    return `<article class="tools-credit"><strong>${esc(copy.title)}</strong><small>${esc(tr('状态：', 'Status: '))}${esc(copy.stateLabel)} · ${esc(tr('范围：', 'Scope: '))}${esc(copy.scope)}</small>${copy.description ? `<small>${esc(copy.description)}</small>` : ''}<small>${esc(tr('到期时间（本地）：', 'Expires (local): '))}${esc(copy.expiry)}</small><button data-tools-action="consume" data-credit-index="${i}" ${pending || busy ? 'disabled' : ''}>${esc(tr('使用此卡', 'Use credit'))}</button></article>`;
+    const available = !creditsStale && card.status === 'available' && (!card.expiresAt || Date.parse(card.expiresAt) > Date.now());
+    return `<article class="tools-credit"><strong>${esc(copy.title)}</strong>${copy.original ? `<small>${esc(tr('未识别的标题或说明保留官方原文', 'Unrecognized title or description is shown in the original wording'))}</small>` : ''}<small>${esc(tr('状态：', 'Status: '))}${esc(copy.stateLabel)} · ${esc(tr('范围：', 'Scope: '))}${esc(copy.scope)}</small>${copy.description ? `<small>${esc(copy.description)}</small>` : ''}<small>${esc(tr('到期时间（本地）：', 'Expires (local): '))}${esc(copy.expiry)}</small><button data-tools-action="consume" data-credit-index="${i}" ${pending || busy || !available ? 'disabled' : ''}>${esc(tr('使用此卡', 'Use credit'))}</button></article>`;
   }
   function renderCredits() {
     if (!dialog?.open || mode !== 'credits') return;
     const credits = creditsState?.credits;
     const pending = attempts.has(targetId) || creditsState?.operation?.status === 'pending';
-    dialog.querySelector('.tools-body').innerHTML = `<p>${esc(tr('重置卡属于当前账号。使用可能无法撤销；不会自动使用第二张。', 'Credits belong to this account. Redemption may be irreversible; a second credit is never consumed automatically.'))}</p><div class="tools-buttons"><button data-tools-action="refresh-credits">${esc(tr('刷新', 'Refresh'))}</button></div>${credits ? `<h3>${esc(tr('可用重置卡', 'Available reset credits'))}: ${esc(credits.availableCount ?? '—')}</h3>` : ''}${pending ? `<p class="tools-pending">${esc(tr('上次操作结果待确认，请刷新核验；再次提交会复用同一个操作编号。', 'The previous result is pending. Refresh to verify; resubmitting reuses the same operation ID.'))}</p><button data-tools-action="consume">${esc(tr('核验或重试原操作', 'Verify or retry prior operation'))}</button>` : ''}${Array.isArray(credits?.credits) ? credits.credits.map((card, i) => creditMarkup(card, i, pending)).join('') : `<p>${esc(tr('官方未提供逐卡详情。', 'Individual credit details were not provided.'))}</p>${Number(credits?.availableCount) > 0 && !pending ? `<button data-tools-action="consume">${esc(tr('使用一张', 'Use one credit'))}</button>` : ''}`}`;
+    dialog.querySelector('.tools-body').innerHTML = `<div class="tools-owner"><strong>${esc(targetName(targetId))}</strong></div>${creditsNotice ? `<p class="tools-notice" role="status">${esc(creditsNotice)}</p>` : ''}<p>${esc(tr('重置卡属于当前账号。使用可能无法撤销；不会自动使用第二张。', 'Credits belong to this account. Redemption may be irreversible; a second credit is never consumed automatically.'))}</p><div class="tools-buttons"><button data-tools-action="refresh-credits">${esc(tr('刷新', 'Refresh'))}</button></div>${credits ? `<h3>${esc(tr('可用重置卡', 'Available reset credits'))}: ${esc(credits.availableCount ?? '—')}</h3>` : ''}${pending ? `<p class="tools-pending">${esc(tr('上次操作结果待确认，请刷新核验；再次提交会复用同一个操作编号。', 'The previous result is pending. Refresh to verify; resubmitting reuses the same operation ID.'))}</p><button data-tools-action="consume" ${busy ? 'disabled' : ''}>${esc(tr('核验或重试原操作', 'Verify or retry prior operation'))}</button>` : ''}${Array.isArray(credits?.credits) ? credits.credits.map((card, i) => creditMarkup(card, i, pending)).join('') : `<p>${esc(tr('官方未提供逐卡详情。', 'Individual credit details were not provided.'))}</p>${Number(credits?.availableCount) > 0 && !pending && !creditsStale ? `<button data-tools-action="consume">${esc(tr('使用一张', 'Use one credit'))}</button>` : ''}`}`;
   }
   async function consume(button) {
+    const id = targetId;
     let attempt = attempts.get(targetId);
-    if (!confirm(tr('确认对当前账号使用一张重置卡？实际重置范围由官方决定，操作可能无法撤销。', 'Use one reset credit for this account? The server determines its scope; this may be irreversible.'))) return;
+    const newAttempt = !attempt;
+    if (!confirm(tr(`确认对「${targetName(id)}」使用一张重置卡？实际重置范围由官方决定，操作可能无法撤销。`, `Use one reset credit for “${targetName(id)}”? The server determines its scope; this may be irreversible.`))) return;
     if (!attempt) {
       const card = creditsState?.credits?.credits?.[Number(button.dataset.creditIndex)];
       attempt = { id: crypto.randomUUID(), creditId: card?.id };
@@ -137,44 +195,83 @@
       saveAttempts();
     }
     renderCredits();
-    const result = await post(`/api/accounts/${encodeURIComponent(targetId)}/reset-credits/consume`, { confirmed: true, clientOperationId: attempt.id, ...(attempt.creditId ? { creditId: attempt.creditId } : {}) });
+    let result;
+    try {
+      result = await post(`/api/accounts/${encodeURIComponent(id)}/reset-credits/consume`, { confirmed: true, clientOperationId: attempt.id, ...(attempt.creditId ? { creditId: attempt.creditId } : {}) });
+    } catch (error) {
+      // A prior uncertain submission must retain its identity even if today's
+      // retry fails before submission (for example because auth has expired).
+      if (newAttempt && error.operationStatus === 'not_submitted') { attempts.delete(id); saveAttempts(); }
+      renderCredits(); throw error;
+    }
     updateQuota(result);
     if (result.outcome !== 'pending') { attempts.delete(targetId); saveAttempts(); }
-    await refreshCredits();
+    creditsStale = result.outcome !== 'pending';
     const outcomes = { reset: tr('已使用', 'Redeemed'), alreadyRedeemed: tr('此操作已完成', 'Already redeemed'), nothingToReset: tr('当前无需重置', 'Nothing to reset'), noCredit: tr('没有可用重置卡', 'No credit available'), pending: tr('结果待确认', 'Pending verification') };
-    const notice = document.createElement('p'); notice.textContent = `${outcomes[result.outcome] || result.outcome}${result.outcome === 'reset' && !result.quotaSynced ? tr('，额度同步中', '; syncing quota') : ''}`;
-    dialog.querySelector('.tools-body').prepend(notice);
+    creditsNotice = `${outcomes[result.outcome] || result.outcome}${result.outcome === 'reset' && !result.quotaSynced ? tr('，额度同步中', '; syncing quota') : ''}`;
+    renderCredits();
+    await refreshCredits().catch(showError);
+  }
+  async function readCatalog(button) {
+    if (catalogLoading) return;
+    const targetIds = selectedTargets();
+    if (!targetIds.length) throw new Error(tr('请选择账号。', 'Select accounts.'));
+    if (targetIds.length > 30) throw new Error(tr('每批最多读取 30 个目标，请减少选择。', 'Read at most 30 targets per batch.'));
+    const epoch = ++catalogEpoch, scope = selectionScope();
+    const current = () => dialog.open && mode === 'models' && epoch === catalogEpoch && scope === selectionScope();
+    catalog = []; catalogScope = scope; modelSelections.clear(); catalogLoading = true; catalogCompleted = 0; catalogTotal = targetIds.length;
+    renderCatalog(); renderSelection();
+    const unique = new Map(), errors = [];
+    let cursor = 0;
+    try {
+      // A slow target must not hide catalogs already returned by healthy targets.
+      await Promise.all(Array.from({length:Math.min(2,targetIds.length)},async()=>{
+        while (cursor < targetIds.length && current()) {
+          const id = targetIds[cursor++];
+          try {
+            const rows = await post('/api/model-diagnostics/catalog',{targetIds:[id]});
+            if (!current()) return;
+            for (const row of rows) {
+              if (row.targetId !== id) continue;
+              if (row.error) errors.push(targetName(id));
+              for (const model of row.models || []) {
+                if (model.error) { errors.push(targetName(id)); continue; }
+                if (model.id) unique.set(`${id}\0${model.id}`,{targetId:id,model:model.id});
+                if (model.id && model.memberTargetId) unique.set(`${model.memberTargetId}\0${model.id}`,{targetId:model.memberTargetId,model:model.id,targetLabel:`${targetName(id)} · ${tr('固定成员','Fixed member')} · ${targetName(model.accountId)}`});
+              }
+            }
+          } catch { if (current()) errors.push(targetName(id)); }
+          if (!current()) return;
+          catalogCompleted++; catalog = [...unique.values()]; renderCatalog();
+        }
+      }));
+      if (current() && errors.length) showError(new Error(tr(`以下目标的目录未能完整读取，可重新读取：${[...new Set(errors)].join('、')}`, `Catalogs could not be fully read for: ${[...new Set(errors)].join(', ')}. Read again to retry.`)));
+    } finally {
+      if (current()) { catalogLoading = false; renderCatalog(); renderSelection(); }
+    }
   }
   async function handle(action, button) {
     if (action === 'close') { dialog.close(); return; }
+    if (action === 'catalog') return readCatalog(button);
+    if (action === 'cancel' && job?.id) {
+      pollEpoch++; clearTimeout(timer); button.disabled = true;
+      try { job = await post(`/api/model-diagnostics/jobs/${encodeURIComponent(job.id)}/cancel`); renderJob(); if (job && ['queued', 'running'].includes(job.status)) poll(job.id); }
+      catch (error) { if (error.status === 404) { rememberJob(''); job = job ? { ...job, id: null, status: 'unavailable' } : null; renderJob(); } else { if (job?.id) poll(job.id); throw error; } }
+      finally { if (button.isConnected) button.disabled = false; }
+      return;
+    }
     if (busy) return;
     busy = true; button.disabled = true;
     try {
-      if (action === 'catalog') {
-        const targetIds = [...dialog.querySelectorAll('[name="tools-target"]:checked')].map(el => el.value);
-        if (!targetIds.length) throw new Error(tr('请选择账号。', 'Select accounts.'));
-        const rows = await post('/api/model-diagnostics/catalog', { targetIds });
-        const unique = new Map(), errors = [];
-        for (const row of rows) {
-          if (row.error) errors.push(`${row.targetId}: ${row.error}`);
-          for (const model of row.models || []) {
-            if (model.error) { errors.push(`${row.targetId}: ${model.error}`); continue; }
-            if (model.id) unique.set(`${row.targetId}\0${model.id}`, { targetId: row.targetId, model: model.id });
-            if (model.id && model.memberTargetId) {
-              const label = (state.accounts || []).find(a => a.id === model.accountId)?.label || model.accountId;
-              unique.set(`${model.memberTargetId}\0${model.id}`, { targetId: model.memberTargetId, model: model.id, targetLabel: `${tr('固定成员', 'Fixed member')} · ${label}` });
-            }
-          }
-        }
-        catalog = [...unique.values()]; renderCatalog();
-        if (errors.length) showError(new Error(errors.join('\n')));
-      } else if (action === 'start') await start([...dialog.querySelectorAll('[name="tools-model"]:checked')].map(el => catalog[Number(el.value)]));
+      if (action === 'start') {
+        if (catalogScope !== selectionScope()) throw new Error(tr('账号选择已变化，请重新读取模型列表。', 'Account selection changed. Read the model catalog again.'));
+        await start([...dialog.querySelectorAll('[name="tools-model"]:checked')].map(el => catalog[Number(el.value)]).filter(Boolean));
+      }
       else if (action === 'retry') await start((job?.items || []).filter(item => !['available', 'success', 'completed', 'running', 'checking', 'queued'].includes(item.state)).map(({ targetId, model }) => ({ targetId, model })));
-      else if (action === 'cancel' && job?.id) { pollEpoch++; clearTimeout(timer); job = await post(`/api/model-diagnostics/jobs/${encodeURIComponent(job.id)}/cancel`); renderJob(); if (['queued', 'running'].includes(job.status)) poll(job.id); }
       else if (action === 'refresh-credits') await refreshCredits();
       else if (action === 'consume') await consume(button);
-      else if (action === 'select-credit-account') { targetId = button.dataset.accountId; mode = 'credits'; creditsState = null; renderCredits(); await refreshCredits(); }
-    } finally { busy = false; if (button.isConnected) button.disabled = false; }
+      else if (action === 'select-credit-account') { targetId = button.dataset.accountId; mode = 'credits'; creditsState = null; creditsNotice = ''; creditsStale = false; renderCredits(); await refreshCredits(); }
+    } finally { busy = false; if (button.isConnected) button.disabled = false; if (mode === 'credits') renderCredits(); }
   }
   function decorate() {
     document.querySelectorAll('.account-actions .action-primary').forEach(button => {
@@ -220,10 +317,10 @@
     } else if (button.dataset.tool === 'reset-pool') {
       mode = 'pool'; open(tr('选择重置卡所属账号', 'Choose credit owner'));
       const key = (state.apiService?.keys || []).find(k => `api-key:${k.id}` === targetId);
-      const ids = key?.accountIds || [];
+      const ids = key?.resolvedAccountIds || key?.accountIds || [];
       dialog.querySelector('.tools-body').innerHTML = `<p>${esc(tr('重置卡属于成员账号，不属于 API Key。', 'Credits belong to member accounts, not the API Key.'))}</p>${ids.map(id => `<button data-tools-action="select-credit-account" data-account-id="${esc(id)}">${esc((state.accounts || []).find(a => a.id === id)?.label || id)}</button>`).join('') || esc(tr('没有绑定账号', 'No bound accounts'))}`;
     } else {
-      mode = 'credits'; creditsState = null; open(tr('重置卡详情', 'Reset credits')); renderCredits(); refreshCredits().catch(showError);
+      mode = 'credits'; creditsState = null; creditsNotice = ''; creditsStale = false; open(tr('重置卡详情', 'Reset credits')); renderCredits(); refreshCredits().catch(showError);
     }
   }, true);
   window.NavoAccountTools = { decorate };

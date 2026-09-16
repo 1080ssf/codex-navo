@@ -33,7 +33,7 @@ function manager(t, options = {}) {
 test('creates hashed Navo keys and never persists the complete secret', (t) => {
   const service = manager(t);
   service.ensureAccountPool(['gpt-5.6-sol']);
-  const created = service.createKey({ name: 'Team key' });
+  const created = service.createKey({ name: 'Team key', accountIds: ['account-a'] });
   assert.match(created.secret, /^sk-navo-/);
   assert.equal(service.authenticate(`Bearer ${created.secret}`).id, created.key.id);
   assert.equal(service.authenticate('Bearer sk-navo-wrong'), null);
@@ -109,7 +109,7 @@ test('forwards native Codex cache fields without adding an explicit cache breakp
     return { upstream: new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) };
   } });
   service.ensureAccountPool(['gpt-5.6-sol']);
-  const created = service.createKey({ modelAllowlist: ['gpt-5.6-sol'] });
+  const created = service.createKey({ modelAllowlist: ['gpt-5.6-sol'], accountIds: ['account-a'] });
   const body = {
     model: 'gpt-5.6-sol', prompt_cache_key: 'native-thread-key', stream: true,
     input: [{ role: 'developer', content: [{ type: 'input_text', text: 'instructions' }] }],
@@ -123,7 +123,7 @@ test('forwards native Codex cache fields without adding an explicit cache breakp
 test('enforces model, request, token and expiry restrictions', (t) => {
   const service = manager(t);
   const provider = service.ensureAccountPool(['allowed', 'other']);
-  const created = service.createKey({ modelAllowlist: ['allowed'], requestLimit: 1 });
+  const created = service.createKey({ modelAllowlist: ['allowed'], requestLimit: 1, accountIds: ['account-a'] });
   const record = service.authenticate(`Bearer ${created.secret}`);
   service.authorizeKey(record, provider, 'allowed');
   assert.throws(() => service.authorizeKey(record, provider, 'other'), /模型权限/);
@@ -154,7 +154,7 @@ test('prices new API usage without guessing historical model from current allowl
 
 test('durable ledger deduplicates request IDs and safely reconciles only complete buckets', (t) => {
   const service = manager(t);
-  const { key } = service.createKey();
+  const { key } = service.createKey({ accountIds: ['account-a'] });
   const record = service.keys.find((item) => item.id === key.id);
   const usage = { inputTokens: 1000, cachedInputTokens: 500, outputTokens: 100 };
   service.recordUsage(record, usage, 'gpt-5.6-sol', new Date(), { requestId: 'request-1', secret: 'never-save' });
@@ -180,7 +180,7 @@ test('durable ledger deduplicates request IDs and safely reconciles only complet
 test('stores API key usage in separate local-day buckets while keeping lifetime limits cumulative', (t) => {
   const service = manager(t);
   service.ensureAccountPool(['gpt-5.6-sol']);
-  const created = service.createKey({ name: 'Daily usage' });
+  const created = service.createKey({ name: 'Daily usage', accountIds: ['account-a'] });
   const record = service.authenticate(`Bearer ${created.secret}`);
   service.recordUsage(record, { inputTokens: 100, cachedInputTokens: 60, outputTokens: 10 }, 'gpt-5.6-sol', new Date(2026, 7, 14, 23, 55));
   service.recordUsage(record, { inputTokens: 20, cachedInputTokens: 5, outputTokens: 2 }, 'gpt-5.6-sol', new Date(2026, 7, 15, 0, 5));
@@ -226,7 +226,7 @@ test('extracts cache reads and cache writes from Responses usage', () => {
 test('lists only account-pool models permitted by a key', (t) => {
   const service = manager(t);
   service.ensureAccountPool(['gpt-a', 'gpt-b']);
-  const created = service.createKey({ modelAllowlist: ['gpt-b'] });
+  const created = service.createKey({ modelAllowlist: ['gpt-b'], accountIds: ['account-a'] });
   const models = service.modelsForKey(service.authenticate(`Bearer ${created.secret}`));
   assert.deepEqual(models.map((item) => item.id), ['gpt-b']);
   assert.ok(models.every((item) => item.provider_id === ACCOUNT_POOL_PROVIDER_ID));

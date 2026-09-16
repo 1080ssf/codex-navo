@@ -65,6 +65,8 @@ test('floating window renders account, quota, usage, task progress, and task usa
   assert.match(client, /Number\(usage\.cachedInput\) \/ Number\(usage\.input\) \* 100/);
   assert.match(client, /fetch\('\/api\/floating-status\/refresh'/);
   assert.match(client, /function renderQuotaWindows\(windows = \[\]\)/);
+  assert.match(styles, /\.quota-window \{[^}]*grid-template-columns: minmax\(0,1fr\) 160px/s);
+  assert.match(styles, /\.quota-window small \{[^}]*font-size: 10px/s);
   assert.match(client, /<progress class="quota-track" value="\$\{remaining\}" max="100"/);
   assert.match(client, /codex-navo-quota-refreshed-at/);
   assert.match(styles, /body\[data-theme="midnight"\]/);
@@ -75,7 +77,14 @@ test('floating window renders account, quota, usage, task progress, and task usa
   assert.match(server, /function floatingWindowState\(\)/);
   assert.match(server, /function combinedFloatingQuotaWindows\(pool = \[\]\)/);
   assert.match(server, /setInterval\(runQuotaRefreshTimer, 5_000\)/);
-  assert.match(server, /const interval = isActive \? 60_000 : 5 \* 60_000/);
+  assert.match(server, /quotaRefreshDue\(account, active, now\)/);
+  const { quotaRefreshDue } = require('../lib/quota-refresh-scheduler');
+  const now = Date.now();
+  const account = { quota: { refreshedAt: new Date(now).toISOString() } };
+  assert.equal(quotaRefreshDue(account, true, now + 59_999), false);
+  assert.equal(quotaRefreshDue(account, true, now + 60_000), true);
+  assert.equal(quotaRefreshDue(account, false, now + 299_999), false);
+  assert.equal(quotaRefreshDue(account, false, now + 300_000), true);
   assert.match(server, /activeKey \? usageForLocalDate\(activeKey\)/);
   assert.match(server, /url\.pathname === '\/api\/floating-status'/);
   assert.match(server, /url\.pathname === '\/api\/floating-status\/refresh'/);

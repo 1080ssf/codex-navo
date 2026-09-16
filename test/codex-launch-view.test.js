@@ -196,7 +196,7 @@ test('project renamed while Codex is open keeps its latest name after switching 
   const restored = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   assert.deepEqual(restored['local-projects'].p1, { name: 'Renamed project', rootPaths: ['C:/one', 'C:/one-extra'] });
   assert.deepEqual(restored['local-projects'].p2, { name: 'Unloaded project', rootPaths: ['C:/two'] });
-  assert.deepEqual(restored['project-order'], ['p2', 'p1']);
+  assert.deepEqual(restored['project-order'], ['p1', 'p2']);
   fs.rmSync(root, { recursive: true, force: true });
 });
 

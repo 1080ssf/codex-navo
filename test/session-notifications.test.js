@@ -201,6 +201,116 @@ test('notification service ignores historical terminal events replayed by a sess
   assert.equal(service.listEvents(0).length, 0);
 });
 
+function monitoredNotificationFixture(t, startAt) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-navo-notification-baseline-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const folder = path.join(root, 'sessions');
+  fs.mkdirSync(folder, { recursive: true });
+  const visible = new Set();
+  const monitor = new CodexSessionMonitor({ codexHome: root, intervalMs: 60_000, now: () => startAt });
+  t.after(() => monitor.stop());
+  // Catalog visibility models launch selection/restoration, without touching a
+  // live database. The monitor still scans and parses real temporary JSONL.
+  monitor.refreshCatalog = () => {
+    monitor.catalogAvailable = true;
+    monitor.catalog = new Map([...visible].map((id) => [id, { id }]));
+  };
+  monitor.watch = () => {};
+  const service = new NotificationService({
+    file: path.join(root, 'notifications.json'), readJson: () => ({}),
+    writeJsonAtomic() {}, now: () => startAt + 10_000,
+  });
+  const emitted = [];
+  monitor.on('terminal', (event) => { emitted.push(event); service.notify(event); });
+  const write = (id, records, append = false) => {
+    const file = path.join(folder, `${id}.jsonl`);
+    const text = `${records.map(JSON.stringify).join('\n')}\n`;
+    if (append) fs.appendFileSync(file, text);
+    else fs.writeFileSync(file, text);
+  };
+  const event = (id, type, at, turn = 'fixture-turn') => ({
+    type: 'event_msg', timestamp: new Date(at).toISOString(), payload: { type, turn_id: turn },
+  });
+  return { monitor, service, visible, write, event, emitted };
+}
+
+test('a recently completed task hidden during startup does not notify when catalog restoration reveals it', async (t) => {
+  const startAt = Date.now();
+  const h = monitoredNotificationFixture(t, startAt);
+  const id = '00000000-0000-4000-8000-000000000201';
+  h.write(id, [h.event(id, 'task_started', startAt - 90_000), h.event(id, 'task_complete', startAt - 60_000)]);
+  await h.monitor.start();
+  h.visible.add(id);
+  await h.monitor.scan(false);
+  assert.equal(h.monitor.snapshot().tasks[0].status, 'completed', 'history remains visible');
+  assert.equal(h.emitted.length, 0);
+  assert.equal(h.service.listEvents().length, 0);
+});
+
+test('new completions still notify for existing tasks and files first discovered after startup', async (t) => {
+  const startAt = Date.now();
+  const h = monitoredNotificationFixture(t, startAt);
+  const existing = '00000000-0000-4000-8000-000000000202';
+  const fresh = '00000000-0000-4000-8000-000000000203';
+  h.visible.add(existing);
+  h.write(existing, [h.event(existing, 'task_started', startAt - 120_000)]);
+  await h.monitor.start();
+  h.write(existing, [h.event(existing, 'task_complete', startAt + 1_000)], true);
+  h.write(fresh, [h.event(fresh, 'task_started', startAt + 1_000), h.event(fresh, 'task_complete', startAt + 2_000)]);
+  h.visible.add(fresh);
+  await h.monitor.scan(false);
+  assert.equal(h.service.listEvents().length, 2);
+  await h.monitor.scan(false);
+  h.visible.clear();
+  await h.monitor.scan(false);
+  h.visible.add(existing); h.visible.add(fresh);
+  await h.monitor.scan(false);
+  assert.equal(h.service.listEvents().length, 2, 'reappearing files retain task/turn notification deduplication');
+});
+
+test('a completion arriving during the initial scan is not discarded as startup history', async (t) => {
+  const startAt = Date.now();
+  const h = monitoredNotificationFixture(t, startAt);
+  const id = '00000000-0000-4000-8000-000000000204';
+  h.visible.add(id);
+  h.write(id, [h.event(id, 'task_started', startAt - 60_000)]);
+  const refreshNames = h.monitor.refreshNames.bind(h.monitor);
+  h.monitor.refreshNames = async () => {
+    await refreshNames();
+    assert.equal(h.monitor.monitorStartedAt, startAt, 'baseline precedes the asynchronous startup scan');
+    h.write(id, [h.event(id, 'task_complete', startAt + 1_000)], true);
+  };
+  await h.monitor.start();
+  assert.equal(h.emitted.length, 1);
+  assert.equal(h.service.listEvents().length, 1);
+});
+
+test('first-discovered child tasks and undated historical events do not produce root completion notifications', async (t) => {
+  const startAt = Date.now();
+  const h = monitoredNotificationFixture(t, startAt);
+  const child = '00000000-0000-4000-8000-000000000205';
+  const undated = '00000000-0000-4000-8000-000000000206';
+  await h.monitor.start();
+  h.write(child, [
+    { type: 'session_meta', timestamp: new Date(startAt + 1_000).toISOString(), payload: {
+      id: child, source: { subagent: { thread_spawn: { parent_thread_id: 'root-fixture' } } },
+    } },
+    h.event(child, 'task_started', startAt + 1_000), h.event(child, 'task_complete', startAt + 2_000),
+  ]);
+  h.write(undated, [{ type: 'event_msg', payload: { type: 'task_complete', turn_id: 'unknown-age' } }]);
+  h.visible.add(child); h.visible.add(undated);
+  await h.monitor.scan(false);
+  assert.equal(h.emitted.length, 0);
+  assert.equal(h.service.listEvents().length, 0);
+});
+
+test('waiting terminal snapshots carry their own event timestamp, not the previous record timestamp', () => {
+  const state = new SessionState('fixture.jsonl');
+  state.apply({ type: 'event_msg', timestamp: '2026-09-16T01:00:00Z', payload: { type: 'task_started' } });
+  const terminal = state.apply({ type: 'event_msg', timestamp: '2026-09-16T01:10:00Z', payload: { type: 'approval_request' } });
+  assert.equal(terminal.task.lastUpdatedAt, '2026-09-16T01:10:00.000Z');
+});
+
 test('子智能体终止事件不会触发任务完成通知', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-navo-notify-subagent-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
