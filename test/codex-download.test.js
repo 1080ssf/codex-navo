@@ -15,12 +15,14 @@ function downloader(t, fetch, timer = setTimeout) {
   const start = source.indexOf('async function downloadCodexPackage(');
   const end = source.indexOf('\nasync function readCodexPackageMetadata', start);
   assert.ok(start >= 0 && end > start);
-  const context = { fs, path, crypto, process, Buffer, URL, AbortController, setTimeout: timer, clearTimeout,
+  const context = { fs, path, crypto, process, Buffer, URL, AbortController, AbortSignal, setTimeout: timer, clearTimeout,
     USER_DATA_ROOT: root, reusablePackage, writeUpdateSnapshot, progressReporter,
+    ...require('../lib/update-download'), configureUpdaterNetwork: async () => ({nodeName:'direct'}),
     codexUpdateSession: () => ({ fetch }), publishCodexUpdateState: () => {} };
   vm.createContext(context);
   vm.runInContext(source.slice(start, end), context);
   return { run: () => context.downloadCodexPackage({ latestVersion: '1.2.3', packageUrl: 'https://example.test/package' }),
+    resilient: () => context.downloadCodexPackageResilient({latestVersion:'1.2.3',packageUrl:'https://example.test/package'}), context,
     cancel: () => context.codexDownloadController.abort(new Error('CODEX_DOWNLOAD_CANCELLED')), root };
 }
 
@@ -44,6 +46,17 @@ test('user cancellation retains resumable data and retry completes from the save
   download.cancel();
   await assert.rejects(pending, /CODEX_DOWNLOAD_CANCELLED/);
   assert.equal(fs.readFileSync((await download.run()).path, 'utf8'), 'package-data');
+});
+
+test('production coordinator selects a download route then safely falls back for small packages', async t => {
+  let selected=0;
+  const d=downloader(t,async(_url,options)=>options.headers.Range==='bytes=0-0'
+    ? new Response('p',{status:206,headers:{etag:'"one"','content-range':'bytes 0-0/12'}})
+    : new Response('package-data',{headers:{'content-length':'12'}}));
+  d.context.configureUpdaterNetwork=async()=>{selected++;return {nodeName:'direct'};};
+  const result=await d.resilient();
+  assert.equal(fs.readFileSync(result.path,'utf8'),'package-data');assert.equal(selected,1);
+  await d.resilient();assert.equal(selected,1,'verified cached package must not probe any routes');
 });
 
 test('download aborts when response headers never arrive', async (t) => {

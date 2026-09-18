@@ -33,7 +33,7 @@ test('账号线路明确覆盖 Codex 任务远程站点而非仅 GitHub', () => 
   assert.match(network, /ALL_PROXY: url, all_proxy: url/);
   assert.match(network, /NODE_USE_ENV_PROXY: '1'/);
   assert.match(network, /const bypass = 'localhost,127\.0\.0\.1,::1,\.localhost,0\.0\.0\.0'/);
-  assert.match(server, /const environment = codexEnvironment\(\{ \.\.\.process\.env, CODEX_HOME: SHARED_CODEX_HOME \}, account\)/);
+  assert.match(server, /const environment = chatgptEnvironment\(codexEnvironment\(\{ \.\.\.process\.env, CODEX_HOME: SHARED_CODEX_HOME \}, account\)\)/);
   assert.match(server, /--proxy-server=http:\/\/127\.0\.0\.1:\$\{accountNetwork\.mixedPort\}/);
 });
 
@@ -655,7 +655,7 @@ test('Codex launch dialog keeps actions visible and omits the redundant language
   assert.doesNotMatch(launchDialog, /跟随 Navo 默认语言/);
   assert.match(styles, /\.codex-launch-dialog form \{[^}]*display: flex[^}]*height: 100%[^}]*flex-direction: column/s);
   assert.match(styles, /\.launch-dialog-content \{[^}]*flex: 1 1 auto[^}]*min-height: 0[^}]*overflow-y: auto/s);
-  assert.match(styles, /\.launch-projects \{[^}]*flex: 1 1 auto[^}]*overflow-y: auto/s);
+  assert.match(styles, /\.launch-projects \{[^}]*overflow: visible/s);
   assert.match(styles, /\.codex-launch-dialog \.dialog-actions \{[^}]*flex: 0 0 auto/s);
 });
 
@@ -683,25 +683,27 @@ test('fold controls use one centered CSS chevron instead of font glyphs', () => 
   assert.match(styles, /\[aria-expanded="true"\][^{]*\.ui-chevron[^}]*rotate\(45deg\)/s);
 });
 
-test('application settings keep Navo on the stable light appearance', () => {
+test('application settings expose persistent light, dark and system appearance', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
   assert.match(html, /id="theme-form"/);
   assert.match(html, /id="app-theme-select"[\s\S]*value="light"/);
-  assert.doesNotMatch(html, /value="system"|value="dark"/);
+  assert.match(html, /value="system"/);
+  assert.match(html, /value="dark"/);
+  assert.ok(html.indexOf('src="/theme-init.js"') < html.indexOf('href="/styles.css"'));
   assert.match(client, /themeStorageKey = 'codex-navo-app-theme'/);
-  assert.match(client, /state\.appTheme = 'light'/);
-  assert.match(client, /document\.documentElement\.dataset\.theme = 'light'/);
+  assert.doesNotMatch(client, /state\.appTheme = 'light'/);
+  assert.match(client, /systemThemeQuery\.addEventListener\('change'/);
   assert.match(client, /localStorage\.setItem\(themeStorageKey, state\.appTheme\)/);
   assert.match(html, /data-settings-picker="language"/);
-  assert.doesNotMatch(html, /data-settings-picker="theme"/);
+  assert.match(html, /data-settings-picker="theme"/);
   assert.match(client, /function renderSettingsPicker\(/);
   assert.match(styles, /\.settings-picker-menu \{[^}]*border-radius:[^}]*box-shadow:/s);
   assert.match(styles, /\.settings-picker-trigger \.ui-chevron \{[^}]*margin:[^}]*3px[^}]*12px/s);
   assert.match(styles, /\.language-settings-layout \{[^}]*overflow:\s*visible/s);
   assert.match(styles, /\.language-settings-layout:has\(\.settings-picker\.open\) \{[^}]*z-index:\s*60/s);
-  assert.match(styles, /\.theme-static-choice/);
+  assert.match(styles, /html\[data-theme="dark"\]/);
 });
 
 test('Codex update card uses the packaged Codex icon instead of a letter mark', () => {
@@ -931,8 +933,10 @@ test('plan expiration is automatically read from the signed-in ChatGPT account',
   assert.match(server, /settledMap\(\[\.\.\.accounts\], 2,/);
   assert.match(server, /if \(planExpiryRefreshRun\) return planExpiryRefreshRun/);
   assert.match(server, /tokens\.access_token/);
-  assert.match(protocol, /backend-api\/accounts\/check\/v4-2023-04-27/);
-  assert.match(protocol, /entitlement\?\.expires_at/);
+  const subscription = fs.readFileSync(path.join(__dirname, '..', 'lib', 'subscription-read.js'), 'utf8');
+  assert.match(protocol, /readSubscriptionInPage/);
+  assert.match(subscription, /backend-api\/accounts\/check\/v4-2023-04-27/);
+  assert.match(subscription, /entitlement\?\.expires_at/);
   assert.doesNotMatch(styles, /\.expiry-badge\[type="button"\]/);
   assert.doesNotMatch(styles, /\.plan-badge\[type="button"\]/);
 });

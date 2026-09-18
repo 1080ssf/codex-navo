@@ -285,10 +285,11 @@
       const account = (state.accounts || []).find(a => a.id === card.dataset.id);
       const expiry = card.querySelector('.expiry-badge');
       if (account && expiry) {
-        const labels = { credential_unavailable: tr('当前凭证无法读取', 'Credential cannot read expiry'), not_returned: tr('官方未提供日期', 'Date not provided'), error: tr('到期读取失败', 'Expiry read failed'), not_checked: tr('到期待检测', 'Expiry not checked') };
+        const labels = { credential_unavailable: tr('当前凭证无法读取', 'Credential cannot read expiry'), not_returned: tr('官方未提供日期', 'Date not provided'), error: tr('到期读取失败', 'Expiry read failed'), not_checked: tr('到期待检测', 'Expiry not checked'), checking: tr('到期检测中', 'Checking expiry'), verification_required: tr('需网页验证', 'Web verification required'), session_required: tr('需网页登录', 'Web login required'), permission_denied: tr('无订阅读取权限', 'Subscription access denied'), account_not_found: tr('未匹配工作空间', 'Workspace not matched'), rate_limited: tr('查询受限', 'Query rate limited') };
+        const hints = { verification_required: tr('请打开该账号网页端完成验证，再点击刷新额度。', 'Open this account’s web page, complete verification, then refresh quota.'), session_required: tr('请登录该账号网页端，再点击刷新额度。', 'Sign in on this account’s web page, then refresh quota.'), permission_denied: tr('官方拒绝订阅查询；这不代表套餐已到期。', 'Subscription access was denied; this does not mean the plan expired.'), account_not_found: tr('未返回当前工作空间的信息，没有使用其他工作空间的日期。', 'The current workspace was not returned; no other workspace’s dates were used.') };
         if (account.planExpiryStatus === 'renewal' && account.planRenewsAt) expiry.textContent = `${tr('下次续费', 'Next renewal')} ${new Date(account.planRenewsAt).toLocaleDateString(navoUsesChinese() ? 'zh-CN' : 'en-US')}`;
         else if (!account.planExpiresAt && labels[account.planExpiryStatus]) expiry.textContent = labels[account.planExpiryStatus];
-        if (account.planExpiryError) expiry.title = `${tr('最近刷新失败', 'Last refresh failed')}: ${account.planExpiryError}`;
+        if (account.planExpiryError) expiry.title = `${tr('最近刷新失败', 'Last refresh failed')}: ${hints[account.planExpiryStatus] || (navoUsesChinese() ? account.planExpiryError : labels[account.planExpiryStatus] || tr('到期读取失败', 'Expiry read failed'))}`;
       }
       const actions = card.querySelector('.account-actions');
       if (card.dataset.id.startsWith('api-key:') && actions && !actions.querySelector('[data-tool="reset-pool"]')) {

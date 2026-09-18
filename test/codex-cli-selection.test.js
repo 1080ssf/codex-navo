@@ -63,10 +63,42 @@ test('resolver coalesces checks, bounds concurrency and chooses numeric newest s
 
 test('failed candidates are cached and explicit paths use the same version validation', async t => {
   const {file}=fixture(t);const exe=file('cli.exe');let calls=0,time=1;
-  const resolver=createCliResolver({now:()=>time,discover:async()=>[{path:exe,source:'configured',explicit:true}],run:async()=>{calls++;return {exitCode:0,stdout:'codex-cli 1.2.3-alpha.1'};}});
-  await assert.rejects(resolver.resolve({configured:exe}),/预发行/);await assert.rejects(resolver.resolve({configured:exe}),/预发行/);
+  const resolver=createCliResolver({now:()=>time,probeProtocol:async()=>({ok:false,code:'protocol_failed'}),discover:async()=>[{path:exe,source:'configured',explicit:true}],run:async()=>{calls++;return {exitCode:0,stdout:'codex-cli 1.2.3-alpha.1'};}});
+  await assert.rejects(resolver.resolve({configured:exe}),/协议验证失败/);await assert.rejects(resolver.resolve({configured:exe}),/协议验证失败/);
   assert.equal(calls,1);time+=16000;await resolver.inspect({configured:exe});assert.equal(calls,2);
   await resolver.inspect({configured:exe,force:true});assert.equal(calls,3);
+});
+
+test('the reported alpha plus EPERM scenario recovers only after an isolated protocol handshake', async t => {
+  const {file}=fixture(t); const alpha=file('alpha.exe'), desktop=file('desktop.exe'); let probes=0;
+  const resolver=createCliResolver({ discover:async()=>[{path:alpha,source:'managed'},{path:desktop,source:'desktop'}],
+    run:async file=>file===alpha?{exitCode:0,stdout:'codex-cli 0.154.0-alpha.6.2'}:{code:'EPERM',exitCode:null},
+    probeProtocol:async file=>{assert.equal(file,alpha);probes++;return {ok:true,durationMs:15};} });
+  assert.equal(await resolver.resolve(),alpha);
+  assert.equal(resolver.snapshot().selected.protocolVerified,true);
+  assert.equal(resolver.snapshot().selected.stable,false);
+  assert.equal(resolver.snapshot().candidates[1].processErrorCode,'EPERM');
+  await resolver.resolve();assert.equal(probes,1);
+  assert.equal(await resolver.resolve({configured:alpha}),alpha);
+  assert.equal(resolver.snapshot().selected.source,'configured');
+  assert.equal(resolver.snapshot().selected.explicit,true);
+});
+
+test('Navo-managed stable installs are discovered but incomplete staging directories are ignored', async t => {
+  const {root,file}=fixture(t);
+  const stable=file('runtime/stable-1.2.3-id/codex.exe');file('runtime/.install-incomplete/codex.exe');
+  file('runtime/stable-1.2.3-id/ready.json');file('runtime/stable-2.0.0-unverified/codex.exe');
+  const rows=await discoverCliCandidates({managedRoot:path.join(root,'runtime'),environment:{},desktopCandidates:async()=>[]});
+  assert.deepEqual(rows.map(row=>row.path),[stable]);assert.equal(rows[0].source,'navo');
+});
+
+test('a stable candidate takes priority over a previously handshake-verified preview', async t => {
+  const {file}=fixture(t);const alpha=file('alpha.exe'),stable=file('stable.exe');let foundStable=false,time=0,probes=0;
+  const resolver=createCliResolver({now:()=>time,discover:async()=>[alpha,...foundStable?[stable]:[]].map(path=>({path,source:'fixture'})),
+    run:async file=>({exitCode:0,stdout:`codex-cli ${file===alpha?'9.0.0-alpha.1':'1.2.3'}`}),
+    probeProtocol:async()=>{probes++;return {ok:true};} });
+  assert.equal(await resolver.resolve(),alpha);foundStable=true;time=31000;
+  assert.equal(await resolver.resolve(),stable);assert.equal(probes,1);
 });
 
 test('version probing is nonblocking, time bounded and reports process errors without raw output', async () => {

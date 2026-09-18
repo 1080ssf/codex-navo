@@ -149,17 +149,33 @@ function systemLocale() {
 state.appLocale = ['en-US', 'zh-CN'].includes(localStorage.getItem(localeStorageKey))
   ? localStorage.getItem(localeStorageKey)
   : systemLocale();
-state.appTheme = 'light';
-localStorage.setItem(themeStorageKey, state.appTheme);
+state.appTheme = ['light', 'dark', 'system'].includes(document.documentElement.dataset.themePreference)
+  ? document.documentElement.dataset.themePreference : 'light';
+const systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)');
 function navoUsesChinese() { return state.appLocale === 'zh-CN'; }
 document.documentElement.lang = state.appLocale;
 function applyTheme() {
-  document.documentElement.dataset.themePreference = 'light';
-  document.documentElement.dataset.theme = 'light';
-  if (elements.themeStatus) elements.themeStatus.textContent = navoUsesChinese() ? '当前固定使用浅色模式。' : 'Codex Navo is fixed to light mode.';
+  window.navoAppearance?.setTheme(state.appTheme).catch(() => {});
+  const dark = state.appTheme === 'dark' || state.appTheme === 'system' && systemThemeQuery.matches;
+  document.documentElement.dataset.themePreference = state.appTheme;
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  if (elements.themeStatus) elements.themeStatus.textContent = state.appTheme === 'system'
+    ? (navoUsesChinese() ? (dark ? '跟随系统 · 当前为深色模式。' : '跟随系统 · 当前为浅色模式。') : `Following system · Currently ${dark ? 'dark' : 'light'} mode.`)
+    : (navoUsesChinese() ? (dark ? '已使用深色模式，自动保存。' : '已使用浅色模式，自动保存。') : `${dark ? 'Dark' : 'Light'} mode applied and saved.`);
 }
 applyTheme();
+systemThemeQuery.addEventListener('change', () => { if (state.appTheme === 'system') applyTheme(); });
+window.addEventListener('storage', (event) => {
+  if (event.key !== themeStorageKey) return;
+  state.appTheme = ['light', 'dark', 'system'].includes(event.newValue) ? event.newValue : 'light';
+  applyTheme();
+  renderSettingsPicker(elements.appThemeSelect, elements.appThemeMenu, state.appTheme);
+});
 const englishUi = new Map([
+  ['跟随系统 · 当前为深色模式。', 'Following system · Currently dark mode.'],
+  ['跟随系统 · 当前为浅色模式。', 'Following system · Currently light mode.'],
+  ['已使用深色模式，自动保存。', 'Dark mode applied and saved.'],
+  ['已使用浅色模式，自动保存。', 'Light mode applied and saved.'],
   ['（旧结果，尚未重新确认）','(previous result; not revalidated)'], ['重新下载','Download again'], ['下载更新','Download update'],
   ['尚未检查。点击“重新检查”读取官方版本与本机安装状态。','Not checked yet. Select Check again to read official and installed versions.'],
   ['，其余仍在读取…','; reading remaining targets…'],
@@ -175,7 +191,9 @@ const englishUi = new Map([
   ['推理强度', 'Reasoning effort'], ['发送内容', 'Prompt'], ['立即唤醒全部', 'Wake All Now'], ['应用与 Codex 默认语言', 'App and Codex default language'],
   ['应用外观', 'Application appearance'], ['当前外观', 'Current appearance'], ['浅色模式', 'Light mode'],
   ['浅色', 'light'], ['深色', 'dark'], ['简体中文', 'Simplified Chinese'],
-  ['Codex Navo 当前固定使用浅色模式。', 'Codex Navo is currently fixed to light mode.'], ['当前固定使用浅色模式。', 'Codex Navo is fixed to light mode.'],
+  ['深色模式', 'Dark mode'], ['跟随系统', 'Follow system'], ['选择外观', 'Choose appearance'],
+  ['选择浅色、深色或跟随系统，仅影响 Codex Navo。', 'Choose light, dark, or follow system. Applies only to Codex Navo.'],
+  ['外观选择后立即生效并自动保存。', 'Appearance changes apply immediately and are saved automatically.'],
   ['保存语言', 'Save Language'], ['界面语言', 'Interface language'], ['外观设置已保存', 'Appearance saved'], ['取消', 'Cancel'], ['按所选内容启动', 'Launch Selected'],
   ['全选项目和会话', 'Select all projects and sessions'], ['全部展开', 'Expand all'], ['全部折叠', 'Collapse all'],
   ['启动前安全优化超大历史会话', 'Safely optimize oversized conversation history before launch'], ['账号与顺序', 'Accounts & Order'],
@@ -608,6 +626,9 @@ function renderApplicationUpdate() {
   const tr = (zh, en) => navoUsesChinese() ? zh : en;
   const busy = ['checking','cancelling','verifying','installing'].includes(status);
   const retryDownload = ['cancelled','error'].includes(status) && Boolean(availableVersion);
+  const updateError = applicationUpdate.errorCode === 'UPDATE_PROXY_REQUIRED'
+    ? tr('Navo 更新需要可用的网络代理，请先配置或恢复代理。', 'Navo updates require an available network proxy. Configure or restore it first.')
+    : applicationUpdate.error;
   const labels = {
     idle: currentVersion ? `v${currentVersion}` : tr('检查更新','Check updates'),
     development: currentVersion ? `v${currentVersion}` : tr('开发模式','Development'),
@@ -640,7 +661,7 @@ function renderApplicationUpdate() {
     checking: tr('正在检查 GitHub Releases…','Checking GitHub Releases…'),
     current: tr(`当前 v${currentVersion} 已是最新版。`,`v${currentVersion} is up to date.`),
     development: tr('开发模式不会连接更新服务，请使用 Setup 安装版测试。','Development mode does not connect to the update service. Use an installed Setup build.'),
-    error: tr('更新未完成，请重试。','The update did not complete. Please retry.') + (applicationUpdate.error ? ` ${tr('详情：','Details: ')}${applicationUpdate.error}` : ''),
+    error: tr('更新未完成，请重试。','The update did not complete. Please retry.') + (updateError ? ` ${tr('详情：','Details: ')}${updateError}` : ''),
   };
   const statusCopy = copies[status] || tr('检查 GitHub Releases 是否有新版本。','Check GitHub Releases for a newer version.');
   const transferCopy = status === 'downloading' ? formatUpdateTransfer(applicationUpdate) : '';
@@ -771,11 +792,13 @@ function formatPlan(planType) {
     pro: 'PRO',
     team: 'TEAM',
     business: 'BUSINESS',
+    self_serve_business_prolite: 'BUSINESS×5',
     enterprise: 'ENTERPRISE',
     edu: 'EDU',
     free: 'FREE',
   };
-  return labels[normalized] || (normalized ? '套餐待识别' : '');
+  const tier = normalized.match(/^pro[ _-]?(?:x|×)[ _-]?(5|20)$/);
+  return tier ? `PRO×${tier[1]}` : labels[normalized] || (normalized ? '套餐待识别' : '');
 }
 
 function formatUsdBalance(credits) {
@@ -1020,6 +1043,7 @@ function renderCodexLaunchProgress(progress = state.launchProgress) {
     '正在准备 API 授权环境…': 'Preparing the API authorization environment…',
     '正在初始化 Codex 服务…': 'Initializing Codex services…',
     '正在打开 Codex…': 'Opening Codex…',
+    '正在通过 Windows 系统启动 Codex…': 'Opening Codex through Windows…',
     '正在等待 Codex 窗口…': 'Waiting for the Codex window…',
     'Codex 启动较慢，正在继续等待…': 'Codex is starting slowly. Still waiting…',
     'Codex 已打开': 'Codex is open',
@@ -2020,7 +2044,7 @@ function render() {
     const secondaryIdentity = account.emailHint && account.emailHint !== account.label
       ? `<p>${escapeHtml(account.emailHint)}</p>`
       : '';
-    const planType = account.quota?.planType;
+    const planType = account.quota?.planType || account.subscriptionPlanType;
     const planBadge = planType
       ? `<span class="plan-badge" title="${escapeHtml(planType)}">${escapeHtml(formatPlan(planType))}</span>`
       : '';
@@ -3209,15 +3233,19 @@ function renderCodexDesktopUpdate() {
 }
 
 function formatUpdateTransfer(info) {
+  const tr = (zh, en) => typeof navoUsesChinese === 'function' && navoUsesChinese() ? zh : en;
   const valid = (value) => Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : 0;
   const received = valid(info.bytesDownloaded);
-  if (!received) return '';
+  const route = info.networkRoute ? `${tr('线路：', 'Route: ')}${info.networkRoute === '直连' ? tr('直连', 'Direct') : info.networkRoute}` : '';
+  const retry = Number(info.retryAttempt) > 1 ? `${tr('重试：', 'Retry: ')}${info.retryAttempt}/3` : '';
+  const extra = [route, retry].filter(Boolean).join(' · ');
+  if (!received) return extra;
   const total = valid(info.totalBytes);
   const speed = valid(info.bytesPerSecond);
   const megabytes = (value) => (value / (1024 * 1024)).toFixed(1);
   const seconds = total > received && speed > 0 ? Math.ceil((total - received) / speed) : 0;
   const eta = seconds > 0 ? ` · ETA ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : '';
-  return `${megabytes(received)} MB${total ? ` / ${megabytes(total)} MB` : ''}${speed ? ` · ${megabytes(speed)} MB/s` : ''}${eta}`;
+  return `${megabytes(received)} MB${total ? ` / ${megabytes(total)} MB` : ''}${speed ? ` · ${megabytes(speed)} MB/s` : ''}${eta}${extra ? ` · ${extra}` : ''}`;
 }
 
 async function refreshCodexUpdateState(check = false) {
@@ -3383,9 +3411,9 @@ async function loadLanguageSettings() {
     elements.appLanguageSelect.innerHTML = catalog.languages.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`).join('');
     elements.appLanguageSelect.value = catalog.languages.some((item) => item.id === state.appLocale) ? state.appLocale : catalog.defaultLanguage;
     renderSettingsPicker(elements.appLanguageSelect, elements.appLanguageMenu);
-    elements.appThemeSelect.value = 'light';
     elements.languageStatus.textContent = navoUsesChinese() ? '当前使用完整简体中文界面。' : 'Navo is using the English interface. Codex will use the selected language.';
     elements.appThemeSelect.value = state.appTheme;
+    renderSettingsPicker(elements.appThemeSelect, elements.appThemeMenu);
     applyTheme();
   } catch (error) { showToast(error.message, true); }
 }
@@ -3425,6 +3453,7 @@ document.querySelectorAll('[data-settings-picker]').forEach((picker) => {
     if (!option) return;
     select.value = option.dataset.settingsValue;
     renderSettingsPicker(select, menu);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
     closeSettingsPickers();
   });
 });
@@ -3433,6 +3462,12 @@ document.addEventListener('click', (event) => {
 });
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') closeSettingsPickers();
+});
+
+elements.appThemeSelect.addEventListener('change', () => {
+  state.appTheme = ['light', 'dark', 'system'].includes(elements.appThemeSelect.value) ? elements.appThemeSelect.value : 'light';
+  try { localStorage.setItem(themeStorageKey, state.appTheme); } catch { /* Apply for this window even without storage. */ }
+  applyTheme();
 });
 elements.languageForm.addEventListener('submit', (event) => {
   event.preventDefault();

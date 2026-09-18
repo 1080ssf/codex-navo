@@ -155,6 +155,10 @@ On first launch, the application follows the Windows language and uses it as the
 
 Settings also contains Telegram, QQ, and GitHub community links.
 
+Appearance supports light, dark, and system modes, applied immediately and saved automatically. If no usable stable CLI is available, install an official stable build into a Navo-managed directory from **Codex CLI runtime**.
+
+Update routes are separate and fixed: Navo GitHub checks and downloads use the configured proxy; Codex official CDN checks and downloads use direct connections. Account and task routing stays unchanged. Large Codex packages support validated range downloads, resumable caching, and bounded retries; the installed version is still verified afterward. Windows manages networking for the Microsoft Store helper service.
+
 ![Language, updates, and community](docs/images/codex-navo-app-settings.jpg)
 
 ## Install and get started

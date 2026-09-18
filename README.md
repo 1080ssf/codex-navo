@@ -170,6 +170,10 @@ Codex Navo 内置 Mihomo 网络核心，可添加订阅、多节点配置或单�
 
 应用设置内置 Telegram 群组、QQ 群和 GitHub 项目入口。
 
+外观支持浅色、深色和跟随系统，选择后立即生效并自动保存。没有可用的稳定版 CLI 时，可在“Codex CLI 运行依赖”中直接安装官方稳定版本到 Navo 独立管理的目录。
+
+更新线路固定分开：Navo 的 GitHub 检查与下载走已配置代理，Codex 官方 CDN 检查与下载走直连，不改动账号或任务代理。Codex 大包支持受校验的分段下载、缓存续传和有限重试；安装完成后仍会核对实际版本。微软商店辅助服务的联网由 Windows 管理。
+
 ![语言、更新与社区入口](docs/images/codex-navo-app-settings.jpg)
 
 ## 安装与快速开始

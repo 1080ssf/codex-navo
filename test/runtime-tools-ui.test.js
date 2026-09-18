@@ -40,6 +40,7 @@ function harness(options = {}) {
     addEventListener: (event, callback) => handlers.set(event, callback),
   };
   const context = vm.createContext({
+    setTimeout: options.setTimeout || setTimeout, clearTimeout,
     document: { querySelector: () => options.noPanel ? null : panel },
     window: { codexRuntime: options.selectCli ? { selectCli: options.selectCli } : undefined },
     state: { appLocale: options.chinese === false ? 'en' : 'zh-CN' },
@@ -278,6 +279,35 @@ test('missing panels do not read CLI state or register handlers', () => {
   assert.deepEqual(harness({ noPanel: true }).calls, []);
 });
 
+test('install action prevents duplicate requests, polls progress, and selects the finished CLI', async () => {
+  const timers = [];
+  let started = false, completed = false;
+  const h = harness({ setTimeout: callback => { timers.push(callback); return 0; }, api: url => {
+    if (url === '/api/cli-install') { started = true; return { status:'downloading',busy:true,progress:25,totalBytes:1000,receivedBytes:300 }; }
+    return { ...ready(completed?'C:\\navo\\codex.exe':'C:\\old\\codex.exe'), installation: started
+      ? { status:completed?'complete':'downloading',busy:!completed,progress:completed?100:25 } : {status:'idle',busy:false} };
+  } });
+  await tick(); await h.click('install'); await h.click('install'); await h.click('save');
+  assert.equal(h.calls.filter(call=>call.url==='/api/cli-install').length,1);
+  assert.equal(h.button('install').disabled,true);assert.equal(h.input.disabled,true);
+  assert.match(h.markup,/25%/);assert.equal(h.button('cancel').disabled,false);
+  completed=true;await timers.shift()();
+  assert.equal(h.input.value,'C:\\navo\\codex.exe');assert.equal(h.button('install').disabled,false);
+  assert.match(h.markup,/稳定版 CLI 已安装并启用/);assert.equal(timers.length,0);
+});
+
+test('installation survives a page reload and failure copy is localized without claiming success', async () => {
+  for (const chinese of [true,false]) {
+    const timers=[];let failed=false;
+    const h=harness({chinese,setTimeout:callback=>{timers.push(callback);return 0;},api:()=>({...ready(),installation: failed
+      ? {status:'error',busy:false,errorCode:'integrity_failed'}:{status:'downloading',busy:true,progress:60}})});
+    await tick();assert.equal(h.button('save').disabled,true);assert.equal(timers.length,1);
+    failed=true;await timers.shift()();assert.equal(h.button('save').disabled,false);
+    assert.match(h.markup,chinese?/校验不一致/:/checksum does not match/);
+    assert.doesNotMatch(h.markup,/已安装并启用|installed and selected/);
+  }
+});
+
 function routeHarness(options = {}) {
   const probes = [], writes = [];
   const original = ready(), validated = options.validated || ready('C:\\new\\codex.exe', '0.150.0');
@@ -285,6 +315,8 @@ function routeHarness(options = {}) {
   const context = vm.createContext({
     path: path.win32, request: null, response: {}, url: null,
     SETTINGS_FILE: 'mock-settings-only', settings: { ...savedSettings },
+    cliInstaller: { snapshot: () => ({ status: options.installBusy ? 'downloading' : 'idle', busy: Boolean(options.installBusy) }),
+      start: () => ({status:'checking',busy:true}), cancel: () => ({status:'cancelled',busy:false}) },
     cliResolver: { snapshot: () => original, inspect: async configuration => { probes.push({ original: true, configuration }); return original; } },
     createCliResolver: () => ({
       snapshot: () => validated,
@@ -298,7 +330,7 @@ function routeHarness(options = {}) {
     sendError: (_response, status, error, extra = {}) => ({ status, error, ...extra }),
   });
   const source = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
-  const start = source.indexOf("    if (request.method === 'GET' && url.pathname === '/api/cli-state')");
+  const start = source.indexOf("    if (request.method === 'POST' && url.pathname === '/api/cli-install')");
   const end = source.indexOf("    if (request.method === 'GET' && url.pathname === '/api/bootstrap')", start);
   assert.ok(start >= 0 && end > start, 'CLI route block must exist');
   const routes = `(async () => { ${source.slice(start, end)} })()`;
@@ -364,4 +396,14 @@ test('relative paths and command shims are rejected before any CLI validation', 
   }
   assert.equal(h.probes.length, 0);
   assert.equal(h.writes.length, 0);
+});
+
+test('installer routes return background state and settings cannot change during installation', async () => {
+  const h=routeHarness({installBusy:true});
+  const started=await h.request('POST','/api/cli-install');
+  assert.equal(started.status,202);assert.equal(started.data.busy,true);
+  const state=await h.request('GET','/api/cli-state');assert.equal(state.data.installation.status,'downloading');
+  assert.equal((await h.request('POST','/api/cli-settings',{path:'C:\\other\\codex.exe'})).status,409);
+  assert.equal(h.probes.length,0);assert.equal(h.writes.length,0);
+  assert.equal((await h.request('POST','/api/cli-install/cancel')).data.status,'cancelled');
 });

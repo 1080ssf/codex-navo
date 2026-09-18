@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light;
   --fog: #f3f6fa;
   --paper: #f8fbff;
   --paper-strong: #ffffff;
@@ -428,7 +429,11 @@ h1 { font-size: clamp(30px, 3vw, 38px); line-height: 1; letter-spacing: -.035em;
 .cli-runtime-summary dt { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
 .cli-runtime-summary dd { margin: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
 .cli-runtime-path { display: grid; gap: 8px; font-size: 13px; }
-.cli-runtime-path input { min-width: 0; min-height: 38px; font: inherit; }
+.cli-runtime-path input { width: 100%; box-sizing: border-box; min-width: 0; min-height: 40px; padding: 9px 12px; border: 1px solid #cbd9ea; border-radius: 8px; background: #fff; color: var(--text); font: inherit; }
+.cli-runtime-path input:focus { outline: 2px solid var(--blue); outline-offset: 1px; }
+.cli-runtime-install { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid #dce6f2; border-radius: 10px; background: #f7f9fc; font-size: 13px; }
+.cli-runtime-install progress { width: 100%; height: 10px; accent-color: var(--blue); }
+.cli-runtime-install p { margin: 0; line-height: 1.6; color: var(--muted); }
 .cli-runtime-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .cli-runtime-actions button { min-height: 36px; padding: 7px 14px; border: 1px solid #cbd9ea; border-radius: 8px; background: #f6f9fd; color: #31577d; font: inherit; font-size: 13px; }
 .cli-runtime-actions button:disabled { opacity: .5; cursor: not-allowed; }
@@ -651,10 +656,10 @@ dialog textarea { resize: vertical; line-height: 1.55; }
 .login-method-picker span { display: grid; gap: 4px; }
 .login-method-picker strong { font-size: 13px; }
 .login-method-picker small { color: var(--muted); font-size: 11px; line-height: 1.5; }
-.login-method-primary { position: relative; align-items: center !important; min-height: 72px; padding: 14px 16px !important; background: #fff !important; }
+.login-method-primary { position: relative; align-items: center !important; min-height: 72px; padding: 14px 16px !important; }
 .login-method-primary span { flex: 1; }
 .login-method-primary em { align-self: center; padding: 4px 8px; border-radius: 999px; color: #1c5ac7; background: #eaf2ff; font-size: 10px; font-style: normal; font-weight: 700; }
-.login-method-import, .login-method-api, .login-method-relay { min-height: 72px; padding: 13px 16px !important; background: #fff !important; }
+.login-method-import, .login-method-api, .login-method-relay { min-height: 72px; padding: 13px 16px !important; }
 .account-manual-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .account-manual-fields[hidden] { display: none; }
 .account-create-network[hidden], #account-fixed-browser[hidden] { display: none; }
@@ -785,7 +790,7 @@ dialog textarea { resize: vertical; line-height: 1.55; }
 .codex-launch-dialog { width: min(610px, calc(100% - 36px)); height: min(680px, calc(100vh - 52px)); max-height: calc(100vh - 52px); overflow: hidden; }
 .codex-launch-dialog form { display: flex; height: 100%; min-height: 0; flex-direction: column; padding: 18px; }
 .codex-launch-dialog form > .dialog-head { flex: 0 0 auto; }
-.launch-dialog-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
+.launch-dialog-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding-right: 4px; }
 .codex-launch-dialog h2 { font-size: 23px; }
 .codex-launch-dialog .dialog-copy { margin: 12px 0 0; }
 .codex-launch-dialog input[type="checkbox"] { width: 16px; height: 16px; margin: 2px 0 0; padding: 0; accent-color: #365d8b; flex: 0 0 auto; }
@@ -801,7 +806,9 @@ dialog textarea { resize: vertical; line-height: 1.55; }
 .launch-selection-progress { grid-column: 1 / -1; display: block; width: 100%; height: 4px; overflow: hidden; border: 0; border-radius: 999px; appearance: none; background: #dfe7f1; }
 .launch-selection-progress::-webkit-progress-bar { border-radius: 999px; background: #dfe7f1; }
 .launch-selection-progress::-webkit-progress-value { border-radius: 999px; background: #2f67d7; transition: width .18s ease; }
-.launch-projects { display: grid; min-height: 100px; grid-auto-rows: max-content; flex: 1 1 auto; align-content: start; gap: 7px; margin-top: 8px; overflow-y: auto; overscroll-behavior: contain; }
+/* The dialog content owns scrolling. A non-scrolling nested overscroll container
+   traps wheel input over project rows even when its parent has a scrollbar. */
+.launch-projects { display: grid; min-height: 100px; grid-auto-rows: max-content; align-content: start; gap: 7px; margin-top: 8px; overflow: visible; }
 .launch-projects::-webkit-scrollbar-track { border-radius: 999px; background: #e9eff6; }
 .launch-project { min-height: 50px; border: 1px solid var(--line); border-radius: 11px; overflow: hidden; background: #fff; flex-shrink: 0; }
 .launch-project-head { display: flex; min-height: 50px; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; background: #f8fafc; }
@@ -1297,10 +1304,23 @@ html[data-theme="dark"] {
   --paper: #101a28;
   --paper-strong: #152132;
   --ink: #e7eef8;
-  --muted: #93a4b9;
+  --muted: #a5b5c8;
   --line: #2b3b4f;
   --blue: #76a2ff;
   --blue-dark: #a9c3ff;
+  --danger: #ff9ba8;
+  --cyan: #72ddbc;
+  --green: #75dda4;
+  --amber: #f5c677;
+  --surface: #131f2e;
+  --surface-raised: #1b2a3d;
+  --field: #0e1826;
+  --positive-bg: #12352e;
+  --positive-ink: #86e3c3;
+  --warning-bg: #382d1d;
+  --warning-ink: #ffd18a;
+  --negative-bg: #3b222d;
+  --negative-ink: #ffa7b3;
   --shadow: 0 20px 60px rgba(0,0,0,.3);
   color-scheme: dark;
 }
@@ -1311,7 +1331,7 @@ html[data-theme="dark"] .brand-copy small { color: #8295ac; }
 html[data-theme="dark"] .update-chip { color: #a9b9cd; border-color: #34475e; background: #142133; }
 html[data-theme="dark"] .current-codex.active { color: #b7ccf5; border-color: #2f435b; background: #122033; }
 html[data-theme="dark"] :is(input,select,textarea) { color: #e5edf8; border-color: #33465d; background: #0e1826; }
-html[data-theme="dark"] :is(input,select,textarea)::placeholder { color: #71839a; }
+html[data-theme="dark"] :is(input,select,textarea)::placeholder { color: #91a5be; opacity: 1; }
 html[data-theme="dark"] :is(.feature-surface,.account-card,.summary-card,.usage-overview,.update-product-card,.community-panel,.session-overview article,.session-project-group,.notification-channel,.package-panel,.network-page-form,.api-service-panel,.api-docs-panel,.wake-page-form,dialog) { color: #dbe5f2; border-color: #2c3d51; background: rgba(17,27,41,.96); box-shadow: 0 12px 32px rgba(0,0,0,.18); }
 html[data-theme="dark"] :is(.feature-page-head,.section-heading,.session-list-head,.notification-section-head) { border-color: #28384b; }
 html[data-theme="dark"] :is(h1,h2,h3,.section-heading h1,.feature-page-head h1,.language-settings-copy h2,.language-card-copy h2,.community-panel-copy h2,.update-product-title strong,.session-title strong,.api-service-head h2,.api-docs-head h2) { color: #edf3fb; }
@@ -1351,6 +1371,93 @@ html[data-theme="dark"] .account-route-group summary .fold-icon { background: #1
 html[data-theme="dark"] .account-route-menu { border-color: #304258; background: #0f1927; box-shadow: inset 0 1px 2px rgba(0,0,0,.25); }
 html[data-theme="dark"] .account-network-dialog .dialog-actions { border-color: #2e4055; }
 html[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #536981; background-clip: padding-box; }
+
+/* Dark appearance: semantic surfaces and states for every application panel.
+   Keep action meaning (success / warning / error) rather than inverting colors. */
+html[data-theme="dark"] { scrollbar-color: #687f9b #111d2c; }
+html[data-theme="dark"] dialog { background: #111b29; }
+html[data-theme="dark"] dialog::backdrop { background: rgba(2,7,14,.62); }
+html[data-theme="dark"] :is(button,input,select,textarea,a,summary):focus-visible { outline: 2px solid #9abdff; outline-offset: 3px; }
+html[data-theme="dark"] ::selection { color: #fff; background: #375fa1; }
+:root[data-theme="dark"] :is(input,select,textarea) { color: var(--ink); border-color: #40556e; background-color: var(--field); accent-color: #84afff; }
+html[data-theme="dark"] select option { color: var(--ink); background: var(--field); }
+html[data-theme="dark"] :is(button,input,select,textarea):disabled { cursor: not-allowed; color: #9aaaBE; border-color: #334257; background: #1c2838; box-shadow: none; }
+html[data-theme="dark"] :is(.primary-button,.action-primary,.network-add-button):hover:not(:disabled) { color: #fff; background: #295ab7; }
+html[data-theme="dark"] :is(.secondary-button,.icon-action,.icon-button):hover:not(:disabled) { color: var(--ink); border-color: #6483ad; background: var(--surface-raised); }
+html[data-theme="dark"] :is(.account-grid .account-actions,.health-row,.tools-section-head,.api-docs-head,.notification-field,.notification-channel-head,.cli-runtime-details,.launch-thread,.launch-select-bar,.account-group-head,.codex-launch-dialog .dialog-actions,.api-editor-dialog form > .dialog-actions) { border-color: var(--line); }
+
+/* Accounts, quotas and usage. */
+html[data-theme="dark"] :is(.section-title strong,.account-group-head,.quota-line,.quota-reset,.usage-range button,.session-filters button,.usage-kicker,.quota-refresh-error,.quota-empty-title) { color: var(--muted); }
+html[data-theme="dark"] .account-group-head small { color: #c4d7f5; border-color: #3c516d; background: #21324a; }
+html[data-theme="dark"] :is(.quota-unavailable,.quota-error-soft,.quota-refresh-error,.setup-steps,.codex-login-panel code) { background: var(--surface); border-color: var(--line); }
+html[data-theme="dark"] :is(.plan-badge,.network-badge) { color: var(--positive-ink); background: var(--positive-bg); border-color: #316958; }
+html[data-theme="dark"] :is(.expiry-badge,.reset-credit-badge,.balance-badge,.node-protocol) { color: #c2d7fa; background: #1d304a; border-color: #3c5677; }
+html[data-theme="dark"] .reset-credit-badge:hover { color: #fff; background: #294467; }
+html[data-theme="dark"] .quota-track, html[data-theme="dark"] .quota-track::-webkit-progress-bar { background: #30425a; }
+html[data-theme="dark"] .quota-window.healthy { --quota-color: #75dda4; }
+html[data-theme="dark"] .quota-window.warning { --quota-color: #f5c677; }
+html[data-theme="dark"] .quota-window.critical { --quota-color: #ff94a3; }
+html[data-theme="dark"] .quota-line strong { color: var(--quota-color); }
+html[data-theme="dark"] .setup-steps span i { color: #c7d8ef; background: #2c405b; }
+html[data-theme="dark"] .setup-steps span.active { color: #b4ccff; }
+html[data-theme="dark"] .account-usage :is(th,td) { border-color: var(--line); }
+
+/* Launch, add account, API key and network dialogs. */
+html[data-theme="dark"] :is(.codex-launch-dialog .dialog-actions,.api-editor-dialog form > .dialog-actions,.launch-language-control,.launch-select-bar,.launch-project-actions [data-launch-toggle],.fixed-browser-value,.login-method-picker label,.api-secret-value,.generated-key-note,.update-dialog-title,.proxy-current,.proxy-toggle,.tools-owner,.tools-targets details,.tools-results article,.tools-catalog,.tools-target-grid label) { color: var(--ink); background: var(--surface); border-color: var(--line); }
+html[data-theme="dark"] :is(.launch-language-control > i,.launch-thread em,.api-endpoint-grid article > span,.package-panel-title > i) { color: #bdd4ff; background: #223955; border-color: #3f5b7c; }
+html[data-theme="dark"] :is(.launch-select-bar button,.launch-project-actions button,.launch-backups-button,.api-docs-connect button,.api-docs-example button) { color: #a9caff; }
+html[data-theme="dark"] .launch-language-control select { background: transparent; }
+html[data-theme="dark"] .launch-selection-progress, html[data-theme="dark"] .launch-selection-progress::-webkit-progress-bar { background: #2b405c; }
+html[data-theme="dark"] .launch-selection-progress::-webkit-progress-value { background: #82adff; }
+html[data-theme="dark"] .login-method-picker label:has(input:checked) { background: #1b3150; border-color: #7598cc; box-shadow: inset 0 0 0 1px #7598cc; }
+html[data-theme="dark"] :is(.fixed-browser-value strong,.login-method-picker strong,.generated-key-note strong,.update-dialog-title strong,.proxy-current strong,.account-network-preview strong,.account-route-option strong,.tools-results article dd) { color: var(--ink); }
+html[data-theme="dark"] :is(.login-method-picker small,.generated-key-note small,.update-dialog-title small,.proxy-current small,.tools-results article dt,.account-network-preview small,.account-route-option small) { color: var(--muted); }
+html[data-theme="dark"] :is(.api-secret-value code,.proxy-current[data-active="true"] strong) { color: var(--positive-ink); }
+
+html[data-theme="dark"] :is(.health-state,.notification-channel-title strong,.notification-checks label,.notification-section-head .compact-switch span) { color: var(--ink); }
+html[data-theme="dark"] :is(.notification-field-head output,.api-key-route) { color: #a9c7ff; }
+html[data-theme="dark"] .network-sidebar-title b { color: #c7d9f5; background: #243a54; }
+html[data-theme="dark"] .health-row button { color: #c7d9f5; border-color: #40556e; background: #1b2b40; }
+html[data-theme="dark"] .account-dialog-actions { background: linear-gradient(180deg, transparent, #101b29 26%); }
+html[data-theme="dark"] :is(.account-usage-strip,.protocol-dialog-progress) { background: var(--surface); border-color: var(--line); }
+html[data-theme="dark"] .login-method-primary em { color: #bdd3ff; background: #243d63; }
+html[data-theme="dark"] .account-actions .network-action[data-active="true"] { color: var(--positive-ink); border-color: #316958; background: var(--positive-bg); }
+html[data-theme="dark"] .navo-account-tools-dialog button { color: #c7d9f5; border-color: #40556e; background: #1b2b40; }
+html[data-theme="dark"] .navo-account-tools-dialog button:hover:not(:disabled) { color: #fff; border-color: #7894bb; background: #294262; }
+html[data-theme="dark"] .navo-account-tools-dialog :is(p,.tools-active-option,.tools-selection,.tools-result-group h4,.tools-results article summary,.tools-results article dt,.tools-credit small,.tools-results article small) { color: var(--muted); }
+html[data-theme="dark"] :is(.tools-results article,.tools-credit,.tools-catalog-group,.tools-targets details) { border-color: var(--line); }
+html[data-theme="dark"] :is(.tools-results article dl,.tools-owner) { color: var(--ink); border-color: var(--line); background: var(--surface); }
+html[data-theme="dark"] .navo-account-tools-dialog :is(.tools-targets label,.tools-catalog label):hover { background: #243a54; }
+html[data-theme="dark"] .tools-error { color: var(--negative-ink); background: var(--negative-bg); }
+html[data-theme="dark"] .tools-pending { color: var(--warning-ink); background: var(--warning-bg); }
+html[data-theme="dark"] .tools-notice { color: var(--positive-ink) !important; border-color: #316958; background: var(--positive-bg); }
+html[data-theme="dark"] :is(.api-editor-dialog .dialog-copy,.api-account-picker,.api-model-picker) { color: var(--ink); border-color: var(--line); background: var(--surface); }
+html[data-theme="dark"] :is(.api-account-picker-head small,.api-account-option small,.proxy-note,.account-usage-title > span,.account-usage-title strong small,.account-usage-line b small,.account-usage-line > span) { color: var(--muted); }
+html[data-theme="dark"] :is(.account-route-option,.account-route-option i,.api-account-picker-head > span) { color: #bdd3ff; }
+html[data-theme="dark"] :is(.account-route-section,.account-grid .api-virtual-card .quota-panel) { border-color: var(--line); }
+html[data-theme="dark"] .account-route-section-title b { color: #bdd3ff; background: #243a54; }
+html[data-theme="dark"] :is(.refresh-all-button,.account-tools-button) { color: #bdd3ff; background: #20334c; border-color: #40556e; }
+html[data-theme="dark"] :is(.refresh-all-button,.account-tools-button):hover:not(:disabled) { color: #fff; background: #356bd1; }
+/* Network, sessions, notifications, API service, authorization and wakeup. */
+html[data-theme="dark"] :is(.health-center,.package-center,.tools-section-head,.notification-control-card,.notification-checks,.api-service-row,.network-node-columns,.file-picker span,.cli-runtime-summary,.cli-runtime-install,.cli-runtime-details article,.cli-runtime-status,.wake-note) { color: var(--ink); border-color: var(--line); background: var(--surface); }
+html[data-theme="dark"] :is(.api-docs-head,.tools-section-head,.network-node-columns) { background: #162438; }
+html[data-theme="dark"] :is(.network-field-title,.notification-field,.notification-toggle,.wake-page-form > label,.wake-settings-grid label,.package-panel label,.language-picker-panel > label,.cli-runtime-summary dd,.network-source-tab strong,.network-node-head strong,.network-node strong,.session-overview strong,.notification-channel-head strong,.api-service-model,.api-endpoint-grid code,.api-docs-connect code) { color: var(--ink); }
+html[data-theme="dark"] :is(.network-source-sidebar > div,.network-source-tab small,.network-source-tab b,.network-node-columns,.node-connect,.health-detail,.notification-field small,.session-overview span,.cli-runtime-summary dt,.cli-runtime-install p,.cli-runtime-details summary,.tools-section-head span) { color: var(--muted); }
+html[data-theme="dark"] :is(.network-source-actions button,.health-actions button,.notification-channel button,.api-service-actions button,.cli-runtime-actions button,.cli-runtime-install button) { color: #c7d9f5; border-color: #40556e; background: #1b2b40; }
+html[data-theme="dark"] :is(.network-source-actions button,.health-actions button,.notification-channel button,.api-service-actions button,.cli-runtime-actions button,.cli-runtime-install button):hover:not(:disabled) { color: #fff; border-color: #7894bb; background: #294262; }
+html[data-theme="dark"] :is(.language-card-kicker,.api-docs-head > div > span,.api-service-head span,.notification-section-head > div > span,.session-list-head > div:first-child span,.language-select-wrap > span) { color: #a9c7ff; }
+html[data-theme="dark"] :is(.api-account-group-head,.api-account-group-head strong,.api-account-option strong,.api-account-option button) { color: var(--ink); }
+html[data-theme="dark"] :is(.api-account-option button,.api-model-option,.api-account-order) { background: #1b2b40; border-color: #40556e; }
+
+/* Preserve visible, consistent success/warning/failure states. */
+html[data-theme="dark"] :is(.node-delay.available,.node-delay.reachable,.health-status.valid,.tools-state.available,.tools-state.success) { color: var(--positive-ink); }
+html[data-theme="dark"] :is(.node-delay.checking,.node-delay.cloudflare-protected,.node-delay.unsupported-region,.health-badge,.launch-thread em.oversized,.generated-key-note.sensitive) { color: var(--warning-ink); border-color: #785d31; background: var(--warning-bg); }
+html[data-theme="dark"] .generated-key-note.sensitive strong { color: var(--warning-ink); }
+html[data-theme="dark"] :is(.node-delay.connection-failed,.node-delay.tls-failed,.node-delay.blocked,.health-status.invalid,.health-status.expired,.tools-state.failed,.tools-state.error,.danger-button,.api-service-actions button.danger,.network-source-actions .remove-source) { color: var(--negative-ink); }
+html[data-theme="dark"] :is(.account-dialog-status,.quota-error,.proxy-result.error,.health-badge.health-expired,.health-badge.health-invalid,.health-badge.health-needs_auth,.tools-error) { color: var(--negative-ink); border-color: #774150; background: var(--negative-bg); }
+html[data-theme="dark"] :is(.account-dialog-status.success,.proxy-result,.proxy-current[data-active="true"],.tools-notice) { color: var(--positive-ink); border-color: #366b5d; background: var(--positive-bg); }
+html[data-theme="dark"] .tools-notice { color: var(--positive-ink) !important; }
+html[data-theme="dark"] .health-badge.health-authorizing { color: #bfd4ff; border-color: #456596; background: #203758; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }

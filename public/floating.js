@@ -86,7 +86,7 @@ function floatingAccountBadge(account) {
   if (account.type === 'api') return 'API CODEX';
   if (account.type !== 'account') return t(account.type === 'external' ? 'external' : 'offline');
   const plan = String(account.planType || '').trim().toLowerCase();
-  const labels = { free: 'FREE', plus: 'Plus', pro: 'Pro', team: 'Team', business: 'Business', enterprise: 'Enterprise', edu: 'Edu' };
+  const labels = { free: 'FREE', plus: 'Plus', pro: 'Pro', team: 'Team', business: 'Business', self_serve_business_prolite: 'Business×5', enterprise: 'Enterprise', edu: 'Edu' };
   // Only show a multiplier explicitly present in the returned plan name.
   const tier = plan.match(/^pro[ _-]?(?:x|×)[ _-]?(5|20)$/);
   return tier ? `Pro×${tier[1]}` : labels[plan] || t('account');

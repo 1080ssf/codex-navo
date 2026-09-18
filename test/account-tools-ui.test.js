@@ -13,7 +13,7 @@ function harness(options = {}) {
   const body = { innerHTML: '', prepend() {} };
   const dialog = { open: true, querySelectorAll(selector) { return selector.includes('tools-target') ? selected.map(value=>({value})) : []; }, querySelector(selector) { return selector === '[name="tools-allow-busy"]' ? { checked: options.allowBusy === true } : selector === '.tools-results' ? results : selector === '.tools-catalog' ? catalog : selector === '.tools-error' ? error : body; } };
   const context = vm.createContext({
-    window: {}, document: { querySelectorAll: () => [], querySelector: () => null, addEventListener() {}, createElement: () => ({}) },
+    window: {}, document: { querySelectorAll: selector => selector === '.account-card[data-id]' ? options.cards || [] : [], querySelector: () => null, addEventListener() {}, createElement: () => ({}) },
     state: { accounts: options.accounts || [], apiService: { keys: [] } }, render() {},
     escapeHtml: s => String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;'),
     navoUsesChinese: () => options.chinese !== false,
@@ -28,6 +28,19 @@ function harness(options = {}) {
   vm.runInContext(source, context);
   return { tools: context.window.NavoAccountTools, calls, storage, dialog, results, body, catalog, error, timers, selected };
 }
+
+test('expiry verification and workspace errors have localized labels and actionable hints', () => {
+  for (const chinese of [true, false]) {
+    for (const status of ['verification_required', 'session_required', 'permission_denied', 'account_not_found', 'checking']) {
+      const expiry = { textContent: '', title: '' };
+      const card = { dataset: { id: 'account-a' }, querySelector: selector => selector === '.expiry-badge' ? expiry : null };
+      harness({ chinese, cards: [card], accounts: [{ id: 'account-a', planExpiryStatus: status, planExpiryError: status === 'checking' ? '' : '原始中文错误' }] });
+      assert.ok(expiry.textContent);
+      if (!chinese) assert.doesNotMatch(expiry.textContent + expiry.title, /\p{Script=Han}/u);
+      if (status === 'verification_required') assert.match(expiry.title, chinese ? /网页端/ : /web page/);
+    }
+  }
+});
 
 test('live model probes require confirmation and remove presentation-only fields', async () => {
   const denied = harness({ confirm: false });

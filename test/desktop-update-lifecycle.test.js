@@ -35,8 +35,8 @@ function harness() {
   const snapshots = [];
   const autoUpdater = new EventEmitter();
   const context = vm.createContext({
-    ...updateOperation, ...codexPackage, probeUpdatePackage, CancellationToken, URL, AbortSignal, path,
-    app: { isPackaged: true, getVersion: () => '1.2.146' },
+    ...updateOperation, ...codexPackage, ...require('../lib/update-download'), probeUpdatePackage, CancellationToken, URL, AbortSignal, AbortController, path,
+    app: { isPackaged: true, getVersion: () => '1.2.146' }, nativeTheme: {},
     autoUpdater, mainWindow: null, updaterConfigured: false, updateTimer: null,
     navoDownloadToken: null, codexDownloadController: null, isQuitting: false,
     codexInstallInProgress: false,
@@ -162,7 +162,7 @@ test('Codex install completion still requires actual installed version readback'
   mockManifest(h, { installed: '26.1.0.0' });
   await h.invoke('codex-updates:check');
   let installs = 0;
-  h.context.downloadCodexPackage = async () => ({ path: 'mock.msix', sha256: 'mock' });
+  h.context.downloadCodexPackageResilient = async () => ({ path: 'mock.msix', sha256: 'mock' });
   h.context.readCodexPackageMetadata = async () => ({
     Name: 'OpenAI.Codex', Publisher: codexPackage.CODEX_PACKAGE_PUBLISHER,
     Version: '26.2.0.0', Architecture: process.arch,
@@ -192,7 +192,7 @@ test('a failed Store install can recheck a HEAD-unsupported direct package befor
   let versionReads = 0, installs = 0;
   h.context.waitForInstalledCodexVersion = async () => ({ installed: true, version: ++versionReads === 1 ? '26.1.0.0' : '26.2.0.0' });
   h.context.codexDesktopIsRunning = async () => false;
-  h.context.downloadCodexPackage = async () => ({ path: 'never-created-fixture.msix', sha256: 'fixture' });
+  h.context.downloadCodexPackageResilient = async () => ({ path: 'never-created-fixture.msix', sha256: 'fixture' });
   h.context.readCodexPackageMetadata = async () => ({ Name: 'OpenAI.Codex', Publisher: codexPackage.CODEX_PACKAGE_PUBLISHER,
     Version: '26.2.0.0', Architecture: process.arch });
   h.context.installCodexPackage = async () => { installs++; };
@@ -298,4 +298,25 @@ test('Navo progress snapshots are throttled; transmission, verification and expl
   assert.equal(installs, 1);
   assert.equal(h.invoke('updates:get-state').status, 'installing');
   assert.equal(h.invoke('updates:install'), false);
+});
+
+test('native appearance accepts only supported preferences', () => {
+  const h = harness();
+  assert.equal(h.invoke('appearance:set-theme', 'dark'), true);
+  assert.equal(h.context.nativeTheme.themeSource, 'dark');
+  assert.equal(h.invoke('appearance:set-theme', 'invalid'), false);
+  assert.equal(h.context.nativeTheme.themeSource, 'dark');
+});
+
+test('Navo transient transport errors retry without publishing a false final failure', async () => {
+  const h = harness(); let calls = 0;
+  h.context.retryDownload = (fn, options) => require('../lib/update-download').retryDownload(fn, { ...options, wait: async () => {} });
+  h.autoUpdater.emit('update-available', { version: '1.2.151' });
+  h.autoUpdater.downloadUpdate = async () => {
+    if (++calls === 1) { const error = new Error('net::ERR_CONNECTION_RESET'); h.autoUpdater.emit('error', error); throw error; }
+    h.autoUpdater.emit('update-downloaded', { version: '1.2.151' });
+  };
+  assert.equal((await h.invoke('updates:download')).status, 'downloaded');
+  assert.equal(calls, 2);
+  assert.equal(h.snapshots.some(state => state.status === 'error'), false);
 });

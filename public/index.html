@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Codex Navo</title>
     <link rel="icon" type="image/png" href="/icon.png">
+    <script src="/theme-init.js"></script>
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
@@ -236,8 +237,8 @@
             <div class="language-settings-footer"><div class="language-status" id="language-status"></div><button class="primary-button language-save-button" type="submit">保存语言</button></div>
           </form>
           <section id="theme-form" class="feature-surface language-settings-layout theme-settings-layout">
-            <div class="language-settings-main"><span class="language-icon theme-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"></path><circle cx="12" cy="12" r="4"></circle></svg></span><div class="language-settings-copy"><span class="language-card-kicker">APPEARANCE</span><h2>应用外观</h2><p>Codex Navo 当前固定使用浅色模式。</p></div><div class="language-picker-panel"><label>当前外观</label><div class="language-select-wrap theme-select-wrap theme-static-choice"><span aria-hidden="true">☀</span><strong>浅色模式</strong><select name="theme" id="app-theme-select" hidden><option value="light" selected>浅色模式</option></select></div></div></div>
-            <div class="language-settings-footer"><div class="language-status" id="theme-status">当前固定使用浅色模式。</div></div>
+            <div class="language-settings-main"><span class="language-icon theme-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"></path><circle cx="12" cy="12" r="4"></circle></svg></span><div class="language-settings-copy"><span class="language-card-kicker">APPEARANCE</span><h2>应用外观</h2><p>选择浅色、深色或跟随系统，仅影响 Codex Navo。</p></div><div class="language-picker-panel"><label for="app-theme-trigger">选择外观</label><div class="language-select-wrap theme-select-wrap settings-picker" data-settings-picker="theme"><span aria-hidden="true">◐</span><button class="settings-picker-trigger" id="app-theme-trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="app-theme-menu"><strong data-settings-picker-label>浅色模式</strong><i class="ui-chevron" aria-hidden="true"></i></button><select name="theme" id="app-theme-select" hidden><option value="light">浅色模式</option><option value="dark">深色模式</option><option value="system">跟随系统</option></select><div class="settings-picker-menu" id="app-theme-menu" role="listbox" aria-labelledby="app-theme-trigger" hidden></div></div></div></div>
+            <div class="language-settings-footer"><div class="language-status" id="theme-status" role="status">外观选择后立即生效并自动保存。</div></div>
           </section>
           <section class="update-page-grid" aria-label="应用更新">
             <article class="update-product-card">

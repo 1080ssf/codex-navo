@@ -22,6 +22,10 @@ const { hasSpendableCredits, readCodexModels, readCodexQuota, warmCodexAppServer
 const { ResetCreditOperations, isResetCreditUsable } = require('./lib/reset-credit-operations');
 const { CodexUsageTracker } = require('./lib/codex-usage');
 const { createCliResolver } = require('./lib/codex-cli-selection');
+const { CliInstaller } = require('./lib/codex-cli-install');
+const { activatePackagedApp } = require('./lib/windows-app-activation');
+const { chatgptAuth, canSaveChatgptAuth, chatgptEnvironment } = require('./lib/codex-launch-auth');
+const { withTaskProxy, removeTaskProxy } = require('./lib/codex-launch-network');
 const { readModelCatalog } = require('./lib/model-catalog');
 const { classifyWakeFailure, detectQuotaReset, isQuotaWindowActive, normalizeWakeSettings, quotaObservation, shouldVerifyWakeAccount, shouldWakeAccount, wakeAttemptState, wakeVerificationState } = require('./lib/wake');
 const { isModelCompatibilityError, parseWakeJsonl, wakeFailureMessage } = require('./lib/wake-command');
@@ -589,8 +593,25 @@ function findCodexDesktop() {
 }
 
 let cliResolver = createCliResolver();
+const CLI_MANAGED_ROOT = path.join(DATA_DIR, 'cli-runtime');
+const cliInstaller = new CliInstaller({
+  root: CLI_MANAGED_ROOT,
+  network: async () => {
+    const runtime = await backgroundTaskRuntime();
+    const dispatcher = runtime ? new ProxyAgent(`http://127.0.0.1:${runtime.mixedPort}`) : null;
+    return { fetch: (url, options) => fetch(url, { ...options, ...(dispatcher ? { dispatcher } : {}) }),
+      close: () => dispatcher?.close().catch(() => {}) };
+  },
+  activate: async executable => {
+    const validated = createCliResolver();
+    await validated.resolve(cliOptions({ configured: executable, force: true }));
+    writeJsonAtomic(SETTINGS_FILE, { ...readJson(SETTINGS_FILE, {}), codexCliExecutable: executable });
+    settings.codexCliExecutable = executable;
+    cliResolver = validated;
+  },
+});
 function cliOptions(extra = {}) {
-  return { configured: settings.codexCliExecutable, desktopExecutable: settings.codexDesktopExecutable, ...extra };
+  return { configured: settings.codexCliExecutable, desktopExecutable: settings.codexDesktopExecutable, managedRoot: CLI_MANAGED_ROOT, ...extra };
 }
 async function findCodexCli() {
   return cliResolver.resolve(cliOptions());
@@ -1800,6 +1821,7 @@ function activateSharedCodexAuth(account) {
   const { codexHomeDir } = accountPaths(account);
   const accountAuthFile = path.join(codexHomeDir, 'auth.json');
   if (!fs.existsSync(accountAuthFile)) throw new Error('该账号还没有完成 Codex 授权');
+  const selectedAuth = chatgptAuth(readJson(accountAuthFile, null));
 
   const active = readActiveCodexAuth();
   if (active && active.accountId !== account.id) {
@@ -1811,7 +1833,7 @@ function activateSharedCodexAuth(account) {
   fs.mkdirSync(SHARED_AUTH_BACKUP_DIR, { recursive: true });
   const hadOriginalAuth = fs.existsSync(SHARED_CODEX_AUTH_FILE);
   if (hadOriginalAuth) copyFileAtomic(SHARED_CODEX_AUTH_FILE, SHARED_AUTH_BACKUP_FILE);
-  copyFileAtomic(accountAuthFile, SHARED_CODEX_AUTH_FILE);
+  writeJsonAtomic(SHARED_CODEX_AUTH_FILE, selectedAuth);
   writeJsonAtomic(ACTIVE_CODEX_AUTH_FILE, {
     accountId: account.id,
     hadOriginalAuth,
@@ -1835,7 +1857,10 @@ function restoreSharedCodexAuth(accountId) {
   const account = accounts.find((item) => item.id === accountId);
   if (active.status !== 'restore_failed' && account && fs.existsSync(SHARED_CODEX_AUTH_FILE)) {
     const { codexHomeDir } = accountPaths(account);
-    copyFileAtomic(SHARED_CODEX_AUTH_FILE, path.join(codexHomeDir, 'auth.json'));
+    const accountAuthFile = path.join(codexHomeDir, 'auth.json');
+    const sharedAuth = readJson(SHARED_CODEX_AUTH_FILE, null);
+    if (canSaveChatgptAuth(readJson(accountAuthFile, null), sharedAuth)) writeJsonAtomic(accountAuthFile, chatgptAuth(sharedAuth));
+    else audit('codex.auth.writeback-skipped', { accountId, result: 'login-type-or-account-mismatch' });
   }
   let launchViewRestoreError = null;
   try { restoreLaunchView(active.launchView); }
@@ -2194,7 +2219,7 @@ function floatingWindowState() {
       id: activeKey?.id || activeAccount?.id || '',
       label: activeKey?.name || activeAccount?.label || (codexSnapshot.pid ? 'External Codex' : 'Codex not running'),
       type: activeKey ? 'api' : activeAccount ? 'account' : codexSnapshot.pid ? 'external' : 'none',
-      planType: activeKey ? null : activeAccount?.quota?.planType || null,
+      planType: activeKey ? null : activeAccount?.quota?.planType || activeAccount?.subscriptionPlanType || null,
       quotaRemaining: Number.isFinite(quotaRemaining) ? Math.max(0, Math.min(100, quotaRemaining)) : null,
       quotaWindows,
       quotaSync: floatingQuotaSync(activePool),
@@ -2626,11 +2651,22 @@ async function waitForCodexDesktop(timeoutMs = CODEX_DESKTOP_START_TIMEOUT_MS, s
 }
 
 const PLAN_EXPIRY_REFRESH_MS = 12 * 60 * 60_000;
+const planExpiryOperations = new Map();
 
 async function refreshAccountPlanExpiry(account, { force = false } = {}) {
+  if (!account) return null;
+  if (planExpiryOperations.has(account.id)) return planExpiryOperations.get(account.id);
+  const operation = refreshAccountPlanExpiryOnce(account, { force });
+  planExpiryOperations.set(account.id, operation);
+  try { return await operation; }
+  finally { planExpiryOperations.delete(account.id); }
+}
+
+async function refreshAccountPlanExpiryOnce(account, { force = false } = {}) {
   if (!account || !isCodexAuthenticated(account)) return null;
   const lastChecked = Date.parse(account.planExpiryCheckedAt || '');
-  const refreshInterval = account.planExpiryError ? 10 * 60_000 : PLAN_EXPIRY_REFRESH_MS;
+  const requiresUserAction = ['verification_required', 'session_required', 'permission_denied', 'account_not_found'].includes(account.planExpiryStatus);
+  const refreshInterval = account.planExpiryError && !requiresUserAction ? 10 * 60_000 : PLAN_EXPIRY_REFRESH_MS;
   if (!force && Number.isFinite(lastChecked) && Date.now() - lastChecked < refreshInterval) {
     return account.planExpiresAt || null;
   }
@@ -2654,18 +2690,23 @@ async function refreshAccountPlanExpiry(account, { force = false } = {}) {
           headers: { Authorization: `Bearer ${accessToken}`, 'ChatGPT-Account-Id': accountId },
           signal: AbortSignal.timeout(12_000), ...(dispatcher ? { dispatcher } : {}) });
         if (!response.ok) {
-          account.planExpiryStatus = [401, 403].includes(response.status) ? 'credential_unavailable' : 'error';
-          throw new Error(`Subscription query HTTP ${response.status}`);
+          const error = new Error(`Subscription query HTTP ${response.status}`);
+          error.code = response.headers.get('cf-mitigated') === 'challenge' ? 'verification_required'
+            : response.status === 401 ? 'session_required' : response.status === 403 ? 'permission_denied' : 'http_error';
+          error.stage = 'subscription'; error.status = response.status;
+          throw error;
         }
         const payload = await response.json();
         const record = payload?.accounts?.[accountId];
-        if (!record) { account.planExpiryStatus = 'not_returned'; throw new Error('Subscription account identity was not returned'); }
+        if (!record) { const error = new Error('Subscription account identity was not returned'); error.code = 'account_not_found'; error.stage = 'subscription'; throw error; }
         const entitlement = record.entitlement || {};
         const iso = (value) => Number.isFinite(Date.parse(value || '')) ? new Date(value).toISOString() : null;
         account.planExpiresAt = iso(entitlement.expires_at);
         account.planRenewsAt = iso(entitlement.renews_at);
         account.planExpiryStatus = account.planExpiresAt ? 'available' : account.planRenewsAt ? 'renewal' : 'not_returned';
         account.planExpiryCheckedAt = new Date().toISOString(); account.planExpiryError = '';
+        account.planExpiryErrorCode = ''; account.planExpiryErrorStage = '';
+        account.subscriptionPlanType = record.account?.plan_type || null;
         saveAccounts([...accounts]);
         return account.planExpiresAt;
       } finally { await dispatcher?.close().catch(() => {}); }
@@ -2694,6 +2735,8 @@ async function refreshAccountPlanExpiry(account, { force = false } = {}) {
     });
     account.planExpiryCheckedAt = new Date().toISOString();
     account.planExpiryError = '';
+    account.planExpiryErrorCode = ''; account.planExpiryErrorStage = '';
+    account.subscriptionPlanType = subscription.planType;
     account.planRenewsAt = subscription.renewsAt;
     account.planExpiryStatus = subscription.expiresAt ? 'available' : subscription.renewsAt ? 'renewal' : 'not_returned';
     account.planBillingPeriod = subscription.billingPeriod;
@@ -2705,9 +2748,12 @@ async function refreshAccountPlanExpiry(account, { force = false } = {}) {
   } catch (error) {
     account.planExpiryCheckedAt = new Date().toISOString();
     account.planExpiryError = error.message;
-    if (!['credential_unavailable', 'not_returned'].includes(account.planExpiryStatus)) account.planExpiryStatus = 'error';
+    account.planExpiryErrorCode = error.code || '';
+    account.planExpiryErrorStage = error.stage || '';
+    const classified = ['verification_required', 'session_required', 'permission_denied', 'account_not_found', 'rate_limited'];
+    account.planExpiryStatus = classified.includes(error.code) ? error.code : 'error';
     saveAccounts([...accounts]);
-    audit('account.plan-expiry.failed', { accountId: account.id, result: error.message });
+    audit('account.plan-expiry.failed', { accountId: account.id, result: error.message, code: account.planExpiryErrorCode, stage: account.planExpiryErrorStage, status: Number(error.status) || null });
     return null;
   } finally {
     if (browser && isProcessAlive(browser.processPid)) stopProtocolBrowser(browser);
@@ -2765,7 +2811,7 @@ async function launchCodexDesktop(account, launchOptions = null) {
       { manageConfig: true, modelProvider: 'openai' },
     );
     writeJsonAtomic(ACTIVE_CODEX_AUTH_FILE, { ...active, launchView });
-    const environment = codexEnvironment({ ...process.env, CODEX_HOME: SHARED_CODEX_HOME }, account);
+    const environment = chatgptEnvironment(codexEnvironment({ ...process.env, CODEX_HOME: SHARED_CODEX_HOME }, account));
     // Codex Desktop has two network layers: Chromium ignores HTTP_PROXY on
     // Windows, while the native/realtime process consumes proxy environment
     // variables. Route both through the account-local core and bypass loopback so
@@ -2837,20 +2883,20 @@ async function launchCodexDesktop(account, launchOptions = null) {
     }
 
     try {
-      await spawnDetached('explorer.exe', [`shell:AppsFolder\\${installation.appUserModelId}`], {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: false,
-      });
+      const configFile = path.join(SHARED_CODEX_HOME, 'config.toml');
+      fs.writeFileSync(configFile, withTaskProxy(fs.readFileSync(configFile, 'utf8'), environment), { mode: 0o600 });
+      try { await activatePackagedApp(installation.appUserModelId, desktopArgs, environment); }
+      catch (activationError) {
+        const delayedPid = await waitForCodexDesktop(15_000);
+        if (!delayedPid) throw activationError;
+        return await finishDetectedLaunch(delayedPid, 'delayed-app-activation');
+      }
       const processPid = await waitForCodexDesktop();
       if (!processPid) throw new Error('系统已接收启动请求，但没有检测到 Codex 进程');
-      recordSharedCodexProcess(account.id, detectCodexDesktopSnapshot({ preferCache: false }));
-      audit('codex.desktop.started', { accountId: account.id, result: `app-activation:${processPid}` });
-      closeTransaction();
-      return processPid;
+      return await finishDetectedLaunch(processPid, 'app-activation');
     } catch (error) {
       restoreSharedCodexAuth(account.id);
-      throw new Error(`Windows 拒绝启动 Codex。请在安全软件中允许 Codex Navo 和 Codex，或先手动启动一次 Codex 后重试。详细信息：${error.message}`);
+      throw new Error(`Windows 系统激活 Codex 失败，未完成账号启动。详细信息：${error.message}`);
     }
   } catch (error) {
     if (readActiveCodexAuth()?.accountId === account.id) restoreSharedCodexAuth(account.id);
@@ -2928,7 +2974,8 @@ function apiKeyCodexConfig(source, model, secret, language = 'zh-CN') {
       if (skipProvider) continue;
     }
     if (skipProvider) continue;
-    if (!section && /^\s*(?:model|model_provider|cli_auth_credentials_store)\s*=/.test(line)) continue;
+    if (!section && /^\s*(?:model|model_provider|cli_auth_credentials_store|forced_login_method|forced_chatgpt_workspace_id)\s*=/.test(line)) continue;
+    if (/^profiles\./.test(section) && /^\s*(?:model_provider|cli_auth_credentials_store|forced_login_method|forced_chatgpt_workspace_id)\s*=/.test(line)) continue;
     output.push(line);
   }
   return withDesktopLocale([
@@ -2938,6 +2985,7 @@ function apiKeyCodexConfig(source, model, secret, language = 'zh-CN') {
     // to it; the original provider is restored when the desktop exits.
     'model_provider = "codex_navo"',
     'cli_auth_credentials_store = "file"',
+    'forced_login_method = "api"',
     ...output,
     '',
     '[model_providers.codex_navo]',
@@ -2966,10 +3014,10 @@ function configAfterApiKeyCodex(source) {
       if (skipProvider) continue;
     }
     if (skipProvider) continue;
-    if (!section && /^\s*(?:model|model_provider|cli_auth_credentials_store)\s*=/.test(line)) continue;
+    if (!section && /^\s*(?:model|model_provider|cli_auth_credentials_store|forced_login_method)\s*=/.test(line)) continue;
     output.push(line);
   }
-  const result = output.join('\n').replace(/^\s+|\s+$/g, '');
+  const result = removeTaskProxy(output.join('\n')).replace(/^\s+|\s+$/g, '');
   return result ? `${result}\n` : '';
 }
 
@@ -3108,6 +3156,7 @@ const API_CODEX_PROCESS_REPLACEMENT_GRACE_MS = 20_000;
 function reconcileActiveApiCodexState() {
   const active = readJson(ACTIVE_API_CODEX_FILE, null);
   if (!active) return null;
+  if (codexLaunchTransaction === 'API Codex 启动' && ['preparing', 'launching'].includes(active.status)) return active;
   // Prefer the PID captured for this exact launch. A Store-packaged Codex can
   // briefly disappear from WMI while its bootstrap/root process is replaced;
   // a transient empty snapshot must not restore the shared config underneath
@@ -3221,12 +3270,25 @@ async function launchApiKeyCodex(keyId, launchOptions = null) {
       ...(localeDebugPort ? ['--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${localeDebugPort}`] : []),
     ];
     setCodexLaunchProgress({ stage: 'starting', message: '正在打开 Codex…', percent: 82 });
-    spawnedPid = await spawnDetached(installation.executable, desktopArgs, {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: false,
-      env: environment,
-    });
+    try {
+      spawnedPid = await spawnDetached(installation.executable, desktopArgs, {
+        detached: true, stdio: 'ignore', windowsHide: false, env: environment,
+      });
+    } catch (error) {
+      if (!['EPERM', 'EACCES'].includes(error.code) || !installation.appUserModelId) throw error;
+      setCodexLaunchProgress({ stage: 'starting', message: '正在通过 Windows 系统启动 Codex…', percent: 86 });
+      // API auth is already launch-scoped in auth.json/config.toml. Persist only
+      // task proxy variables for brokered children; never persist API keys here.
+      const configFile = path.join(codexHomeDir, 'config.toml');
+      fs.writeFileSync(configFile, withTaskProxy(fs.readFileSync(configFile, 'utf8'), environment), { mode: 0o600 });
+      try { spawnedPid = await activatePackagedApp(installation.appUserModelId, desktopArgs, environment); }
+      catch (activationError) {
+        const delayedPid = await waitForCodexDesktop(15_000);
+        if (!delayedPid) throw activationError;
+        spawnedPid = delayedPid;
+      }
+      audit('api.codex.system-activated', { result: String(error.code) });
+    }
     setCodexLaunchProgress({ stage: 'waiting', message: '正在等待 Codex 窗口…', percent: 92 });
     // Store-packaged Codex can spend well over ten seconds replacing its
     // bootstrap process after app-server migrations. Restoring config during
@@ -3234,8 +3296,10 @@ async function launchApiKeyCodex(keyId, launchOptions = null) {
     const processPid = await waitForCodexDesktop(60_000);
     if (!processPid) throw new Error(`Codex 启动进程 ${spawnedPid} 已退出`);
     if (localeDebugPort) {
-      await applyDesktopLocaleBridge(localeDebugPort, selection.language);
-      audit('api.codex.locale-applied', { result: `${keyId}:${selection.language}` });
+      try {
+        await applyDesktopLocaleBridge(localeDebugPort, selection.language);
+        audit('api.codex.locale-applied', { result: `${keyId}:${selection.language}` });
+      } catch (error) { audit('api.codex.locale-failed', { result: String(error.code || 'locale-bridge-failed') }); }
     }
     activeRecord = {
       ...activeRecord,
@@ -3843,7 +3907,8 @@ function accountView(account, context = {}) {
     planExpiresAt: account.planExpiresAt || null,
     planExpiryCheckedAt: account.planExpiryCheckedAt || null,
     planExpiryError: account.planExpiryError || '',
-    planExpiryStatus: account.planExpiryStatus || 'not_checked',
+    planExpiryStatus: planExpiryOperations.has(account.id) ? 'checking' : account.planExpiryStatus || 'not_checked',
+    subscriptionPlanType: account.subscriptionPlanType || null,
     planRenewsAt: account.planRenewsAt || null,
     quota: account.quota || null,
     codexActive: activeAccountId === account.id,
@@ -4397,14 +4462,21 @@ const server = http.createServer(async (request, response) => {
       return sendError(response, 403, '页面令牌已失效，请刷新后重试');
     }
 
+    if (request.method === 'POST' && url.pathname === '/api/cli-install') {
+      return sendJson(response, 202, { ok: true, data: cliInstaller.start() });
+    }
+    if (request.method === 'POST' && url.pathname === '/api/cli-install/cancel') {
+      return sendJson(response, 200, { ok: true, data: cliInstaller.cancel() });
+    }
     if (request.method === 'GET' && url.pathname === '/api/cli-state') {
-      return sendJson(response, 200, { ok: true, data: { ...cliResolver.snapshot(), configuredPath: settings.codexCliExecutable } });
+      return sendJson(response, 200, { ok: true, data: { ...cliResolver.snapshot(), configuredPath: settings.codexCliExecutable, installation: cliInstaller.snapshot() } });
     }
     if (request.method === 'POST' && url.pathname === '/api/cli-diagnostics') {
       const result = await cliResolver.inspect(cliOptions({ force: true }));
       return sendJson(response, 200, { ok: true, data: { ...result, configuredPath: settings.codexCliExecutable } });
     }
     if (request.method === 'POST' && url.pathname === '/api/cli-settings') {
+      if (cliInstaller.snapshot().busy) return sendError(response, 409, 'CLI installation is in progress. Please wait.');
       const body = await readBody(request);
       const executable = String(body.path || '').trim();
       if (executable && (!path.isAbsolute(executable) || !/\.exe$/i.test(executable))) return sendError(response, 400, 'Choose an absolute Codex CLI .exe path');

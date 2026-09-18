@@ -1,4 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
+contextBridge.exposeInMainWorld('navoAppearance', {
+  setTheme: preference => ipcRenderer.invoke('appearance:set-theme', preference),
+});
 
 contextBridge.exposeInMainWorld('codexRuntime', {
   selectCli: (locale) => ipcRenderer.invoke('runtime:select-cli', locale),

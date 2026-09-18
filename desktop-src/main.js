@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, Notification, screen, session, shell, Tray } = require('electron');
+const { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeTheme, Notification, screen, session, shell, Tray } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { CancellationToken } = require('builder-util-runtime');
 const { spawn, spawnSync } = require('node:child_process');
@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const { reusablePackage } = require('../lib/update-cache');
+const { retryDownload, downloadInRanges } = require('../lib/update-download');
 const { createUpdateDiagnostics } = require('../lib/update-diagnostics');
 const { probeUpdatePackage } = require('../lib/update-package-probe');
 const { FLOATING_MAX_HEIGHT, fittedFloatingBounds } = require('../lib/floating-window-size');
@@ -362,8 +363,17 @@ function requestLocalJson(pathname, timeoutMs = 15_000) {
 const configuredUpdateRoutes = new WeakMap();
 function codexUpdateSession() { return session.fromPartition('codex-navo-official-updates'); }
 
-async function configureUpdaterNetwork(updaterSession = autoUpdater.netSession) {
-  const route = await requestLocalJson('/api/network/background-route');
+async function configureUpdaterNetwork(updaterSession = autoUpdater.netSession, signal) {
+  signal?.throwIfAborted();
+  // Fixed per-source policy: GitHub requires Navo's configured proxy, while
+  // the official Codex CDN is direct. Never change account or system routing.
+  let route = { proxyUrl: '', nodeName: '直连' };
+  if (updaterSession === autoUpdater.netSession) {
+    route = await requestLocalJson('/api/network/background-route');
+    if (!route?.proxyUrl) throw Object.assign(new Error('Navo updates require a configured network proxy. No proxy is available; direct GitHub fallback is disabled.'), { code: 'UPDATE_PROXY_REQUIRED' });
+    route = { ...route, nodeName: route.nodeName || 'Proxy' };
+  }
+  signal?.throwIfAborted();
   const fingerprint = JSON.stringify([route?.proxyUrl || '', route?.bypass || '']);
   if (configuredUpdateRoutes.get(updaterSession) === fingerprint) return route;
   if (route?.proxyUrl) {
@@ -481,6 +491,9 @@ async function checkForUpdates(manual = false) {
 
 function publishUpdateError(error) {
   if (navoDownloadToken?.cancelled) return;
+  // downloadUpdate emits an error before rejecting; the retry coordinator
+  // publishes only the final failure, not a transient failure between attempts.
+  if (navoDownloadToken) return;
   publishUpdateState({ ...updateErrorState(error), phase: 'error', cancellable: false });
 }
 
@@ -832,7 +845,7 @@ function runHiddenProcess(command, args, timeoutMs = 10 * 60 * 1000, options = {
 }
 
 let codexDownloadController = null;
-async function downloadCodexPackage(state) {
+async function downloadCodexPackage(state, outerSignal) {
   const updateDirectory = path.join(USER_DATA_ROOT, 'updates', 'codex');
   fs.mkdirSync(updateDirectory, { recursive: true });
   const finalPath = path.join(updateDirectory, `Codex-${state.latestVersion}-${process.arch}.msix`);
@@ -849,7 +862,8 @@ async function downloadCodexPackage(state) {
     }
   } catch {}
   const downloadController = new AbortController();
-  codexDownloadController = downloadController;
+  if (!outerSignal) codexDownloadController = downloadController;
+  const signal = outerSignal ? AbortSignal.any([outerSignal, downloadController.signal]) : downloadController.signal;
   let idleTimer;
   const resetIdle = () => {
     clearTimeout(idleTimer);
@@ -859,10 +873,10 @@ async function downloadCodexPackage(state) {
   let response;
   try {
     response = await codexUpdateSession().fetch(state.packageUrl, {
-      cache: 'no-store', signal: downloadController.signal,
+      cache: 'no-store', signal,
       headers: offset > 0 ? { Range: `bytes=${offset}-`, 'If-Range': resumeTag } : {},
     });
-  } catch (error) { clearTimeout(idleTimer); throw error; }
+  } catch (error) { clearTimeout(idleTimer); throw signal.aborted ? signal.reason : error; }
   clearTimeout(idleTimer);
   if (response.status === 416 && offset > 0) {
     downloadController.abort();
@@ -870,7 +884,10 @@ async function downloadCodexPackage(state) {
     throw new Error('The saved download range is no longer available. Retry to download a fresh Codex package.');
   }
   if (response.status === 404) throw new Error('CODEX_PACKAGE_PROPAGATING');
-  if (!response.ok || !response.body) throw new Error(`The official Codex package returned HTTP ${response.status}.`);
+  if (!response.ok || !response.body) {
+    downloadController.abort();
+    throw Object.assign(new Error(`The official Codex package returned HTTP ${response.status}.`), { status: response.status });
+  }
   if (new URL(response.url || state.packageUrl).protocol !== 'https:') throw new Error('The official Codex package redirected to an insecure URL.');
   let total = Number(response.headers.get('content-length')) || 0;
   if (response.status === 206) {
@@ -916,10 +933,10 @@ async function downloadCodexPackage(state) {
       received += bytes.length;
       reportProgress(downloadProgress());
     }
-    if (downloadController.signal.aborted) throw downloadController.signal.reason;
+    signal.throwIfAborted();
     reportProgress(downloadProgress(), true);
   } catch (error) {
-    downloadError = error;
+    downloadError = signal.aborted ? signal.reason : error;
   } finally {
     clearTimeout(idleTimer);
     await handle.close();
@@ -939,6 +956,37 @@ async function downloadCodexPackage(state) {
   const result = { path: finalPath, bytes: received, sha256: hash.digest('hex') };
   writeUpdateSnapshot(`${finalPath}.json`, { url: state.packageUrl, bytes: result.bytes, sha256: result.sha256 });
   return result;
+}
+
+async function downloadCodexPackageResilient(state) {
+  const controller = new AbortController();
+  codexDownloadController = controller;
+  const directory = path.join(USER_DATA_ROOT, 'updates', 'codex');
+  fs.mkdirSync(directory, { recursive: true });
+  const destination = path.join(directory, `Codex-${state.latestVersion}-${process.arch}.msix`);
+  const cached = await reusablePackage(destination, state.packageUrl);
+  controller.signal.throwIfAborted();
+  if (cached) return cached;
+  const route = await configureUpdaterNetwork(codexUpdateSession(), controller.signal);
+  controller.signal.throwIfAborted();
+  publishCodexUpdateState({ networkRoute: route.nodeName || '直连', retryAttempt: 1 });
+  // Resume an existing single-stream partial before choosing segmented mode.
+  const partial = fs.existsSync(`${destination}.download.json`);
+  if (!partial) {
+    const result = await downloadInRanges({ url: state.packageUrl, destination,
+      fetch: (url, options) => codexUpdateSession().fetch(url, options), signal: controller.signal,
+      onProgress: progress => publishCodexUpdateState({ ...progress, status: 'downloading', phase: 'downloading',
+        percent: Math.max(1, Math.min(89, Math.round(progress.bytesDownloaded / progress.totalBytes * 89))) }),
+    });
+    if (result) return result;
+  }
+  return retryDownload(() => downloadCodexPackage(state, controller.signal), {
+    signal: controller.signal,
+    onRetry: async attempt => {
+      publishCodexUpdateState({ retryAttempt: attempt, bytesPerSecond: 0 });
+      await configureUpdaterNetwork(codexUpdateSession(), controller.signal);
+    },
+  });
 }
 
 async function readCodexPackageMetadata(packagePath) {
@@ -1067,8 +1115,9 @@ async function installCodexWindowsUpdate({ locale = 'en-US' } = {}) {
         directPackageHeadStatus: packageResponse.headStatus || 0,
         directPackageProbeMethod: packageResponse.probeMethod || 'HEAD', directPackageError: '' });
     }
-    publishCodexUpdateState({ status: 'downloading', phase: 'downloading', percent: 1, error: '', cancelled: false });
-    const download = await downloadCodexPackage(state);
+    publishCodexUpdateState({ status: 'downloading', phase: 'downloading', percent: 1, error: '', cancelled: false,
+      bytesDownloaded: 0, totalBytes: 0, bytesPerSecond: 0, retryAttempt: 1, connections: 1 });
+    const download = await downloadCodexPackageResilient(state);
     publishCodexUpdateState({ status: 'verifying', phase: 'verifying', percent: 90, sha256: download.sha256 });
     const metadata = validateCodexPackageMetadata(await readCodexPackageMetadata(download.path), state.latestVersion);
     if (await codexDesktopIsRunning()) {
@@ -1117,16 +1166,26 @@ const installCodexWindowsUpdateOnce = singleFlight(async (options) => {
 const downloadNavoUpdateOnce = singleFlight(async () => {
   if (!updateState.availableVersion || !['available', 'cancelled', 'error'].includes(updateState.status)) return updateState;
   const token = new CancellationToken();
+  const controller = new AbortController();
+  token.onCancel(() => controller.abort(new Error('NAVO_DOWNLOAD_CANCELLED')));
   navoDownloadToken = token;
-  publishUpdateState({ status: 'downloading', phase: 'downloading', percent: 0, error: '', errorCode: '', cancelled: false, cancellable: true });
+  publishUpdateState({ status: 'downloading', phase: 'downloading', percent: 0, error: '', errorCode: '', cancelled: false, cancellable: true,
+    bytesDownloaded: 0, totalBytes: 0, bytesPerSecond: 0, retryAttempt: 1 });
   try {
-    const route = await configureUpdaterNetwork();
+    const route = await configureUpdaterNetwork(autoUpdater.netSession, controller.signal);
     if (!token.cancelled) {
       publishUpdateState({ networkRoute: route.nodeName || '直连' });
-      await autoUpdater.downloadUpdate(token);
+      await retryDownload(() => autoUpdater.downloadUpdate(token), {
+        signal: controller.signal,
+        onRetry: async attempt => {
+          publishUpdateState({ status: 'downloading', phase: 'downloading', retryAttempt: attempt, error: '', bytesPerSecond: 0 });
+          const next = await configureUpdaterNetwork(autoUpdater.netSession, controller.signal);
+          publishUpdateState({ networkRoute: next.nodeName || '直连' });
+        },
+      });
     }
   } catch (error) {
-    if (!token.cancelled) publishUpdateError(error);
+    if (!token.cancelled) publishUpdateState({ ...updateErrorState(error), phase: 'error', cancellable: false });
   } finally {
     if (token.cancelled) publishUpdateState({ status: 'cancelled', phase: 'cancelled', cancelled: true, cancellable: false, error: '', errorCode: '', percent: 0 });
     if (navoDownloadToken === token) navoDownloadToken = null;
@@ -1136,6 +1195,12 @@ const downloadNavoUpdateOnce = singleFlight(async () => {
 });
 
 function registerUpdaterIpc() {
+  ipcMain.handle('appearance:set-theme', (_event, preference) => {
+    if (!['light', 'dark', 'system'].includes(preference)) return false;
+    nativeTheme.themeSource = preference;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#0a111b' : '#f3f6fa');
+    return true;
+  });
   ipcMain.handle('runtime:select-cli', async (_event, locale) => {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: locale === 'zh-CN' ? '选择现有 Codex CLI' : 'Choose an existing Codex CLI',

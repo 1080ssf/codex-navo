@@ -45,6 +45,7 @@ test('missing release manifest is an error, never evidence that the app is curre
     status: 'error', error: 'latest.yml HTTP 404', errorCode: 'UPDATE_MANIFEST_MISSING',
   });
   assert.equal(updateErrorState(new Error('timeout')).status, 'error');
+  assert.equal(updateErrorState({code:'UPDATE_PROXY_REQUIRED',message:'No proxy'}).errorCode,'UPDATE_PROXY_REQUIRED');
 });
 
 test('concurrent install requests share one operation and release the lock after failure', async () => {
