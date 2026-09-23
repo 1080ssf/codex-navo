@@ -235,6 +235,7 @@ const englishUi = new Map([
   ['例如：美国 VPS', 'For example: US VPS'], ['粘贴订阅链接或节点配置', 'Paste a subscription URL or node configuration'],
   ['代理核心将在首次添加节点时自动准备', 'The proxy core will be prepared when the first node is added'], ['还没有节点或订阅', 'No nodes or subscriptions yet'],
   ['检查账号授权状态，或通过授权包迁移 Codex 与可用的网页会话。', 'Check account authorization or migrate Codex and available web sessions with an authorization package.'],
+  ['未完成验证', 'Verification incomplete'],
   ['账号健康', 'Account health'], ['检查全部', 'Check all'], ['账号授权包', 'Account authorization package'], ['导出授权', 'Export authorization'],
   ['生成单个 .codexnavo 账号授权包', 'Create one .codexnavo account package'], ['选择账号', 'Select account'], ['生成授权包', 'Create package'],
   ['导入授权', 'Import authorization'], ['验证通过后创建新的 Codex 账号环境', 'Create a new Codex account environment after validation'], ['授权包', 'Authorization package'],
@@ -421,7 +422,7 @@ const englishUi = new Map([
   ['重新识别', 'Identify again'], ['自动唤醒设置已启用', 'Automatic wake enabled'], ['最少', 'Minimal'],
   ['API 账号池代理已保存', 'API account-pool proxy saved'], ['API 账号池已切换为直连', 'API account pool now uses a direct connection'], ['API Key 不存在', 'API key does not exist'],
   ['ChatGPT 检测', 'ChatGPT check'], ['ChatGPT 未完成', 'ChatGPT check incomplete'], ['Codex 返回的原始 Credits', 'Raw credits returned by Codex'],
-  ['Codex 默认模型', 'Codex default model'], ['Codex 授权已导入，网页会话需要重新登录', 'Codex authorization imported; the web session requires sign-in'],
+  ['Codex 默认模型', 'Codex default model'], ['Codex 授权已导入，网页数据已保留，请打开网页端验证登录', 'Codex authorization imported; web data retained. Open the web page to verify sign-in'],
   ['Codex 授权已导入；该授权包不包含网页会话。', 'Codex authorization imported; this package does not contain a web session.'],
   ['Codex 授权已完成。网页端仍需登录时，可在该账号的独立 Chrome 中继续。', 'Codex authorization is complete. If Web still requires sign-in, continue in this account’s isolated Chrome.'],
   ['（已回退账号默认模型）', ' (account default model fallback)'],
@@ -485,7 +486,7 @@ const englishUiPatterns = [
   [/^已导入 (\d+) 个临时账号（可续期 (\d+)，限时 (\d+)）$/, 'Imported $1 temporary accounts ($2 renewable, $3 time-limited)'],
   [/^下载 (\d+)%$/, 'Download $1%'], [/^正在下载 OpenAI 官方 Codex 安装包… (\d+)%$/, 'Downloading the official OpenAI Codex installer… $1%'],
   [/^余额 (.+)$/, 'Balance $1'], [/^Codex 更新失败：(.+)$/, 'Codex update failed: $1'], [/^Codex 默认（当前 (.+)）$/, 'Codex default (current: $1)'],
-  [/^Codex 授权已导入；网页会话验证失败，需要重新登录网页端：(.+)$/, 'Codex authorization imported; web-session verification failed and requires sign-in: $1'],
+  [/^Codex 授权已导入；网页数据已保留，请打开网页端验证登录：(.+)$/, 'Codex authorization imported; web data retained. Open the web page to verify sign-in: $1'],
   [/^Codex 已更新到 v(.+)。$/, 'Codex updated to v$1.'],
   [/^OpenAI 官方清单已公布 Codex v(.+)；Windows Store 检测失败，官方直装包当前返回 HTTP (.+)。请重新检查。$/, 'The official OpenAI manifest lists Codex v$1; the Windows Store check failed, and the direct package currently returns HTTP $2. Check again.'],
   [/^OpenAI 官方清单已公布 Codex v(.+)；Windows Store 尚未向本机提供该版本，官方直装包当前返回 HTTP (.+)。请稍后重新检查。$/, 'The official OpenAI manifest lists Codex v$1; Windows Store has not offered it to this device, and the direct package currently returns HTTP $2. Check again later.'],
@@ -2522,7 +2523,7 @@ elements.importAuthPackage.addEventListener('click', async () => {
     showToolsStatus(status.web === 'imported'
       ? '导入完成：Codex 授权与网页会话均已验证。'
       : status.web === 'failed'
-        ? `Codex 授权已导入；网页会话验证失败，需要重新登录网页端：${status.webError || '会话已失效'}`
+        ? `Codex 授权已导入；网页数据已保留，请打开网页端验证登录：${status.webError || '未完成验证'}`
         : 'Codex 授权已导入；该授权包不包含网页会话。', status.web === 'failed');
   } catch (error) {
     showToolsStatus(error.message, true);
@@ -3686,7 +3687,7 @@ elements.form.addEventListener('submit', async (event) => {
       showToast(status.web === 'imported'
         ? '账号已导入：Codex 授权与网页会话均已验证'
         : status.web === 'failed'
-          ? 'Codex 授权已导入，网页会话需要重新登录'
+          ? 'Codex 授权已导入，网页数据已保留，请打开网页端验证登录'
           : '账号已导入：授权包仅包含 Codex 授权', status.web === 'failed');
     } catch (error) {
       showAccountDialogError(error.message);

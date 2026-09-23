@@ -2581,7 +2581,7 @@ async function exportAccountWebSession(account) {
       port,
       closeBrowser: Boolean(browser),
     }));
-    if (!cookies.some((cookie) => /(?:^|-)next-auth\.session-token$/i.test(cookie.name))) return null;
+    if (!cookies.some((cookie) => /(?:^|-)next-auth\.session-token(?:\.\d+)?$/i.test(cookie.name))) return null;
     return {
       version: 1,
       exportedAt: new Date().toISOString(),
@@ -3086,7 +3086,9 @@ function repairSharedCodexPreferences() {
   const catalog = repairSharedCodexThreadCatalog(SHARED_CODEX_HOME);
   if (catalog.changed) audit('codex.thread-catalog.recovered', { result: `${catalog.catalogCount || 0}` });
   else if (catalog.reason === 'repair-failed') audit('codex.thread-catalog.repair-failed', { result: catalog.error || catalog.reason });
-  const names = syncSessionIndexNames(SHARED_CODEX_HOME);
+  let names = { state: 0, catalog: 0 };
+  try { names = syncSessionIndexNames(SHARED_CODEX_HOME); }
+  catch (error) { audit('codex.thread-names.sync-deferred', { result: String(error.message).slice(0, 240) }); }
   if (names.state || names.catalog) audit('codex.thread-names.synced', { result: `${names.state}:${names.catalog}` });
   return { projects, config, catalog, names, changed: Boolean(projects.changed || config.changed || catalog.changed || names.state || names.catalog) };
 }
@@ -4052,7 +4054,7 @@ async function importAuthorizationPackage(envelope, operator) {
         importStatus.web = 'failed';
         importStatus.webError = String(error.message || '网页会话验证失败').slice(0, 180);
         account.webLoginComplete = false;
-        if (isWithin(BROWSER_PROFILES_DIR, browserDir)) fs.rmSync(browserDir, { recursive: true, force: true });
+        // Keep imported browser data for a visible retry or manual verification.
       }
     }
     saveAccounts([...accounts, account]);

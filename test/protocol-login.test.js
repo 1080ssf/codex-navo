@@ -36,7 +36,7 @@ class MockChromeSocket {
   send(raw) {
     const request = JSON.parse(raw);
     this.methods.push(request.method);
-    if (request.method === 'Browser.close') return;
+    if (request.method === 'Browser.close') { queueMicrotask(() => this.emit('close', {})); return; }
     const result = request.method === 'Network.setCookies'
       ? { success: true }
       : request.method === 'Runtime.evaluate'
@@ -130,7 +130,7 @@ test('协议网页会话转换为仅供本机 Chrome 写入的 Cookie', () => {
   }] }));
   const session = readProtocolSession(file);
   const [cookie] = normalizeChromeCookies(session.cookies);
-  assert.equal(cookie.domain, 'chatgpt.com');
+  assert.equal(cookie.domain, '.chatgpt.com');
   assert.equal(cookie.sameSite, 'Lax');
   assert.equal(cookie.httpOnly, true);
   assert.equal(cookie.expires, 2_000_000_000);
@@ -180,6 +180,17 @@ test('Headless 403 延后验证路径真实执行三次重试并主动关闭浏�
   assert.deepEqual(result, { verified: false, deferred: true, status: 403, session: null });
   assert.equal(socket.methods.filter((method) => method === 'Runtime.evaluate').length, 3);
   assert.ok(socket.methods.includes('Browser.close'));
+});
+
+test('failed import verification still flushes cookies via graceful browser close', async () => {
+  let socket;
+  class WebSocketImpl extends MockChromeSocket { constructor() { super(); socket = this; } }
+  await assert.rejects(injectProtocolCookies({
+    port: 12345, cookies: [], WebSocketImpl,
+    fetchImpl: async () => ({ ok: true, json: async () => [{ type: 'page', url: 'https://chatgpt.com/', webSocketDebuggerUrl: 'ws://mock' }] }),
+    closeBrowser: true, verificationDelayMs: 1, verificationAttempts: 1,
+  }), /403/);
+  assert.equal(socket.methods.filter(method => method === 'Browser.close').length, 1);
 });
 
 test('官方 OAuth 完成后可以保留 Chrome 并等待 ChatGPT 网页会话建立', async () => {

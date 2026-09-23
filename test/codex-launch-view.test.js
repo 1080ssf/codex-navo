@@ -108,6 +108,7 @@ catalog.execute('INSERT INTO local_thread_catalog_metadata VALUES(1,1)')
 catalog.commit(); catalog.close()
 `, [path.join(root, 'state_5.sqlite'), path.join(root, 'sqlite', 'codex-dev.db')]);
   fs.writeFileSync(path.join(root, 'session_index.jsonl'), [
+    ...Array.from({ length: 1500 }, (_, i) => JSON.stringify({ id: `unused-${i}`, thread_name: '中文会话名称 regression long history' })),
     JSON.stringify({ id: 'thread-1', thread_name: 'Initial generated name' }),
     JSON.stringify({ id: 'thread-1', thread_name: 'Final visible name' }),
   ].join('\n'));
