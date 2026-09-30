@@ -363,15 +363,54 @@ function requestLocalJson(pathname, timeoutMs = 15_000) {
 const configuredUpdateRoutes = new WeakMap();
 function codexUpdateSession() { return session.fromPartition('codex-navo-official-updates'); }
 
-async function configureUpdaterNetwork(updaterSession = autoUpdater.netSession, signal) {
+async function probeUpdaterRoute(updaterSession, route, probeUrl, signal) {
   signal?.throwIfAborted();
-  // Fixed per-source policy: GitHub requires Navo's configured proxy, while
-  // the official Codex CDN is direct. Never change account or system routing.
-  let route = { proxyUrl: '', nodeName: '直连' };
-  if (updaterSession === autoUpdater.netSession) {
-    route = await requestLocalJson('/api/network/background-route');
-    if (!route?.proxyUrl) throw Object.assign(new Error('Navo updates require a configured network proxy. No proxy is available; direct GitHub fallback is disabled.'), { code: 'UPDATE_PROXY_REQUIRED' });
-    route = { ...route, nodeName: route.nodeName || 'Proxy' };
+  const probeSession = session.fromPartition(route.proxyUrl ? 'navo-update-probe-proxy' : 'navo-update-probe-direct');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8_000);
+  let response;
+  const started = Date.now();
+  try {
+    await probeSession.setProxy(route.proxyUrl ? {
+      mode: 'fixed_servers', proxyRules: route.proxyUrl,
+      proxyBypassRules: route.bypass || 'localhost,127.0.0.1,::1,*.localhost',
+    } : { mode: 'direct' });
+    await probeSession.closeAllConnections?.();
+    response = await probeSession.fetch(probeUrl, {
+      cache: 'no-store', signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
+      headers: { Range: 'bytes=0-131071', 'Accept-Encoding': 'identity' },
+    });
+    if (!response.ok || new URL(response.url || probeUrl).protocol !== 'https:') return null;
+    let bytes = 0;
+    for await (const chunk of response.body || []) {
+      bytes += chunk.length;
+      if (bytes >= 128 * 1024) break;
+    }
+    if (!bytes) return null;
+    return { ...route, speed: bytes / Math.max(1, Date.now() - started) };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+    try { await response?.body?.cancel(); } catch {}
+  }
+}
+
+async function configureUpdaterNetwork(updaterSession = autoUpdater.netSession, signal, probeUrl = '') {
+  signal?.throwIfAborted();
+  let configured = null;
+  try { configured = await requestLocalJson('/api/network/background-route'); } catch {}
+  const candidates = [{ proxyUrl: '', nodeName: '直连' }];
+  if (configured?.proxyUrl) candidates.push({ ...configured, nodeName: configured.nodeName || '代理' });
+  let route = candidates[0];
+  probeUrl ||= updaterSession === autoUpdater.netSession
+    ? 'https://github.com/1080ssf/codex-navo/releases/latest/download/latest.yml' : CODEX_UPDATE_MANIFEST_URL;
+  if (probeUrl) {
+    const measured = (await Promise.all(candidates.map(candidate => probeUpdaterRoute(updaterSession, candidate, probeUrl, signal)))).filter(Boolean);
+    measured.sort((left, right) => right.speed - left.speed);
+    if (measured[0]) route = measured[0];
+    else throw new Error('Update source is unreachable through direct and configured proxy routes.');
   }
   signal?.throwIfAborted();
   const fingerprint = JSON.stringify([route?.proxyUrl || '', route?.bypass || '']);
@@ -415,8 +454,8 @@ async function ensureServer(root, port) {
       CODEX_MANAGER_NO_OPEN: '1',
       CODEX_SWITCHBOARD_USER_DATA: USER_DATA_ROOT,
       CODEX_NAVO_BUNDLED_NETWORK_CORE: app.isPackaged
-        ? path.join(process.resourcesPath, 'network-core', 'mihomo-v1.19.29.exe')
-        : path.join(root, '.cache', 'network-core', 'mihomo-v1.19.29.exe'),
+        ? path.join(process.resourcesPath, 'network-core', 'mihomo-v1.19.31.exe')
+        : path.join(root, '.cache', 'network-core', 'mihomo-v1.19.31.exe'),
       ...(app.isPackaged ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
     },
   });
@@ -707,7 +746,7 @@ async function fetchOfficialCodexUpdateState() {
   publishCodexUpdateState({ status: 'checking', phase: 'checking', percent: 0, error: '', cancelled: false, checkAttemptedAt });
   try {
     const updaterSession = codexUpdateSession();
-    const route = await stage('network', () => configureUpdaterNetwork(updaterSession));
+    const route = await stage('network', () => configureUpdaterNetwork(updaterSession, undefined, CODEX_UPDATE_MANIFEST_URL));
     const manifest = await stage('manifest', async () => {
       const response = await updaterSession.fetch(CODEX_UPDATE_MANIFEST_URL, { cache: 'no-store', signal: AbortSignal.timeout(15_000) });
       if (!response.ok) throw new Error(`The official Codex update manifest returned HTTP ${response.status}.`);
@@ -967,7 +1006,7 @@ async function downloadCodexPackageResilient(state) {
   const cached = await reusablePackage(destination, state.packageUrl);
   controller.signal.throwIfAborted();
   if (cached) return cached;
-  const route = await configureUpdaterNetwork(codexUpdateSession(), controller.signal);
+  const route = await configureUpdaterNetwork(codexUpdateSession(), controller.signal, state.packageUrl);
   controller.signal.throwIfAborted();
   publishCodexUpdateState({ networkRoute: route.nodeName || '直连', retryAttempt: 1 });
   // Resume an existing single-stream partial before choosing segmented mode.
@@ -984,7 +1023,7 @@ async function downloadCodexPackageResilient(state) {
     signal: controller.signal,
     onRetry: async attempt => {
       publishCodexUpdateState({ retryAttempt: attempt, bytesPerSecond: 0 });
-      await configureUpdaterNetwork(codexUpdateSession(), controller.signal);
+      await configureUpdaterNetwork(codexUpdateSession(), controller.signal, state.packageUrl);
     },
   });
 }
@@ -1172,14 +1211,15 @@ const downloadNavoUpdateOnce = singleFlight(async () => {
   publishUpdateState({ status: 'downloading', phase: 'downloading', percent: 0, error: '', errorCode: '', cancelled: false, cancellable: true,
     bytesDownloaded: 0, totalBytes: 0, bytesPerSecond: 0, retryAttempt: 1 });
   try {
-    const route = await configureUpdaterNetwork(autoUpdater.netSession, controller.signal);
+    const sampleUrl = `https://github.com/1080ssf/codex-navo/releases/download/v${encodeURIComponent(updateState.availableVersion)}/Codex-Navo-Setup-${encodeURIComponent(updateState.availableVersion)}-windows-${process.arch}.exe`;
+    const route = await configureUpdaterNetwork(autoUpdater.netSession, controller.signal, sampleUrl);
     if (!token.cancelled) {
       publishUpdateState({ networkRoute: route.nodeName || '直连' });
       await retryDownload(() => autoUpdater.downloadUpdate(token), {
         signal: controller.signal,
         onRetry: async attempt => {
           publishUpdateState({ status: 'downloading', phase: 'downloading', retryAttempt: attempt, error: '', bytesPerSecond: 0 });
-          const next = await configureUpdaterNetwork(autoUpdater.netSession, controller.signal);
+          const next = await configureUpdaterNetwork(autoUpdater.netSession, controller.signal, sampleUrl);
           publishUpdateState({ networkRoute: next.nodeName || '直连' });
         },
       });

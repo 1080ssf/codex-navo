@@ -88,11 +88,18 @@ test('Codex 运行时不会向其他账号提供无效的切换操作', () => {
 
 test('添加账号期间不会被后台刷新或更新弹窗抢走输入焦点', () => {
   const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
-  assert.match(client, /requestAnimationFrame\(\(\) => elements\.form\.querySelector\('input\[name="loginMethod"\]:checked'\)\?\.focus\(\)\)/);
+  assert.doesNotMatch(client, /requestAnimationFrame\(\(\) => elements\.form\.querySelector\('input\[name="loginMethod"\]:checked'\)\?\.focus\(\)\)/);
   assert.match(client, /function editingSurfaceActive\(\)/);
   assert.match(client, /document\.querySelector\('dialog\[open\]'\)/);
   assert.match(client, /refresh\(\{ background: true \}\)/);
   assert.doesNotMatch(client, /nextState\.status === 'available'[\s\S]{0,160}showModal/);
+});
+
+test('所有文本输入控件显式保留原生命中测试和文本编辑能力', () => {
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(styles, /:is\(input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\):not\(\[type="range"\]\):not\(\[type="file"\]\):not\(\[type="hidden"\]\), textarea, select\) \{[^}]*pointer-events: auto;[^}]*user-select: text;[^}]*-webkit-app-region: no-drag;/s);
+  assert.match(styles, /dialog :is\(input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\):not\(\[type="range"\]\):not\(\[type="file"\]\):not\(\[type="hidden"\]\), textarea, select\) \{[^}]*position: relative;[^}]*z-index: 1;/s);
+  assert.match(styles, /dialog label \{[^}]*-webkit-app-region: no-drag;/);
 });
 
 test('版本入口进入应用设置更新卡片且官方授权结束后验证并落地网页会话', () => {
@@ -442,12 +449,24 @@ test('授权包使用单个文件且不要求密码或密钥文件', () => {
   assert.match(server, /readAuthPackage/);
 });
 
+test('授权迁移支持选择 Sub2API 和 CPA 导出格式', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  assert.match(html, /id="export-format"/);
+  assert.match(html, /value="sub2"/);
+  assert.match(html, /value="cpa"/);
+  assert.match(client, /format: elements\.exportFormat\?\.value \|\| 'codexnavo'/);
+  assert.match(server, /exportAccountCredentials\(auth, account, requestedFormat\)/);
+  assert.match(server, /format: 'codexnavo'/);
+});
+
 test('添加账号直接展示官方登录与授权包导入', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.match(html, /class="login-method-primary"[\s\S]*<strong>登录并授权<\/strong>/);
-  assert.match(html, /class="login-method-import"[\s\S]*<strong>导入已有账号<\/strong>/);
+  assert.match(html, /class="login-method-package"[\s\S]*<strong>导入数据包<\/strong>/);
   assert.doesNotMatch(html, /<details class="login-method-more">/);
   assert.doesNotMatch(html, /<strong>后台交互登录<\/strong>/);
   assert.doesNotMatch(client, /more\.open/);
@@ -471,12 +490,12 @@ test('添加账号弹窗可直接导入单个授权包', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
   const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
-  assert.match(html, /name="loginMethod" value="import"/);
+  assert.match(html, /name="loginMethod" value="package-import"/);
   assert.match(html, /id="account-import-package-file"/);
   assert.match(html, /id="account-import-panel"/);
   assert.match(app, /state\.accountImportPackageText/);
-  assert.match(app, /requestedLoginMethod === 'import'/);
-  assert.match(app, /readAuthorizationPackageFile/);
+  assert.match(app, /requestedLoginMethod === 'package-import'/);
+  assert.match(app, /state\.accountImportPackageText = await file\.text\(\)/);
   assert.match(app, /\/api\/auth-packages\/import/);
   assert.match(styles, /\.account-import-panel/);
 });
@@ -527,9 +546,10 @@ test('account creation keeps official login and package import only', () => {
   assert.match(html, /name="loginMethod" value="official"/);
   assert.doesNotMatch(html, /name="loginMethod" value="protocol"/);
   assert.match(html, /name="loginMethod" value="official" checked/);
-  assert.match(html, /class="login-method-import"/);
+  assert.match(html, /class="login-method-package"/);
   assert.doesNotMatch(html, /value="cdk"|name="mockOtpEndpoint"|name="protocolPaste"/);
-  assert.match(html, /name="loginMethod" value="import"/);
+  assert.match(html, /name="loginMethod" value="package-import"/);
+  assert.deepEqual([...html.matchAll(/name="loginMethod" value="([^"]+)"/g)].map((match) => match[1]), ['official', 'package-import']);
   assert.doesNotMatch(client, /openProtocolDialog\(created\)/);
   assert.doesNotMatch(client, /\/authorize-protocol/);
   assert.doesNotMatch(client, /cdkImportToken|mockOtpEndpoint|protocolPaste/);
@@ -840,8 +860,8 @@ test('third-party packages are imported from Add Account and shown as temporary 
   const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
   const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert.doesNotMatch(html, /id="relay-account-import-button"/);
-  assert.match(html, /name="loginMethod" value="relay-import"/);
-  assert.match(html, /<strong>导入第三方数据包<\/strong>/);
+  assert.match(html, /name="loginMethod" value="package-import"/);
+  assert.match(html, /<strong>导入数据包<\/strong>/);
   for (const id of ['relay-import-dialog', 'relay-import-form', 'relay-import-file', 'relay-import-submit']) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
@@ -888,11 +908,11 @@ test('单独节点显示线路名称且机场订阅在账号线路选择器中�
   assert.match(styles, /\.account-route-menu\s*\{[^}]*position:\s*static/);
 });
 
-test('Add Account can create the same one-time Navo API Key used by API Service', () => {
+test('API key creation stays in API Service with one-time secret display', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   const client = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
-  assert.match(html, /name="loginMethod" value="create-api"/);
-  assert.match(html, /<strong>创建 API<\/strong>/);
+  assert.doesNotMatch(html, /name="loginMethod" value="create-api"/);
+  assert.match(html, /id="api-key-add"/);
   assert.doesNotMatch(html, /id="api-key-created"/);
   assert.match(client, /async function createApiKeyAndShowSecret\(\)/);
   assert.match(client, /function openApiSecretDialog\(secret\)/);

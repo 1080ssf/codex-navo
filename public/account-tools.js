@@ -8,12 +8,15 @@
     browser: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9h18M7 6.5h.01M10 6.5h.01"/>',
     codex: '<path d="m9 6-6 6 6 6m6-12 6 6-6 6"/>',
     models: '<path d="M9 3h6m-5 0v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3M8 15h8"/><path d="M10 18h.01M14 17h.01"/>',
-    route: '<path d="M5 5h14M5 12h14M5 19h14"/>'
+    route: '<path d="M5 5h14M5 12h14M5 19h14"/>',
+    attribution: '<circle cx="12" cy="12" r="8.5"/><path d="M8 9.5h.01M12 7.5h.01M16 10h.01M9 15h.01M14 16h.01"/>'
   };
   const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || icons.codex}</svg>`;
   let dialog, mode, timer, targetId, creditsState, busy = false, catalog = [], job = null, pollEpoch = 0;
   let catalogEpoch = 0, catalogScope = '', pollFailures = 0, creditsNotice = '', creditsStale = false;
   let catalogLoading = false, catalogCompleted = 0, catalogTotal = 0;
+  let attributionState = { runtime: null, results: null, routing: {}, targetId: '', model: '', models: [], catalogLoading: false, loading: false, error: '', job: null };
+  let attributionTimer, attributionCatalogEpoch = 0;
   const modelSelections = new Set();
   const attempts = new Map();
   try { for (const [id, attempt] of JSON.parse(sessionStorage.getItem('navo-reset-attempts') || '[]')) if (attempt?.id) attempts.set(id, attempt); } catch {}
@@ -52,6 +55,8 @@
       dialog.addEventListener('close', () => { pollEpoch++; catalogEpoch++; clearTimeout(timer); });
       dialog.addEventListener('change', event => {
         if (event.target.name === 'tools-target') resetCatalog();
+        if (event.target.name === 'attribution-target' && !attributionState.loading) { attributionState.targetId = event.target.value; attributionState.model = ''; attributionState.results = null; void attributionLoadModels(); }
+        if (event.target.name === 'attribution-model' && !attributionState.loading) { attributionState.model = event.target.value; attributionState.results = null; }
         if (event.target.name === 'tools-model') {
           const entry = catalog[Number(event.target.value)];
           if (entry) { if (event.target.checked) modelSelections.add(modelKey(entry)); else modelSelections.delete(modelKey(entry)); }
@@ -91,8 +96,114 @@
       <label class="tools-search"><span>${esc(tr('搜索账号','Search accounts'))}</span><input type="search" name="tools-search" placeholder="${esc(tr('按账号名称筛选','Filter by account name'))}"></label><p class="tools-selection" role="status"></p>
       <div class="tools-targets">${targets().map(group => `<details ${group.values.some(a => a.id === initial) ? 'open' : ''}><summary>${esc(group.title)} · ${group.values.length}</summary>${group.values.map(a => `<label><input type="checkbox" name="tools-target" value="${esc(a.id)}" ${a.id === initial ? 'checked' : ''}><span class="tools-option-text">${esc(a.label || a.emailHint || a.id)}</span></label>`).join('')}</details>`).join('')}</div>
       <label class="tools-active-option"><input type="checkbox" name="tools-allow-busy"><span>${esc(tr('包含使用中的账号（可能影响当前任务的额度与限流）', 'Include active accounts (shares task quota and rate limits)'))}</span></label>
-      <div class="tools-buttons"><button data-tools-action="catalog">${esc(tr('读取模型列表', 'Read model catalog'))}</button><button data-tools-action="start">${esc(tr('检测所选模型', 'Probe selected models'))}</button><button data-tools-action="cancel">${esc(tr('停止检测', 'Stop job'))}</button><button data-tools-action="retry">${esc(tr('重测失败项', 'Retry failed items'))}</button></div><div class="tools-catalog"></div><div class="tools-results" aria-live="polite"></div>`;
+      <div class="tools-buttons"><button data-tools-action="catalog">${esc(tr('读取模型列表', 'Read model catalog'))}</button><button data-tools-action="start">${esc(tr('检测所选模型', 'Probe selected models'))}</button><button data-tools-action="attribution">${esc(tr('归因测试', 'Attribution test'))}</button><button data-tools-action="cancel">${esc(tr('停止检测', 'Stop job'))}</button><button data-tools-action="retry">${esc(tr('重测失败项', 'Retry failed items'))}</button></div><div class="tools-catalog"></div><div class="tools-results" aria-live="polite"></div>`;
     renderCatalog(); renderJob(); renderSelection();
+  }
+  async function loadAttributionRuntime() {
+    if (attributionState.runtime) return attributionState.runtime;
+    const [core, challengeModule, response] = await Promise.all([
+      import('/modeltrace/fingerprint-core.js'),
+      import('/modeltrace/challenge-browser.js'),
+      fetch('/modeltrace/data/unified_bank.json', { cache: 'force-cache' }),
+    ]);
+    if (!response.ok) throw new Error(tr('归因模型库加载失败。', 'The attribution reference bank could not be loaded.'));
+    attributionState.runtime = { ...core, ...challengeModule, bank: await response.json() };
+    return attributionState.runtime;
+  }
+  function attributionTargetOptions() {
+    return targets().flatMap(group => group.values.map(item => ({ id: item.id, label: `${group.title} · ${item.label || item.emailHint || item.id}` })));
+  }
+  function renderAttributionResults(result, routing = {}) {
+    const results = result?.results || [];
+    const top = results.slice(0, 8);
+    const probabilityText = tr('模型概率 {prob}% · 有效回答 {used}/{total}', 'Model probability {prob}% · {used}/{total} valid responses').replace('{prob}', (Number(result.probability) * 100).toFixed(1)).replace('{used}', result.used_outputs).replace('{total}', result.diagnostics?.length || 3);
+    const actual = routing.actualModel || tr('未返回', 'Not returned');
+    const actualCount = routing.actualCount || 0;
+    const requested = routing.requestedModel || '';
+    const mismatch = requested && actualCount && actual !== requested;
+    return `<section class="tools-attribution-results"><div class="tools-attribution-summary"><strong>${esc(tr('最可能模型（指纹）', 'Most likely model (fingerprint)'))}</strong><b>${esc(result.prediction_name || result.prediction || '—')}</b><span>${esc(probabilityText)}</span></div><div class="tools-attribution-routing"><div><span>${esc(tr('上游实际返回模型', 'Upstream returned model'))}</span><strong>${esc(actual)}</strong></div><div><span>${esc(tr('三次返回一致性', 'Response consistency'))}</span><strong>${esc(`${actualCount}/${routing.total || 3}`)}</strong></div>${mismatch ? `<p>${esc(tr('请求模型与上游返回模型不一致，可能存在别名、路由或代理层改写。', 'Requested and upstream models differ; an alias, router, or proxy layer may have rewritten the request.'))}</p>` : ''}</div><div class="tools-attribution-bar-list">${top.map(item => `<div class="tools-attribution-bar-row"><span>${esc(item.display_name || item.model)}</span><div><i style="width:${Math.max(1, Math.min(100, Number(item.probability) * 100)).toFixed(2)}%"></i></div><b>${(Number(item.probability) * 100).toFixed(1)}%</b></div>`).join('')}</div><small>${esc(tr('上游返回模型是本次请求的直接证据；指纹概率只在当前 ModelTrace 参考库内比较，不能单独证明未知模型的真实身份。', 'The upstream model field is direct evidence for this request; fingerprint probabilities are closed-set comparisons within the bundled ModelTrace bank and are not proof of an unknown identity.'))}</small></section>`;
+  }
+function renderAttribution() {
+    if (!dialog?.open || mode !== 'attribution') return;
+    const s = attributionState;
+    const options = attributionTargetOptions();
+    if (s.targetId && !options.some(item => item.id === s.targetId)) options.push({ id: s.targetId, label: targetName(s.targetId) });
+    const locked = s.loading || s.catalogLoading;
+    const finished = (s.job?.items || []).filter(item => !['queued', 'checking', 'running'].includes(item.state)).length;
+    dialog.querySelector('.tools-body').innerHTML = `<p>${esc(tr('自动发送 3 次测试请求，会消耗账号额度并与当前任务共享限流。回答仅在本机分析，不会上传到 ModelTrace。', 'Sends three requests using account quota and sharing task rate limits. Responses are analyzed locally, not uploaded to ModelTrace.'))}</p>
+      <div class="tools-attribution-form">
+        <label><span>${esc(tr('测试账号', 'Account'))}</span><select name="attribution-target" ${locked ? 'disabled' : ''}>${options.map(item => `<option value="${esc(item.id)}" ${item.id === s.targetId ? 'selected' : ''}>${esc(item.label)}</option>`).join('')}</select></label>
+        <label><span>${esc(tr('测试模型', 'Model'))}</span><select name="attribution-model" ${locked ? 'disabled' : ''}>${s.models.length ? s.models.map(model => `<option value="${esc(model)}" ${model === s.model ? 'selected' : ''}>${esc(model)}</option>`).join('') : `<option>${esc(s.catalogLoading ? tr('正在读取模型…', 'Loading models…') : tr('暂无模型', 'No models'))}</option>`}</select></label>
+      </div>
+      <div class="tools-buttons"><button data-tools-action="attribution-run" ${locked || !s.model ? 'disabled' : ''}>${esc(s.loading ? tr('测试中…', 'Testing…') : tr('开始测试', 'Start test'))}</button>
+      ${s.loading ? `<button data-tools-action="attribution-stop">${esc(tr('停止测试', 'Stop test'))}</button>` : ''}
+      ${!s.models.length && !locked ? `<button data-tools-action="attribution-load-models">${esc(tr('重试读取模型', 'Retry loading models'))}</button>` : ''}
+      <button data-tools-action="attribution-back">${esc(tr('返回', 'Back'))}</button></div>
+      ${s.job ? `<p role="status">${esc(tr('已完成', 'Finished'))} ${finished}/3 · ${esc(status(s.job.status))}</p><progress max="3" value="${finished}" aria-label="${esc(tr('测试进度', 'Test progress'))}"></progress>` : ''}
+      ${s.error ? `<p class="tools-error-inline" role="alert">${esc(s.error)}</p>` : ''}
+      ${s.results ? renderAttributionResults(s.results, s.routing) : ''}
+      ${s.job ? `<details><summary>${esc(tr('请求详情', 'Request details'))}</summary>${s.job.items.map((item, i) => `<p>${i + 1}. ${esc(status(item.state))}${item.httpStatus ? ` · HTTP ${esc(item.httpStatus)}` : ''}${item.errorCode ? ` · ${esc(item.errorCode)}` : ''}${item.selectedAccountId ? ` · ${esc(targetName(item.selectedAccountId))}` : ''}</p>`).join('')}</details>` : ''}`;
+  }
+  async function attributionLoadModels() {
+    const s = attributionState, id = s.targetId, epoch = ++attributionCatalogEpoch;
+    s.catalogLoading = true; s.error = ''; s.models = []; renderAttribution();
+    try {
+      if (!id) throw new Error(tr('请先选择测试账号。', 'Select an account first.'));
+      const rows = await post('/api/model-diagnostics/catalog', { targetIds: [id] });
+      if (epoch !== attributionCatalogEpoch || s !== attributionState) return;
+      s.models = [...new Set((rows[0]?.models || []).map(item => item.id).filter(Boolean))];
+      if (!s.models.length) throw new Error(tr('模型目录读取失败，请重试；尚未消耗测试额度。', 'Could not read the model catalog. Retry; no test quota has been consumed.'));
+      if (!s.models.includes(s.model)) s.model = s.models[0];
+    } catch (error) { if (epoch === attributionCatalogEpoch) s.error = error.message; }
+    finally { if (epoch === attributionCatalogEpoch) { s.catalogLoading = false; renderAttribution(); } }
+  }
+  async function attributionPoll() {
+    const s = attributionState;
+    if (!s.job?.id || !s.loading) return;
+    clearTimeout(attributionTimer);
+    try {
+      s.job = await api(`/api/model-diagnostics/jobs/${encodeURIComponent(s.job.id)}`);
+      s.error = '';
+      if (s.job.status !== 'running') {
+        s.loading = false;
+        const complete = s.job.items.filter(item => ['available', 'model_mismatch'].includes(item.state));
+        if (!complete.length) {
+          s.error = tr('测试未完成：', 'Test did not complete: ') + s.job.items.map(item => status(item.state) + (item.httpStatus ? ` (HTTP ${item.httpStatus})` : '')).filter((v, i, a) => a.indexOf(v) === i).join(' / ');
+        } else {
+          const runtime = await loadAttributionRuntime();
+          const actualModels = complete.map(item => item.actualModel).filter(Boolean);
+          const counts = new Map(actualModels.map(model => [model, 0]));
+          actualModels.forEach(model => counts.set(model, (counts.get(model) || 0) + 1));
+          const actualModel = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+          s.routing = { actualModel, actualCount: counts.get(actualModel) || 0, requestedModel: s.model, total: s.job.items.length };
+          try {
+            s.results = runtime.analyzeGlobalOutputs(complete.map(item => ({ expected_count: item.expected_count, text: item.outputText || '' })), runtime.bank);
+          } catch {
+            s.error = tr('模型未返回足够的有效数字，无法归因；这不代表模型被替换。', 'Not enough valid numbers were returned. Attribution is unavailable; this does not prove model substitution.');
+          }
+          if (complete.length < 3 && s.results) s.error = tr('部分请求失败，结果仅基于成功返回的样本。', 'Some requests failed; results use only successful samples.');
+        }
+      }
+    } catch (error) {
+      s.error = error.message;
+      if (error.status === 404) s.loading = false;
+    } finally {
+      renderAttribution();
+      if (s.loading) attributionTimer = setTimeout(attributionPoll, 1500);
+    }
+  }
+  async function attributionRun() {
+    const s = attributionState;
+    if (s.loading || s.catalogLoading || !s.targetId || !s.model) return;
+    s.loading = true; s.stopRequested = false; s.results = null; s.job = null; s.error = ''; renderAttribution();
+    try {
+      const runtime = await loadAttributionRuntime();
+      if (s.stopRequested) { s.loading = false; renderAttribution(); return; }
+      s.job = await post('/api/model-attribution/run', { confirmed: true, targetId: s.targetId, model: s.model, challenges: runtime.generateChallenges(3) });
+      if (s.stopRequested) await post(`/api/model-diagnostics/jobs/${encodeURIComponent(s.job.id)}/cancel`);
+      void attributionPoll();
+    } catch (error) { s.loading = false; s.error = error.message; }
+    renderAttribution();
   }
   function renderCatalog() {
     const box = dialog.querySelector('.tools-catalog');
@@ -252,6 +363,25 @@
   }
   async function handle(action, button) {
     if (action === 'close') { dialog.close(); return; }
+    if (action === 'attribution') {
+      const chosen = catalog.find(entry => modelSelections.has(modelKey(entry)));
+      const initial = chosen?.targetId || selectedTargets()[0] || targetId || attributionTargetOptions()[0]?.id || '';
+      if (!attributionState.loading) {
+        attributionState = { runtime: attributionState.runtime, results: null, routing: {}, targetId: initial,
+          model: chosen?.model || '', models: [], catalogLoading: false, loading: false, error: '', job: null };
+      }
+      mode = 'attribution'; open(tr('归因测试', 'Attribution test')); renderAttribution();
+      if (!attributionState.loading) await attributionLoadModels();
+      return;
+    }
+    if (action === 'attribution-back') { mode = 'models'; open(tr('模型检测', 'Model diagnostics')); modelBody(targetId); const id = job?.id || storedJob(); if (id) void poll(id); return; }
+    if (action === 'attribution-load-models' && !attributionState.loading) { await attributionLoadModels(); return; }
+    if (action === 'attribution-run') { await attributionRun(); return; }
+    if (action === 'attribution-stop') {
+      const s = attributionState; s.stopRequested = true;
+      if (s.job?.id) await post(`/api/model-diagnostics/jobs/${encodeURIComponent(s.job.id)}/cancel`);
+      return;
+    }
     if (action === 'catalog') return readCatalog(button);
     if (action === 'cancel' && job?.id) {
       pollEpoch++; clearTimeout(timer); button.disabled = true;

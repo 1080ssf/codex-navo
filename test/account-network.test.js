@@ -19,6 +19,32 @@ const {
   unsupportedRegionFromNodeName,
 } = require('../lib/account-network');
 
+test('missing Navo runtime preserves a machine-wide proxy but removes stale Navo ports', () => {
+  const manager = new AccountNetworkManager({ runtimeRoot: fs.mkdtempSync(path.join(os.tmpdir(), 'navo-env-')) });
+  const globalProxy = {
+    HTTP_PROXY: 'http://proxy.example:7890',
+    HTTPS_PROXY: 'http://proxy.example:7890',
+    ALL_PROXY: 'socks5://proxy.example:7890',
+    NODE_USE_ENV_PROXY: '1',
+  };
+  assert.equal(manager.environmentForRuntime(null, globalProxy).HTTP_PROXY, globalProxy.HTTP_PROXY);
+  const stale = { ...globalProxy, HTTP_PROXY: 'http://127.0.0.1:18342', HTTPS_PROXY: 'http://127.0.0.1:18342' };
+  const cleaned = manager.environmentForRuntime(null, stale);
+  assert.equal(cleaned.HTTP_PROXY, undefined);
+  assert.equal(cleaned.HTTPS_PROXY, undefined);
+  assert.equal(cleaned.ALL_PROXY, globalProxy.ALL_PROXY);
+});
+
+test('HY2 preserves userpass and decodes query credentials exactly once', () => {
+  const proxy = proxyUriToMihomo('hy2://alice:p%2540ss@host.example:443?obfs=salamander&obfs-password=x%252Fy&sni=tls.example&pinSHA256=abcd', 'fixture');
+  assert.equal(proxy.password, 'alice:p%40ss');
+  assert.equal(proxy['obfs-password'], 'x%2Fy');
+  assert.equal(proxy.sni, 'tls.example');
+  assert.equal(proxy.fingerprint, 'abcd');
+  assert.equal(proxy['skip-cert-verify'], undefined);
+  assert.equal(proxyUriToMihomo('hysteria2://alice%3Ap%40ss@host.example', 'fixture').password, 'alice:p@ss');
+});
+
 test('descriptive proxy text and split SOCKS5 fields are accepted', () => {
   const described = parseProxyInput([
     'Proxy Type: SOCKS5',
@@ -314,6 +340,7 @@ test('direct, live proxy, dead proxy and per-account routes stay isolated', () =
     const manager = new AccountNetworkManager({ runtimeRoot });
     const base = { SAMPLE_ENV: 'kept' };
     assert.deepEqual(manager.environment('direct-account', base), base);
+    assert.deepEqual(manager.environment('direct-account', { ...base, HTTPS_PROXY: 'http://127.0.0.1:18342', ALL_PROXY: 'http://127.0.0.1:18342', NODE_USE_ENV_PROXY: '1' }), base);
     assert.deepEqual(manager.browserArgs('direct-account'), []);
 
     manager.accountRuntimes.set('account-a', { child: { exitCode: null, killed: false }, mixedPort: 17891 });

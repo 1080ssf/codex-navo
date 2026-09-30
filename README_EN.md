@@ -59,7 +59,7 @@ Manually changing authorization becomes disruptive as accounts, projects, proxy 
 | Account management | Isolated Chrome profiles and OAuth, standard/temporary/API groups, quota refresh, card/list views |
 | Start Codex | Proxy preflight, selective project and session loading, language choice, launch progress |
 | Usage | Today/yesterday/7-day/30-day/all-time input, cached input, output, cache rate, model calls, estimates |
-| API service | `/v1/models`, `/v1/responses`, `/v1/chat/completions`, account-pool failover |
+| API service | `/v1/models`, `/v1/responses`, `/v1/chat/completions`, `/v1/images/generations`, account-pool failover |
 | Network proxy | Subscriptions and single nodes, progressive testing, latency sorting, per-account/per-key routing |
 | Sessions | Project grouping, active/failed/all/archived views, archive, delete, failed-list cleanup |
 | Notifications | Windows, Feishu, DingTalk, Telegram, custom message text, imported local sounds |
@@ -105,6 +105,7 @@ Supported compatible endpoints:
 GET  /v1/models
 POST /v1/responses
 POST /v1/chat/completions
+POST /v1/images/generations
 ```
 
 ![API service and Navo API keys](docs/images/codex-navo-api-service.jpg)
@@ -157,7 +158,7 @@ Settings also contains Telegram, QQ, and GitHub community links.
 
 Appearance supports light, dark, and system modes, applied immediately and saved automatically. If no usable stable CLI is available, install an official stable build into a Navo-managed directory from **Codex CLI runtime**.
 
-Update routes are separate and fixed: Navo GitHub checks and downloads use the configured proxy; Codex official CDN checks and downloads use direct connections. Account and task routing stays unchanged. Large Codex packages support validated range downloads, resumable caching, and bounded retries; the installed version is still verified afterward. Windows manages networking for the Microsoft Store helper service.
+Updates compare direct and configured-proxy routes and select the faster available connection. Download probes sample the actual installer. System, account, and task routing stays unchanged. Large Codex packages support validated range downloads, resumable caching, and bounded retries; the installed version is still verified afterward. Windows manages networking for the Microsoft Store helper service.
 
 ![Language, updates, and community](docs/images/codex-navo-app-settings.jpg)
 

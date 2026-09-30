@@ -98,10 +98,10 @@ test('安装包内置经过固定摘要校验的 Mihomo 核心并传递给后台
   const manager = fs.readFileSync(path.join(root, 'lib', 'account-network.js'), 'utf8');
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
   assert.match(source, /CODEX_NAVO_BUNDLED_NETWORK_CORE/);
-  assert.match(source, /process\.resourcesPath, 'network-core', 'mihomo-v1\.19\.29\.exe'/);
+  assert.match(source, /process\.resourcesPath, 'network-core', 'mihomo-v1\.19\.31\.exe'/);
   assert.match(manager, /CORE_EXECUTABLE_SHA256/);
   assert.match(manager, /network\.core\.installed/);
-  assert.ok(manifest.build.extraResources.some((item) => item.to === 'network-core/mihomo-v1.19.29.exe'));
+  assert.ok(manifest.build.extraResources.some((item) => item.to === 'network-core/mihomo-v1.19.31.exe'));
 });
 
 test('任务进展与消息提醒模块已从应用中移除', () => {

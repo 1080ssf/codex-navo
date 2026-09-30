@@ -37,7 +37,7 @@ function harness() {
   const context = vm.createContext({
     ...updateOperation, ...codexPackage, ...require('../lib/update-download'), probeUpdatePackage, CancellationToken, URL, AbortSignal, AbortController, path,
     app: { isPackaged: true, getVersion: () => '1.2.146' }, nativeTheme: {},
-    autoUpdater, mainWindow: null, updaterConfigured: false, updateTimer: null,
+    autoUpdater, process: { arch: 'x64' }, mainWindow: null, updaterConfigured: false, updateTimer: null,
     navoDownloadToken: null, codexDownloadController: null, isQuitting: false,
     codexInstallInProgress: false,
     USER_DATA_ROOT: 'mock-user-data', UPDATE_START_DELAY_MS: 1, UPDATE_INTERVAL_MS: 1,

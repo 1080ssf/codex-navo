@@ -17,6 +17,7 @@ function harness(options={}) {
     apiServiceManager:{issueLaunchSecret:()=>({record:{modelAllowlist:['model']},secret:'fixture-key'}),accountPool:()=>({})},
     prepareApiKeyCodexHome:()=>({codexHomeDir:home,status:'launching'}),findCodexDesktop:()=>({executable:'fixture.exe',appUserModelId:options.noId?'':'OpenAI.Codex_test!App'}),
     apiKeyTaskEnvironment:async()=>env,apiCodexEnvironment:()=>env,prepareStableApiCodexProxy:async()=>18301,stableApiCodexProxyEnvironment:()=>env,
+    stageNativeProxy:(_view,_home,_env,persist)=>{events.push('native-proxy');persist();},
     warmCodexAppServer:async()=>{events.push('warm');return {elapsedMs:1};},findCodexCli:async()=> 'fixture-cli.exe',reserveLoopbackPort:async()=>12345,
     spawnDetached:async()=>{events.push('direct');if(options.directSuccess)return 42;throw Object.assign(new Error('spawn failed'),{code:options.code||'EPERM'});},
     activatePackagedApp:async(id,args,environment)=>{
@@ -37,21 +38,23 @@ function harness(options={}) {
 
 test('API permission failure takes system activation with proxy arguments and retains auth until a window is confirmed',async()=>{
   const h=harness();assert.equal(await h.launch(),42);
-  assert.ok(h.events.indexOf('warm')<h.events.indexOf('direct'));
+  assert.ok(h.events.indexOf('warm')<h.events.indexOf('activation'));
+  assert.ok(h.events.indexOf('native-proxy')<h.events.indexOf('warm'));
+  assert.ok(!h.events.includes('direct'));
   assert.ok(h.events.indexOf('activation')<h.events.indexOf('wait'));
   assert.ok(h.events.indexOf('wait')<h.events.indexOf('record:running'));
   assert.ok(!h.events.includes('restore'));assert.equal(h.events.filter(e=>e==='end').length,1);
   assert.match(h.writes[0],/HTTPS_PROXY = "http:\/\/127.0.0.1:18301"/);assert.doesNotMatch(h.writes[0],/fixture-key/);
 });
 test('direct API startup does not invoke activation or edit fallback proxy settings',async()=>{
-  const h=harness({directSuccess:true});assert.equal(await h.launch(),42);assert.ok(!h.events.includes('activation'));assert.equal(h.writes.length,0);
+  const h=harness({directSuccess:true,noId:true});assert.equal(await h.launch(),42);assert.ok(!h.events.includes('activation'));assert.equal(h.writes.length,0);
 });
 test('API activation errors and absent windows restore the original state only after checking for delayed startup',async()=>{
   const h=harness({activationFailure:true,noWindow:true});await assert.rejects(h.launch(),/activation failed/);
   assert.ok(h.events.indexOf('wait')<h.events.indexOf('restore'));assert.equal(h.events.filter(e=>e==='end').length,1);
 });
 test('API non-permission failures or missing app identifiers do not blindly activate an unrelated app',async()=>{
-  for(const options of [{code:'ENOENT'},{noId:true}]){const h=harness(options);await assert.rejects(h.launch(),/spawn failed/);assert.ok(!h.events.includes('activation'));assert.ok(h.events.includes('restore'));}
+  for(const options of [{code:'ENOENT',noId:true},{noId:true}]){const h=harness(options);await assert.rejects(h.launch(),/spawn failed/);assert.ok(!h.events.includes('activation'));assert.ok(h.events.includes('restore'));}
 });
 test('optional locale failure does not turn an activated API desktop into a failed launch',async()=>{
   const h=harness({localeFailure:true});assert.equal(await h.launch(),42);assert.ok(!h.events.includes('restore'));

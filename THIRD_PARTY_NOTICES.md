@@ -26,3 +26,13 @@ pinned, verified version in a subsequent Codex Navo application release.
 - Upstream project: https://github.com/MetaCubeX/mihomo
 - Release source: https://github.com/MetaCubeX/mihomo/releases
 - Upstream license: GNU General Public License v3.0
+
+## ModelTrace attribution fingerprint
+
+The local attribution test bundles the ModelTrace fingerprint implementation and
+its reference bank for offline analysis. It does not embed the upstream web page
+or send account responses to the ModelTrace service.
+
+- Upstream project: https://xqy2006.github.io/ModelTrace/
+- Bundled files: `public/modeltrace/fingerprint-core.js`, `public/modeltrace/challenge-browser.js`, and `public/modeltrace/data/unified_bank.json`
+- Upstream license: `public/modeltrace/LICENSE`

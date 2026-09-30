@@ -2,7 +2,7 @@
   "name": "codex-navo",
   "productName": "Codex Navo",
   "private": true,
-  "version": "1.2.153",
+  "version": "1.2.160",
   "description": "Open-source Windows workspace for Codex multi-account isolation, quota and token tracking, API pooling and failover, per-account proxies, sessions, notifications, and floating status.",
   "main": "desktop-src/main.js",
   "author": "1080ssf",
@@ -50,8 +50,8 @@
     ],
     "extraResources": [
       {
-        "from": ".cache/network-core/mihomo-v1.19.29.exe",
-        "to": "network-core/mihomo-v1.19.29.exe"
+        "from": ".cache/network-core/mihomo-v1.19.31.exe",
+        "to": "network-core/mihomo-v1.19.31.exe"
       }
     ],
     "win": {

@@ -23,7 +23,7 @@ test('唤醒设置默认关闭并限制非法输入', () => {
 
 test('缺少模型缓存时提供可选择的官方模型和推理强度', () => {
   const models = readModelCatalog(['Z:\\definitely-missing-model-cache.json']);
-  assert.equal(models[0].slug, 'gpt-5.6-sol');
+  assert.equal(models[0].slug, 'gpt-6.1-sol');
   assert.ok(models[0].reasoningEfforts.includes('low'));
   assert.ok(models[0].reasoningEfforts.includes('max'));
 });

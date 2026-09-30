@@ -7,6 +7,7 @@ const { codexUpstreamHeaders } = require('../lib/codex-upstream-headers');
 test('forwards Codex session and cache-routing headers without forwarding credentials', () => {
   const headers = codexUpstreamHeaders({
     authorization: 'Bearer local-secret',
+    'x-openai-actor-authorization': 'Bearer local-image-secret',
     host: '127.0.0.1:18300',
     'content-length': '123',
     'session-id': 'session-a',

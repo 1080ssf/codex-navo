@@ -55,6 +55,11 @@ test('gateway serves account-pool models with Navo key authentication', { timeou
   const noAccountsText = await noAccounts.text();
   assert.doesNotMatch(noAccountsText, /resolveProvider/);
   assert.equal(JSON.parse(noAccountsText).error.code, 'account_pool_unavailable');
+  const imageNoAccounts = await fetch(`http://127.0.0.1:${gatewayPort}/v1/images/generations`, {
+    method: 'POST', headers, body: JSON.stringify({ model: 'gpt-image-1', prompt: 'test image' }),
+  });
+  assert.equal(imageNoAccounts.status, 503, 'image requests should reach the account-pool router');
+  assert.equal(JSON.parse(await imageNoAccounts.text()).error.code, 'account_pool_unavailable');
   const largeHistory = await fetch(`http://127.0.0.1:${gatewayPort}/v1/responses`, {
     method: 'POST', headers, body: JSON.stringify({ model: 'gpt-5.6-sol', input: 'x'.repeat(3 * 1024 * 1024) }),
   });

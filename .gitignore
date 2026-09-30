@@ -18,6 +18,9 @@ profiles/
 
 # Runtime credentials, state, logs, and screenshots
 data/
+# Public ModelTrace reference data is a bundled runtime asset, not account data.
+!public/modeltrace/data/
+!public/modeltrace/data/unified_bank.json
 *.codexnavo
 
 # Temporary and editor files

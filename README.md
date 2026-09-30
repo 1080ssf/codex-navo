@@ -61,7 +61,7 @@
 | 账号管理 | 独立 Chrome、OAuth 授权、普通/临时/API 分类、额度刷新、卡片/列表视图 |
 | 启动 Codex | 代理预检、项目与会话按需加载、语言选择、启动进度提示 |
 | 用量统计 | 今日/昨日/7 天/30 天/全部，输入、缓存、输出、缓存率、模型调用与估值 |
-| API 服务 | `/v1/models`、`/v1/responses`、`/v1/chat/completions`、账号池故障切换 |
+| API 服务 | `/v1/models`、`/v1/responses`、`/v1/chat/completions`、`/v1/images/generations`、账号池故障切换 |
 | 网络代理 | 订阅与单节点、逐节点检测、随检随显示、延迟排序、账号/Key 独立路由 |
 | 会话管理 | 项目分组、进行中/失败/全部/已归档、归档、删除与失败列表清理 |
 | 通知提醒 | Windows 通知、飞书、钉钉、Telegram、自定义文案、本地提示音导入 |
@@ -112,6 +112,7 @@ http://127.0.0.1:18300/v1
 GET  /v1/models
 POST /v1/responses
 POST /v1/chat/completions
+POST /v1/images/generations
 ```
 
 ![API 服务与 Navo API Key](docs/images/codex-navo-api-service.jpg)
@@ -172,7 +173,7 @@ Codex Navo 内置 Mihomo 网络核心，可添加订阅、多节点配置或单�
 
 外观支持浅色、深色和跟随系统，选择后立即生效并自动保存。没有可用的稳定版 CLI 时，可在“Codex CLI 运行依赖”中直接安装官方稳定版本到 Navo 独立管理的目录。
 
-更新线路固定分开：Navo 的 GitHub 检查与下载走已配置代理，Codex 官方 CDN 检查与下载走直连，不改动账号或任务代理。Codex 大包支持受校验的分段下载、缓存续传和有限重试；安装完成后仍会核对实际版本。微软商店辅助服务的联网由 Windows 管理。
+更新前自动比较直连与已配置代理，选择本次更快的可用线路；下载阶段使用实际安装包的小段数据测速，不改动系统、账号或任务代理。Codex 大包支持受校验的分段下载、缓存续传和有限重试；安装完成后仍会核对实际版本。微软商店辅助服务的联网由 Windows 管理。
 
 ![语言、更新与社区入口](docs/images/codex-navo-app-settings.jpg)
 

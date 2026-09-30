@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const {chatgptAuth,canSaveChatgptAuth,chatgptEnvironment,chatgptConfig}=require('../lib/codex-launch-auth');
+const {chatgptAuth,canSaveChatgptAuth,chatgptEnvironment,chatgptConfig,normalizeWindowsSandbox}=require('../lib/codex-launch-auth');
 const {prepareLaunchView,restoreLaunchView}=require('../lib/codex-launch-view');
 const auth=id=>({auth_mode:'api',OPENAI_API_KEY:'stale-key',tokens:{account_id:id,access_token:'a'.repeat(30),refresh_token:'r'.repeat(30)}});
 
@@ -12,6 +12,13 @@ test('regular launch rejects API-only credentials and strips stale API-key login
   const original=auth('account-a');const normalized=chatgptAuth(original);
   assert.equal(normalized.auth_mode,'chatgpt');assert.equal(normalized.OPENAI_API_KEY,null);
   assert.equal(original.OPENAI_API_KEY,'stale-key');assert.equal(normalized.tokens.account_id,'account-a');
+});
+
+test('launch-scoped config normalizes elevated Windows sandbox without changing user config', () => {
+  const source = '[windows]\nsandbox = "elevated"\n[other]\nvalue = 1\n';
+  assert.match(normalizeWindowsSandbox(source), /sandbox = "unelevated"/);
+  assert.equal(source, '[windows]\nsandbox = "elevated"\n[other]\nvalue = 1\n');
+  assert.match(chatgptConfig(source), /sandbox = "unelevated"/);
 });
 
 test('regular credential writeback refuses API logins and another ChatGPT account',()=>{

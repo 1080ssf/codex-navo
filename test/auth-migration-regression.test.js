@@ -52,3 +52,27 @@ test('web verification failure retains imported profile and does not claim a ver
   assert.equal(saved.length, 1);
   assert.deepEqual(deleted, []);
 });
+
+test('authorization package import applies the selected network route', async () => {
+  const start = source.indexOf('async function importAuthorizationPackage(');
+  const end = source.indexOf('\nconst MANAGED_CODEX_EXIT_GRACE_MS', start);
+  const assigned = [];
+  const saved = [];
+  const fn = vm.runInNewContext(`(${source.slice(start, end)})`, {
+    path, crypto: { randomBytes: () => Buffer.from('route') }, accounts: [], settings: { mockLaunch: true },
+    readAuthPackage: () => ({ files: { 'auth.json': {} }, account: { label: '带线路账号' } }),
+    authIdentity: () => 'route-fixture', existingAuthIdentity: () => null, uniqueImportedLabel: label => label,
+    accountPaths: () => ({ browserDir: 'browser', codexDir: 'codex', codexHomeDir: 'codex' }),
+    ensureCodexProfileConfig: () => {}, writeJsonAtomic: () => {}, saveAccounts: value => saved.push(value),
+    networkManager: { assign: (accountId, value) => assigned.push({ accountId, value }) },
+    audit: () => {}, isWithin: () => true, BROWSER_PROFILES_DIR: 'profiles', CODEX_PROFILES_DIR: 'profiles',
+    fs: { rmSync: () => {} },
+  });
+  const network = { mode: 'proxy', sourceId: 'source-fixture', nodeName: 'node-fixture' };
+  const result = await fn({}, 'fixture', network);
+  assert.equal(result.account.label, '带线路账号');
+  assert.equal(assigned.length, 1);
+  assert.equal(assigned[0].accountId, result.account.id);
+  assert.deepEqual(assigned[0].value, network);
+  assert.equal(saved.length, 1);
+});

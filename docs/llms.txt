@@ -18,7 +18,7 @@ Codex Navo provides isolated Chrome profiles and Codex OAuth authorization for s
 
 - Multi-account isolation and one-click Codex authorization switching on Windows
 - Quota, input, cached input, output, cache-rate, model-call, and token-estimate monitoring
-- OpenAI-compatible `/v1/models`, `/v1/responses`, and `/v1/chat/completions` endpoints
+- OpenAI-compatible `/v1/models`, `/v1/responses`, `/v1/chat/completions`, and `/v1/images/generations` endpoints
 - Ordered API account pools with cooldown and automatic failover for eligible failures
 - Per-account and per-API-key proxy routing with subscription and single-node support
 - Local Codex project, session, archive, failure, and task-status management

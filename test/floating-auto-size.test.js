@@ -6,8 +6,9 @@ const vm = require('node:vm');
 const { FLOATING_MAX_HEIGHT, fittedFloatingBounds } = require('../lib/floating-window-size');
 
 const root = path.join(__dirname, '..');
-const mainSource = fs.readFileSync(path.join(root, 'desktop-src/main.js'), 'utf8');
-const clientSource = fs.readFileSync(path.join(root, 'public/floating.js'), 'utf8');
+// Source slices must work after Windows Git checkouts convert LF to CRLF.
+const mainSource = fs.readFileSync(path.join(root, 'desktop-src/main.js'), 'utf8').replace(/\r\n/g, '\n');
+const clientSource = fs.readFileSync(path.join(root, 'public/floating.js'), 'utf8').replace(/\r\n/g, '\n');
 function sourceFunction(source, name) {
   const start = source.indexOf(`function ${name}(`);
   const end = source.indexOf('\n}', start);

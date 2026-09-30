@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { CodexUsageTracker, localDateKey } = require('../lib/codex-usage');
+const { CodexUsageTracker, localDateKey, PRICING_REVISION } = require('../lib/codex-usage');
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'navo-repricing-'));
@@ -49,7 +49,7 @@ test('repricing repairs amounts without changing counts and preserves a backup',
   assert.equal(usage.totalTokens, 101000);
   assert.equal(usage.pricedRequests, 1);
   assert.equal(usage.unpricedRequests, 0);
-  assert.ok(fs.existsSync(`${tracker.storeFile}.before-pricing-2026-09-06.bak`));
+  assert.ok(fs.existsSync(`${tracker.storeFile}.before-pricing-${PRICING_REVISION}.bak`));
   assert.equal(await tracker.reconcileHistoricalCosts(), null);
 });
 

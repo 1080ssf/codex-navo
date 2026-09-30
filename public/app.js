@@ -1,5 +1,7 @@
-const state = { accounts: [], csrfToken: '', timer: null, sessionTimer: null, notificationTimer: null, notificationPolling: false, launchProgressTimer: null, launchProgress: null, launchProgressDismissed: false, launchProgressStartedAt: '', launchProgressCompleteKey: '', wakeSettings: {}, wakeModelOptions: [], networkSettings: { core: {}, sources: [], assignments: {} }, apiService: { config: {}, providers: [], keys: [], baseUrl: '' }, sessions: { connected: false, tasks: [], counts: {} }, sessionFilter: 'all', sessionCollapsed: new Set(), sessionAllSeenGroups: new Set(), notificationSettings: {}, notificationEventId: 0, networkSourceId: '', accountNetworkId: '', usage: null, importPackageText: '', accountImportPackageText: '', relayImportPackageText: '', protocolDialogAccountId: '', protocolDialogPromptKind: '', localeCatalog: null };
+const state = { accounts: [], csrfToken: '', timer: null, sessionTimer: null, notificationTimer: null, notificationPolling: false, launchProgressTimer: null, launchProgress: null, launchProgressDismissed: false, launchProgressStartedAt: '', launchProgressCompleteKey: '', wakeSettings: {}, wakeModelOptions: [], networkSettings: { core: {}, sources: [], assignments: {} }, apiService: { config: {}, providers: [], keys: [], baseUrl: '' }, sessions: { connected: false, tasks: [], counts: {} }, sessionFilter: 'all', sessionCollapsed: new Set(), sessionAllSeenGroups: new Set(), notificationSettings: {}, notificationEventId: 0, networkSourceId: '', accountNetworkId: '', usage: null, importPackageText: '', accountImportPackageText: '', relayImportPackageText: '', protocolDialogAccountId: '', protocolDialogPromptKind: '', localeCatalog: null, selectedAccountIds: new Set(), accountNetworkBatchIds: [] };
 let toolsStatusTimer = null;
+state.exportAccountIds = new Set();
+state.exportingPackage = false;
 const elements = {
   accounts: document.querySelector('#accounts'),
   summary: document.querySelector('#account-summary'),
@@ -12,6 +14,7 @@ const elements = {
   accountImportPanel: document.querySelector('#account-import-panel'),
   accountImportPackageFile: document.querySelector('#account-import-package-file'),
   accountImportFileName: document.querySelector('#account-import-file-name'),
+  accountImportRoute: document.querySelector('#account-import-route'),
   accountSubmit: document.querySelector('#account-submit'),
   accountCreateRoute: document.querySelector('#account-create-route'),
   protocolProgress: document.querySelector('#protocol-dialog-progress'),
@@ -44,6 +47,7 @@ const elements = {
   sortPopover: document.querySelector('#sort-popover'),
   viewSwitcher: document.querySelector('#view-switcher'),
   floatingWindowButton: document.querySelector('#floating-window-button'),
+  batchAccountNetwork: document.querySelector('#batch-account-network'),
   relayImportDialog: document.querySelector('#relay-import-dialog'),
   relayImportForm: document.querySelector('#relay-import-form'),
   relayImportClose: document.querySelector('#relay-import-close'),
@@ -82,10 +86,12 @@ const elements = {
   checkAllHealth: document.querySelector('#check-all-health'),
   toolsStatus: document.querySelector('#tools-status'),
   exportAccount: document.querySelector('#export-account'),
+  exportSearch: document.querySelector('#export-account-search'),
+  exportSelectAll: document.querySelector('#export-select-all'),
+  exportSelectNone: document.querySelector('#export-select-none'),
+  exportFormat: document.querySelector('#export-format'),
   exportAuthPackage: document.querySelector('#export-auth-package'),
-  importPackageFile: document.querySelector('#import-package-file'),
-  importFileName: document.querySelector('#import-file-name'),
-  importAuthPackage: document.querySelector('#import-auth-package'),
+  exportSelectionCount: document.querySelector('#export-selection-count'),
   updateChip: document.querySelector('#update-chip'),
   updateDialog: document.querySelector('#update-dialog'),
   updateDialogCopy: document.querySelector('#update-dialog-copy'),
@@ -172,6 +178,22 @@ window.addEventListener('storage', (event) => {
   renderSettingsPicker(elements.appThemeSelect, elements.appThemeMenu, state.appTheme);
 });
 const englishUi = new Map([
+  ['导入后网络线路', 'Import route'], ['导入数据包', 'Import package'],
+  ['可多选账号合并为一个 Navo、Sub2API 或 CPA 包', 'Merge multiple accounts into one Navo, Sub2API, or CPA package'],
+  ['批量配置网络', 'Batch network settings'], ['数据包', 'Package'],
+  ['为已选择的 1 个账号统一设置网络线路。', 'Apply one network route to 1 selected account.'],
+  ['系统会按文件内容自动识别格式；.codexnavo 恢复 Codex 授权，第三方包创建临时账号。', 'The format is detected automatically; .codexnavo restores Codex authorization and third-party packages create temporary accounts.'],
+  ['系统会按文件内容自动识别格式；.codexnavo 恢复 Codex 授权，第三方包创建临时账号。旧版单个 .codexnavo 文件继续兼容。', 'The format is detected automatically; .codexnavo restores Codex authorization and third-party packages create temporary accounts. Legacy single .codexnavo files remain supported.'],
+  ['选择 .codexnavo、JSON 或 CPA ZIP 文件', 'Choose a .codexnavo, JSON, or CPA ZIP file'],
+  ['选择代理后，本次导入的所有账号统一使用该线路，之后仍可批量修改。', 'When a proxy is selected, all imported accounts use it and can be changed in batch later.'],
+  ['选择账号（按 Ctrl / Shift 多选）', 'Select accounts (use Ctrl / Shift for multiple)'],
+  ['选择账号进行批量操作', 'Select this account for batch actions'], ['已选择 0 个账号', '0 accounts selected'], ['已选择 1 个账号', '1 account selected'],
+  ['支持 .codexnavo、Sub2API、CPA ZIP、Cockpit、9router、AxonHub 等格式', 'Supports .codexnavo, Sub2API, CPA ZIP, Cockpit, 9router, AxonHub, and more'],
+  ['直连（所有导入账号）', 'Direct (all imported accounts)'], ['Codex Navo（合并 .codexnavo，含网页会话）', 'Codex Navo (merged .codexnavo with web sessions)'], ['CPA / CLIProxyAPI（合并 JSON）', 'CPA / CLIProxyAPI (merged JSON)'], ['Sub2API / toSub2（合并 JSON）', 'Sub2API / toSub2 (merged JSON)'],
+  ['已导入 1 个临时账号，网络线路：1', 'Imported 1 temporary account; route: 1'], ['已导入 1 个授权账号', 'Imported 1 authorized account'],
+  ['已合并生成 1 个账号的授权包（包含可导出的网页会话）。', 'Merged authorization package created for 1 account (with exportable web sessions).'],
+  ['已合并生成 1 迁移包（1 个账号，仅包含 Codex 凭证）。', 'Merged migration package created for 1 account (Codex credentials only).'],
+  ['已为 1 个账号统一设置1', 'Applied route 1 to 1 account'],
   ['跟随系统 · 当前为深色模式。', 'Following system · Currently dark mode.'],
   ['跟随系统 · 当前为浅色模式。', 'Following system · Currently light mode.'],
   ['已使用深色模式，自动保存。', 'Dark mode applied and saved.'],
@@ -237,7 +259,8 @@ const englishUi = new Map([
   ['检查账号授权状态，或通过授权包迁移 Codex 与可用的网页会话。', 'Check account authorization or migrate Codex and available web sessions with an authorization package.'],
   ['未完成验证', 'Verification incomplete'],
   ['账号健康', 'Account health'], ['检查全部', 'Check all'], ['账号授权包', 'Account authorization package'], ['导出授权', 'Export authorization'],
-  ['生成单个 .codexnavo 账号授权包', 'Create one .codexnavo account package'], ['选择账号', 'Select account'], ['生成授权包', 'Create package'],
+  ['生成单个 .codexnavo 账号授权包', 'Create one .codexnavo account package'], ['选择账号', 'Select account'], ['导出格式', 'Export format'], ['可迁移为 Navo、Sub2API 或 CPA 格式', 'Export for Navo, Sub2API, or CPA'], ['Codex Navo（单个 .codexnavo，含网页会话）', 'Codex Navo (.codexnavo with web session)'], ['生成授权包', 'Create package'],
+  ['已生成 1 迁移包（仅包含 Codex 凭证，不包含网页会话）。', 'Migration package created (Codex credentials only; web session not included).'],
   ['导入授权', 'Import authorization'], ['验证通过后创建新的 Codex 账号环境', 'Create a new Codex account environment after validation'], ['授权包', 'Authorization package'],
   ['选择 .codexnavo 文件', 'Choose a .codexnavo file'], ['验证并导入', 'Validate and import'],
   ['实时读取本机 Codex 会话，查看运行、等待处理和最近完成的任务。', 'Read local Codex sessions in real time and review active, waiting, and recently completed tasks.'],
@@ -247,7 +270,7 @@ const englishUi = new Map([
   ['把已授权的 Codex 账号池转换为 OpenAI 兼容 API，并使用 Navo API Key 管理访问权限。', 'Expose the authorized Codex account pool as an OpenAI-compatible API and manage access with Navo API keys.'],
   ['API 文档', 'API documentation'], ['兼容 OpenAI 调用格式，使用创建的 Navo API Key 访问。', 'OpenAI-compatible request format using a generated Navo API key.'],
   ['复制', 'Copy'], ['复制格式', 'Copy format'], ['读取当前 Key 可访问的模型', 'Models available to the current key'], ['Codex 与 Responses 客户端调用', 'Codex and Responses clients'],
-  ['兼容 OpenAI Chat Completions', 'OpenAI Chat Completions compatible'], ['请求示例', 'Request example'], ['复制示例', 'Copy example'],
+  ['兼容 OpenAI Chat Completions', 'OpenAI Chat Completions compatible'], ['兼容 gpt-image 图片生成', 'gpt-image image generation compatible'], ['请求示例', 'Request example'], ['复制示例', 'Copy example'],
   ['创建供客户端使用的 Bearer Key，并配置权限与额度。', 'Create Bearer keys for clients and configure permissions and limits.'],
   ['设置自动唤醒策略、模型、推理强度与发送内容。', 'Configure automatic wake schedules, models, reasoning effort, and prompts.'],
   ['默认关闭；开启后按下方策略执行', 'Off by default; when enabled, uses the schedule below'], ['仅手动唤醒', 'Manual only'], ['每天唤醒一次', 'Once daily'],
@@ -256,6 +279,12 @@ const englishUi = new Map([
   ['应用与 Codex 默认语言', 'App and Codex default language'], ['保存语言', 'Save language'], ['添加账号环境', 'Add account environment'],
   ['邮箱提示', 'Email hint'], ['登录方式', 'Sign-in method'], ['添加方式', 'Add method'], ['登录并授权', 'Sign in and authorize'], ['推荐', 'Recommended'], ['导入已有账号', 'Import existing account'],
   ['创建 API', 'Create API'], ['导入第三方数据包', 'Import third-party package'], ['临时账号', 'Temporary accounts'], ['临时', 'Temporary'],
+  ['登录并授权，或导入已有数据包。创建 API Key 请前往 API 服务。', 'Sign in and authorize, or import a data package. Create API keys in API Service.'],
+  ['勾选账号，合并导出为一个数据包', 'Select accounts to export together in one package'],
+  ['搜索账号名称或邮箱', 'Search account name or email'], ['选择导出账号', 'Accounts to export'],
+  ['全选结果', 'Select results'], ['清空选择', 'Clear selection'], ['没有匹配的已授权账号', 'No matching authorized accounts'],
+  ['Navo 格式包含可迁移的网页会话；Sub2API 和 CPA 格式仅包含 Codex 凭证。', 'Navo includes transferable web sessions. Sub2API and CPA include Codex credentials only.'],
+  ['数据包包含敏感凭证，请妥善保管，不要公开分享。', 'Packages contain sensitive credentials. Keep them safe and do not share them publicly.'],
   ['创建与 API 服务页面相同的 Navo API Key，并一次性显示完整 Key', 'Create the same Navo API key as the API Service page and show the full key once'],
   ['支持 Sub2API、CLIProxyAPI、Cockpit、9router、AxonHub 等 JSON 数据包', 'Supports Sub2API, CLIProxyAPI, Cockpit, 9router, AxonHub, and other JSON packages'],
   ['网络线路', 'Network route'], ['浏览器', 'Browser'], ['正在登录并授权', 'Signing in and authorizing'], ['重新授权', 'Authorize again'], ['完成', 'Done'],
@@ -1474,30 +1503,10 @@ function showAccountDialogError(message) {
   elements.accountDialogStatus.hidden = false;
 }
 
-async function readAuthorizationPackageFile(file, { onName, onClear }) {
-  if (!file) {
-    onName('选择 .codexnavo 文件');
-    return '';
-  }
-  onName(file.name);
-  if (file.size > 768 * 1024) {
-    onClear();
-    onName('文件过大，请选择有效授权包');
-    throw new Error('授权包文件过大');
-  }
-  try {
-    return await file.text();
-  } catch {
-    throw new Error('无法读取授权包文件');
-  }
-}
-
 function syncAccountLoginMethod() {
   const method = String(new FormData(elements.form).get('loginMethod') || 'official');
-  const importing = method === 'import';
-  const creatingApi = method === 'create-api';
-  const importingRelay = method === 'relay-import';
-  const accountFlow = method === 'official' || importing;
+  const importing = method === 'package-import';
+  const accountFlow = method === 'official';
   const labelInput = elements.form.elements.label;
   const emailInput = elements.form.elements.emailHint;
   elements.accountImportPanel.hidden = !importing;
@@ -1509,13 +1518,9 @@ function syncAccountLoginMethod() {
   emailInput.disabled = method !== 'official';
   emailInput.placeholder = '例如：de***@company.com';
   elements.accountDialogCopy.textContent = importing
-    ? '选择 .codexnavo 授权包，恢复已保存的 Codex 授权和网页会话。'
-    : creatingApi
-      ? '创建一个本机 Navo API Key。完整 Key 只显示一次，请在关闭前复制保存。'
-      : importingRelay
-        ? '导入第三方账号数据包并加入“临时账号”，仅用于本机 API 反代与轮转。'
-        : '创建独立账号环境，并在 Chrome 中完成官方登录与 Codex OAuth。';
-  elements.accountSubmit.textContent = importing ? '导入账号' : creatingApi ? '创建 API' : importingRelay ? '选择数据包' : '登录并授权';
+    ? '选择数据包，系统会自动识别 .codexnavo、Sub2API、CPA ZIP 等格式。第三方凭证会创建临时账号。'
+    : '创建独立账号环境，并在 Chrome 中完成官方登录与 Codex OAuth。';
+  elements.accountSubmit.textContent = importing ? '导入数据包' : '登录并授权';
 }
 
 function renderProtocolPrompt(login, action = 'protocol-input') {
@@ -1855,16 +1860,38 @@ function renderHealthCenter() {
     }).join('')
     : '<div class="health-empty">账号池为空，暂无可检查的授权。</div>';
 
-  const selected = elements.exportAccount.value;
-  elements.exportAccount.replaceChildren();
-  for (const account of state.accounts.filter((item) => item.codexInitialized)) {
-    const option = document.createElement('option');
-    option.value = account.id;
-    option.textContent = account.label;
-    elements.exportAccount.append(option);
+  renderExportAccounts();
+}
+
+function filteredExportAccounts() {
+  const query = elements.exportSearch.value.trim().toLowerCase();
+  return state.accounts.filter((account) => account.codexInitialized
+    && `${account.label || ''} ${account.emailHint || ''}`.toLowerCase().includes(query));
+}
+
+function updateExportSelection() {
+  const eligible = new Set(state.accounts.filter((account) => account.codexInitialized).map((account) => account.id));
+  for (const id of state.exportAccountIds) if (!eligible.has(id)) state.exportAccountIds.delete(id);
+  const count = state.exportAccountIds.size;
+  elements.exportSelectionCount.textContent = tr(`已选择 ${count} 个账号`, `${count} accounts selected`);
+  elements.exportAuthPackage.disabled = count === 0 || state.exportingPackage;
+  elements.exportSelectNone.disabled = count === 0;
+}
+
+function renderExportAccounts() {
+  updateExportSelection();
+  const accounts = filteredExportAccounts();
+  elements.exportSelectAll.disabled = !accounts.length;
+  const focusedId = elements.exportAccount.contains(document.activeElement) ? document.activeElement.value : null;
+  const scrollTop = elements.exportAccount.scrollTop;
+  const markup = accounts.length ? accounts.map((account) =>
+    `<label class="package-account-row"><input type="checkbox" value="${escapeHtml(account.id)}"${state.exportAccountIds.has(account.id) ? ' checked' : ''}><span title="${escapeHtml(account.label || account.emailHint || account.id)}">${escapeHtml(account.label || account.emailHint || account.id)}</span><small>${tr(account.accountKind === 'relay' ? '临时' : '普通账号', account.accountKind === 'relay' ? 'Temporary' : 'Regular')}</small></label>`
+  ).join('') : `<p class="package-account-empty">${tr('没有匹配的已授权账号', 'No matching authorized accounts')}</p>`;
+  if (elements.exportAccount.innerHTML !== markup) {
+    elements.exportAccount.innerHTML = markup;
+    if (focusedId) [...elements.exportAccount.querySelectorAll('input')].find((input) => input.value === focusedId)?.focus({ preventScroll: true });
+    elements.exportAccount.scrollTop = scrollTop;
   }
-  if ([...elements.exportAccount.options].some((option) => option.value === selected)) elements.exportAccount.value = selected;
-  elements.exportAuthPackage.disabled = !elements.exportAccount.value;
 }
 
 function downloadJsonFile(fileName, value) {
@@ -1941,7 +1968,7 @@ function renderApiService() {
   const service = state.apiService || { providers: [], keys: [] };
   const accountPool = (service.providers || []).find((provider) => provider.type === 'navo-pool');
   const baseUrl = service.baseUrl || 'http://127.0.0.1:18300/v1';
-  const defaultModel = accountPool?.defaultModel || accountPool?.models?.[0] || 'gpt-5.6-codex';
+  const defaultModel = accountPool?.defaultModel || accountPool?.models?.[0] || 'gpt-6.1-sol';
   elements.apiDocBaseUrl.textContent = baseUrl;
   elements.apiDocExample.textContent = `curl ${baseUrl}/responses \
   -H "Authorization: Bearer sk-navo-REPLACE_ME" \
@@ -2107,7 +2134,7 @@ function render() {
     return `<article class="account-card ${status}${relayOnly ? ' relay-account-card' : ''}${account.codexActive ? ' current' : ''}${usageExpanded ? ' usage-expanded' : ''}" data-id="${account.id}" aria-expanded="${usageExpanded}" title="${usageTitle}">
       <div class="account-overview">
         <div class="account-identity">
-          <div class="identity-title"><h3>${escapeHtml(account.label)}</h3></div>
+          <div class="identity-title"><label class="account-select-wrap" title="选择账号进行批量操作"><input class="account-select-checkbox" type="checkbox" data-account-select="${account.id}"${(state.selectedAccountIds || new Set()).has(account.id) ? ' checked' : ''}><span></span></label><h3>${escapeHtml(account.label)}</h3></div>
           ${(planBadge || expiryBadge || resetBadge || balanceBadge || sessionBadge || healthBadge || networkBadge) ? `<div class="identity-badges">${planBadge}${expiryBadge}${resetBadge}${balanceBadge}${sessionBadge}${healthBadge}<span class="identity-network-row">${networkBadge}</span></div>` : ''}
           ${secondaryIdentity}
         </div>
@@ -2158,6 +2185,7 @@ async function refresh(options = {}) {
     if (state.usageRange !== 'today') state.usage = await api(`/api/usage?range=${encodeURIComponent(state.usageRange)}`);
     if (background && (document.hidden || editingSurfaceActive())) return;
     render();
+    if (elements.appPages.some(page => page.dataset.appPage === 'authorization' && !page.hidden)) renderHealthCenter();
     const completed = state.accounts.find((account) => pendingAccountIds.has(account.id) && account.codexInitialized);
     if (completed) {
       showToast(completed.webLoginComplete
@@ -2179,6 +2207,14 @@ elements.accounts.addEventListener('keydown', (event) => {
 });
 
 elements.accounts.addEventListener('click', async (event) => {
+  const selection = event.target.closest('[data-account-select]');
+  if (selection) {
+    event.stopPropagation();
+    const id = selection.dataset.accountSelect;
+    if (selection.checked) state.selectedAccountIds.add(id); else state.selectedAccountIds.delete(id);
+    if (elements.batchAccountNetwork) elements.batchAccountNetwork.disabled = state.selectedAccountIds.size === 0;
+    return;
+  }
   const groupButton = event.target.closest('[data-account-group]');
   if (groupButton) {
     const kind = groupButton.dataset.accountGroup;
@@ -2324,11 +2360,16 @@ document.querySelector('#add-account').addEventListener('click', () => {
   elements.accountDialogStatus.textContent = '';
   state.accountImportPackageText = '';
   elements.accountImportPackageFile.value = '';
-  elements.accountImportFileName.textContent = '选择 .codexnavo 文件';
+  elements.accountImportFileName.textContent = '选择 .codexnavo、JSON 或 CPA ZIP 文件';
   populateAccountRouteSelect(elements.accountCreateRoute);
+  if (elements.accountImportRoute) populateAccountRouteSelect(elements.accountImportRoute);
   syncAccountLoginMethod();
   elements.dialog.showModal();
-  requestAnimationFrame(() => elements.form.querySelector('input[name="loginMethod"]:checked')?.focus());
+  // Do not move focus after showModal().  Electron/Chromium can deliver a
+  // fast click on the first text field in the same frame as this callback;
+  // moving focus to the radio button then makes the field appear clickable
+  // while keystrokes go to the radio group.  Native dialog focus handling is
+  // sufficient and leaves the user's first click authoritative.
 });
 
 elements.protocolProgressInput.addEventListener('keydown', (event) => {
@@ -2462,33 +2503,44 @@ elements.checkAllHealth.addEventListener('click', async () => {
   }
 });
 
+elements.exportAccount.addEventListener('change', (event) => {
+  if (!event.target.matches('input[type="checkbox"]')) return;
+  if (event.target.checked) state.exportAccountIds.add(event.target.value);
+  else state.exportAccountIds.delete(event.target.value);
+  updateExportSelection();
+});
+elements.exportSearch.addEventListener('input', renderExportAccounts);
+elements.exportSelectAll.addEventListener('click', () => {
+  for (const account of filteredExportAccounts()) state.exportAccountIds.add(account.id);
+  renderExportAccounts();
+});
+elements.exportSelectNone.addEventListener('click', () => {
+  state.exportAccountIds.clear();
+  renderExportAccounts();
+});
+
 elements.exportAuthPackage.addEventListener('click', async () => {
+  if (state.exportingPackage) return;
+  updateExportSelection();
+  state.exportingPackage = true;
   elements.exportAuthPackage.disabled = true;
   try {
-    const result = await api(`/api/accounts/${elements.exportAccount.value}/export-auth`, {
-      method: 'POST', body: JSON.stringify({ operator: operator() }),
+    const accountIds = [...state.exportAccountIds];
+    if (!accountIds.length) throw new Error('请至少选择一个已授权账号');
+    const result = await api('/api/accounts/export-auth', {
+      method: 'POST', body: JSON.stringify({ operator: operator(), accountIds, format: elements.exportFormat?.value || 'codexnavo' }),
     });
     downloadJsonFile(result.fileName, result.package);
-    showToolsStatus(result.webSessionIncluded
-      ? '双端授权包已生成：包含 Codex 授权和网页会话。'
-      : '授权包已生成，但该账号没有可导出的有效网页会话，因此仅包含 Codex 授权。');
+    showToolsStatus(result.format && result.format !== 'codexnavo'
+      ? `已合并生成 ${result.format === 'sub2api' ? 'Sub2API / toSub2' : 'CPA / CLIProxyAPI'} 迁移包（${result.count || accountIds.length} 个账号，仅包含 Codex 凭证）。`
+      : result.webSessionIncluded
+        ? `已合并生成 ${result.count || accountIds.length} 个账号的授权包（包含可导出的网页会话）。`
+        : '授权包已生成，但该账号没有可导出的有效网页会话，因此仅包含 Codex 授权。');
   } catch (error) {
     showToolsStatus(error.message, true);
   } finally {
-    elements.exportAuthPackage.disabled = !elements.exportAccount.value;
-  }
-});
-
-elements.importPackageFile.addEventListener('change', async () => {
-  const file = elements.importPackageFile.files?.[0];
-  state.importPackageText = '';
-  try {
-    state.importPackageText = await readAuthorizationPackageFile(file, {
-      onName: (name) => { elements.importFileName.textContent = name; },
-      onClear: () => { elements.importPackageFile.value = ''; },
-    });
-  } catch (error) {
-    showToolsStatus(error.message, true);
+    state.exportingPackage = false;
+    updateExportSelection();
   }
 });
 
@@ -2496,39 +2548,19 @@ elements.accountImportPackageFile.addEventListener('change', async () => {
   const file = elements.accountImportPackageFile.files?.[0];
   state.accountImportPackageText = '';
   try {
-    state.accountImportPackageText = await readAuthorizationPackageFile(file, {
-      onName: (name) => { elements.accountImportFileName.textContent = name; },
-      onClear: () => { elements.accountImportPackageFile.value = ''; },
-    });
+    if (!file) return;
+    elements.accountImportFileName.textContent = file.name;
+    if (file.size > (file.name.toLowerCase().endsWith('.zip') ? 12 * 1024 * 1024 : 2 * 1024 * 1024)) throw new Error('数据包文件过大');
+    if (file.name.toLowerCase().endsWith('.zip')) {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let binary = '';
+      for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+      state.accountImportPackageText = JSON.stringify({ __zipBase64: btoa(binary), name: file.name });
+    } else state.accountImportPackageText = await file.text();
     elements.accountDialogStatus.hidden = true;
   } catch (error) {
+    elements.accountImportPackageFile.value = '';
     showAccountDialogError(error.message);
-  }
-});
-
-elements.importAuthPackage.addEventListener('click', async () => {
-  if (!state.importPackageText) return showToolsStatus('请先选择 .codexnavo 授权包', true);
-  elements.importAuthPackage.disabled = true;
-  try {
-    const result = await api('/api/auth-packages/import', {
-      method: 'POST',
-      body: JSON.stringify({ operator: operator(), package: state.importPackageText }),
-    });
-    state.importPackageText = '';
-    elements.importPackageFile.value = '';
-    elements.importFileName.textContent = '选择 .codexnavo 文件';
-    await refresh();
-    renderHealthCenter();
-    const status = result.importStatus || {};
-    showToolsStatus(status.web === 'imported'
-      ? '导入完成：Codex 授权与网页会话均已验证。'
-      : status.web === 'failed'
-        ? `Codex 授权已导入；网页数据已保留，请打开网页端验证登录：${status.webError || '未完成验证'}`
-        : 'Codex 授权已导入；该授权包不包含网页会话。', status.web === 'failed');
-  } catch (error) {
-    showToolsStatus(error.message, true);
-  } finally {
-    elements.importAuthPackage.disabled = false;
   }
 });
 
@@ -2997,6 +3029,27 @@ function openApiKeyNetwork(key) {
   elements.accountNetworkDialog.showModal();
 }
 
+function openBatchAccountNetwork() {
+  const ids = [...state.selectedAccountIds].filter((id) => state.accounts.some((account) => account.id === id));
+  if (!ids.length) return showToast('请先勾选要批量配置的账号', true);
+  state.accountNetworkId = 'batch-accounts';
+  state.accountNetworkBatchIds = ids;
+  elements.accountNetworkCopy.textContent = `为已选择的 ${ids.length} 个账号统一设置网络线路。`;
+  const proxyNodeCount = (state.networkSettings?.sources || []).reduce((total, source) => total + (source.nodes?.length || 0), 0);
+  populateAccountRouteSelect(elements.accountNetworkRoute, 'direct');
+  elements.accountNetworkRouteMenu.hidden = false;
+  elements.accountNetworkRouteTrigger.setAttribute('aria-expanded', 'true');
+  elements.accountNetworkRouteField.hidden = proxyNodeCount === 0;
+  elements.accountNetworkPreview.hidden = proxyNodeCount === 0;
+  elements.accountNetworkEmpty.hidden = proxyNodeCount !== 0;
+  elements.saveAccountNetwork.hidden = false;
+  elements.accountNetworkResult.hidden = true;
+  syncAccountNetworkPreview();
+  elements.accountNetworkDialog.showModal();
+}
+
+elements.batchAccountNetwork?.addEventListener('click', openBatchAccountNetwork);
+
 elements.accountNetworkRouteTrigger.addEventListener('click', () => {
   const willOpen = elements.accountNetworkRouteMenu.hidden;
   elements.accountNetworkRouteMenu.hidden = !willOpen;
@@ -3053,15 +3106,18 @@ elements.accountNetworkForm.addEventListener('submit', async (event) => {
   elements.saveAccountNetwork.disabled = true;
   try {
     const apiKeyId = state.accountNetworkId.startsWith('api-key:') ? state.accountNetworkId.slice(8) : '';
-    const endpoint = apiKeyId ? `/api/api-service/keys/${apiKeyId}/network` : `/api/accounts/${state.accountNetworkId}/network`;
+    const batch = state.accountNetworkId === 'batch-accounts';
+    const endpoint = apiKeyId ? `/api/api-service/keys/${apiKeyId}/network` : batch ? '/api/accounts/network/batch' : `/api/accounts/${state.accountNetworkId}/network`;
+    const accountIds = batch ? state.accountNetworkBatchIds : undefined;
     const result = await api(endpoint, {
       method: 'POST',
-      body: JSON.stringify({ operator: operator(), mode: route === 'direct' ? 'direct' : 'proxy', sourceId, nodeName: decodeURIComponent(encodedNode) }),
+      body: JSON.stringify({ operator: operator(), ...(accountIds ? { accountIds } : {}), mode: route === 'direct' ? 'direct' : 'proxy', sourceId, nodeName: decodeURIComponent(encodedNode) }),
     });
     state.networkSettings = result.networkSettings;
     elements.accountNetworkDialog.close();
     await refresh();
-    showToast(route === 'direct' ? (apiKeyId ? 'API 账号池已切换为直连' : '该账号已切换为直连') : (apiKeyId ? 'API 账号池代理已保存' : '账号代理已保存'));
+    showToast(batch ? `已为 ${accountIds.length} 个账号统一设置${route === 'direct' ? '直连' : '代理'}` : route === 'direct' ? (apiKeyId ? 'API 账号池已切换为直连' : '该账号已切换为直连') : (apiKeyId ? 'API 账号池代理已保存' : '账号代理已保存'));
+    if (batch) { state.selectedAccountIds.clear(); state.accountNetworkBatchIds = []; if (elements.batchAccountNetwork) elements.batchAccountNetwork.disabled = true; }
   } catch (error) {
     elements.accountNetworkResult.hidden = false;
     elements.accountNetworkResult.classList.add('error');
@@ -3659,32 +3715,31 @@ elements.form.addEventListener('submit', async (event) => {
   event.preventDefault();
   const formData = new FormData(elements.form);
   const requestedLoginMethod = String(formData.get('loginMethod') || 'official');
-  if (requestedLoginMethod === 'create-api') {
-    elements.dialog.close();
-    try { await createApiKeyAndShowSecret(); }
-    catch (error) { showToast(error.message, true); }
-    return;
-  }
-  if (requestedLoginMethod === 'relay-import') {
-    elements.dialog.close();
-    openRelayImportDialog();
-    return;
-  }
-  if (requestedLoginMethod === 'import') {
-    if (!state.accountImportPackageText) return showAccountDialogError('请先选择 .codexnavo 授权包');
+  if (requestedLoginMethod === 'package-import') {
+    if (!state.accountImportPackageText) return showAccountDialogError('请先选择数据包');
     elements.accountSubmit.disabled = true;
     elements.accountSubmit.textContent = '正在导入…';
     try {
-      const result = await api('/api/auth-packages/import', {
-        method: 'POST',
-        body: JSON.stringify({ operator: operator(), package: state.accountImportPackageText }),
-      });
+      let packageValue;
+      try { packageValue = JSON.parse(state.accountImportPackageText); } catch { throw new Error('数据包不是有效 JSON 或受支持的 CPA ZIP'); }
+      const route = String(elements.accountImportRoute?.value || 'direct');
+      const [sourceId, encodedNode = ''] = route.split('|');
+      const network = route === 'direct' ? { mode: 'direct' } : { mode: 'proxy', sourceId, nodeName: decodeURIComponent(encodedNode) };
+      const endpoint = packageValue?.type === 'codex-navo-auth-package' ? '/api/auth-packages/import' : '/api/relay-accounts/import';
+      const body = packageValue?.__zipBase64
+        ? { operator: operator(), package: { zipBase64: packageValue.__zipBase64, name: packageValue.name }, network }
+        : { operator: operator(), package: packageValue, network };
+      const result = await api(endpoint, { method: 'POST', body: JSON.stringify(body) });
       const status = result.importStatus || {};
       state.accountImportPackageText = '';
       elements.form.reset();
       elements.dialog.close();
       await refresh();
-      showToast(status.web === 'imported'
+      showToast(result.counts
+        ? `已导入 ${result.counts.total} 个临时账号，网络线路：${route === 'direct' ? '直连' : '代理'}`
+        : status.total
+          ? `已导入 ${status.total} 个授权账号`
+          : status.web === 'imported'
         ? '账号已导入：Codex 授权与网页会话均已验证'
         : status.web === 'failed'
           ? 'Codex 授权已导入，网页数据已保留，请打开网页端验证登录'

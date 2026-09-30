@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { ACCOUNT_POOL_PROVIDER_ID, ApiServiceManager, extractUsage, usageForLocalDate } = require('../lib/api-service');
+const { ACCOUNT_POOL_PROVIDER_ID, ApiServiceManager, extractUsage, resolveImageToolModel, usageForLocalDate } = require('../lib/api-service');
 
 function temporaryDirectory(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-navo-api-'));
@@ -29,6 +29,17 @@ function manager(t, options = {}) {
     ...options,
   });
 }
+
+test('catalog refresh adds GPT-6.1 Sol without replacing defaults or widening a restricted key', (t) => {
+  const service = manager(t);
+  service.ensureAccountPool(['gpt-6-sol']);
+  service.createKey({ accountIds: ['account-a'], modelAllowlist: ['gpt-6-sol'] });
+  const updated = service.ensureAccountPool(['gpt-6.1-sol', 'gpt-6-sol']);
+  assert.equal(updated.defaultModel, 'gpt-6-sol');
+  assert.equal(service.resolveModel('gpt-6.1-sol').model, 'gpt-6.1-sol');
+  service.ensureAccountPool(['gpt-6.1-sol']);
+  assert.deepEqual(service.keys[0].modelAllowlist, ['gpt-6-sol']);
+});
 
 test('creates hashed Navo keys and never persists the complete secret', (t) => {
   const service = manager(t);
@@ -70,7 +81,7 @@ test('exposes only the built-in account pool and migrates old key scopes', (t) =
   assert.equal(provider.id, ACCOUNT_POOL_PROVIDER_ID);
   assert.deepEqual(service.publicState().providers.map((item) => item.id), [ACCOUNT_POOL_PROVIDER_ID]);
   assert.deepEqual(service.keys[0].providerIds, [ACCOUNT_POOL_PROVIDER_ID]);
-  assert.deepEqual(service.keys[0].modelAllowlist, ['gpt-5.6-sol']);
+  assert.deepEqual(service.keys[0].modelAllowlist, ['deepseek-chat', 'gpt-5.6-sol']);
   assert.equal(JSON.stringify(service.publicState()).includes('legacy-deepseek'), false);
 });
 
@@ -102,6 +113,82 @@ test('routes Responses requests through the account-pool forwarder with ordered 
   assert.equal(record.usage.outputTokens, 3);
 });
 
+test('routes virtual image models through a real Codex driver model', async (t) => {
+  let forwarded = null;
+  const service = manager(t, {
+    poolForwarder: async (request) => {
+      forwarded = request;
+      return { upstream: new Response('data: {"type":"response.completed","response":{"output":[]}}\n\n', {
+        status: 200, headers: { 'content-type': 'text/event-stream' },
+      }) };
+    },
+  });
+  service.ensureAccountPool(['gpt-5.6-luna', 'gpt-6-astra']);
+  const created = service.createKey({ name: 'Image key', accountIds: ['account-a'] });
+  const result = await service.forwardImageGeneration({
+    keyRecord: service.authenticate(`Bearer ${created.secret}`),
+    requestedModel: 'gpt-image-1',
+    body: { model: 'gpt-image-1', stream: true, tools: [{ type: 'image_generation' }] },
+  });
+  assert.equal(result.requestedModel, 'gpt-image-1');
+  assert.equal(result.model, 'gpt-5.6-luna');
+  assert.equal(forwarded.model, 'gpt-5.6-luna');
+  assert.equal(forwarded.body.model, 'gpt-5.6-luna');
+});
+
+test('accepts current image compatibility names and separates the tool model from the text driver', async (t) => {
+  let forwarded = null;
+  const service = manager(t, {
+    poolForwarder: async (request) => {
+      forwarded = request;
+      return { upstream: new Response('{}', { status: 200 }) };
+    },
+  });
+  service.ensureAccountPool(['gpt-5.6-sol']);
+  const created = service.createKey({ accountIds: ['account-a'] });
+  const record = service.authenticate(`Bearer ${created.secret}`);
+  assert.equal(resolveImageToolModel('gpt-image-1'), 'gpt-image-2.5');
+  assert.equal(resolveImageToolModel('gpt-image-2.5-sunburst'), 'gpt-image-2.5-sunburst');
+  assert.ok(service.modelsForKey(record).some(item => item.id === 'gpt-image-2.5'));
+  await service.forwardImageGeneration({
+    keyRecord: record,
+    requestedModel: 'gpt-image-2.5-sunburst',
+    body: { model: 'gpt-5.6-sol', tools: [{ type: 'image_generation', model: 'gpt-image-2.5-sunburst', action: 'generate' }] },
+  });
+  assert.equal(forwarded.model, 'gpt-5.6-sol');
+});
+
+test('keeps a virtual image model out of the ordinary account-pool default', (t) => {
+  const service = manager(t);
+  service.ensureAccountPool(['gpt-5.6-luna', 'gpt-image-1']);
+  assert.equal(service.providers[0].defaultModel, 'gpt-5.6-luna');
+  service.providers[0].defaultModel = 'gpt-image-1';
+  service.ensureAccountPool(['gpt-5.6-luna', 'gpt-image-1']);
+  assert.equal(service.providers[0].defaultModel, 'gpt-5.6-luna');
+});
+
+test('does not allow Responses to send a virtual image model upstream', async (t) => {
+  let called = false;
+  const service = manager(t, { poolForwarder: async () => { called = true; return {}; } });
+  service.ensureAccountPool(['gpt-5.6-luna']);
+  const created = service.createKey({ accountIds: ['account-a'] });
+  await assert.rejects(
+    service.forwardResponses({ keyRecord: service.authenticate(`Bearer ${created.secret}`), body: { model: 'gpt-image-1' } }),
+    (error) => error.errorCode === 'image_model_requires_images_endpoint' && error.statusCode === 400,
+  );
+  assert.equal(called, false);
+});
+
+test('explicit image model allowlists are enforced separately from the driver model', async (t) => {
+  const service = manager(t, { poolForwarder: async () => ({ upstream: new Response('{}') }) });
+  service.ensureAccountPool(['gpt-5.6-luna']);
+  const created = service.createKey({ modelAllowlist: ['gpt-5.6-luna'], accountIds: ['account-a'] });
+  await assert.rejects(
+    service.forwardImageGeneration({ keyRecord: service.authenticate(`Bearer ${created.secret}`), requestedModel: 'gpt-image-1', body: {} }),
+    (error) => error.statusCode === 403 && /模型权限/.test(error.message),
+  );
+});
+
 test('forwards native Codex cache fields without adding an explicit cache breakpoint', async (t) => {
   let forwarded = null;
   const service = manager(t, { poolForwarder: async (request) => {
@@ -129,6 +216,14 @@ test('enforces model, request, token and expiry restrictions', (t) => {
   assert.throws(() => service.authorizeKey(record, provider, 'other'), /模型权限/);
   service.recordUsage(record);
   assert.throws(() => service.authorizeKey(record, provider, 'allowed'), /请求额度/);
+});
+
+test('normalizes current Codex short model aliases before pool authorization', (t) => {
+  const service = manager(t);
+  const provider = service.ensureAccountPool(['gpt-6-astra', 'gpt-5.6-sol']);
+  assert.equal(service.resolveModel('gpt-6').model, 'gpt-6-astra');
+  assert.equal(service.resolveModel('gpt-5.6').model, 'gpt-5.6-sol');
+  assert.equal(service.resolveModel(`${provider.id}/gpt-6`).model, 'gpt-6-astra');
 });
 
 test('prices new API usage without guessing historical model from current allowlist', (t) => {
