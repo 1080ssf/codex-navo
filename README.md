@@ -1,5 +1,7 @@
 # Codex Navo
 
+最近暂时不更新了，已转Claude，后续GPT调整好了再转GPT继续运营此项目。
+
 **简体中文** · [English](README_EN.md)
 
 > 面向 Windows 的开源 Codex 多账号工作台：在一个桌面应用里完成账号隔离与切换、额度和 Token 统计、OpenAI 兼容 API 账号池与故障切换、账号级代理、项目会话管理、通知与悬浮窗。
